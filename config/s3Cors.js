@@ -12,8 +12,7 @@ const corsConfig = {
                 "https://viralstatus-frontend.vercel.app",
             ],
             // ExposeHeaders: ["ETag"],
-            ExposeHeaders: ["*"],
-
+            ExposeHeaders: [],
             MaxAgeSeconds: 3600
         }
     ]

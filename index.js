@@ -74,6 +74,8 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/folders', folderRoutes);
 app.use('/api/images', videoMergeRoutes);
 app.use('/api/video', videoOverlayRoutes);
+
+// Auth Routes for instagram and youtube
 app.use('/api/instagram/reels', instagramReelsRoutes);
 app.use('/api/youtube/upload', ytUploadRoutes);
 app.use('/api/webhooks', webhookRoutes);
