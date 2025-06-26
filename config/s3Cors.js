@@ -8,7 +8,8 @@ const corsConfig = {
             AllowedMethods: ["GET", "PUT", "POST", "DELETE", "HEAD"],
             AllowedOrigins: [
                 "http://localhost:5173",
-                "https://viral-status.vercel.app"
+                // "https://viral-status.vercel.app",
+                "https://viralstatus-frontend.vercel.app",
             ],
             // ExposeHeaders: ["ETag"],
             ExposeHeaders: ["*"],
