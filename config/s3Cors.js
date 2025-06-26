@@ -10,7 +10,9 @@ const corsConfig = {
                 "http://localhost:5173",
                 "https://viral-status.vercel.app"
             ],
-            ExposeHeaders: ["ETag"],
+            // ExposeHeaders: ["ETag"],
+            ExposeHeaders: ["*"],
+
             MaxAgeSeconds: 3600
         }
     ]

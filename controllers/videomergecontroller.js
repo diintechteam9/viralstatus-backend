@@ -76,7 +76,6 @@ const mergeVideos = async (req, res) => {
                 message: "Request body is empty or malformed"
             });
         }
-
         console.log('Step 1: Request validation passed');
 
         // Validate FFmpeg installation
@@ -198,6 +197,8 @@ const mergeVideos = async (req, res) => {
             // Prepare a new array to hold the possibly modified mediaFiles
             let processedMediaFiles = [...mediaFiles];
 
+            // Add more detailed logs here for each step of processing
+            console.log('Step 6.1: Checking for inrow/outrow options');
             // Prepend inrow if needed
             if (options && options.showInrow) {
                 try {
@@ -453,6 +454,12 @@ const mergeVideos = async (req, res) => {
                 message: 'This endpoint only supports direct browser preview.'
             });
 
+        } catch (mergeError) {
+            console.error('Error during video merge process:', mergeError);
+            return res.status(500).json({
+                error: "Merge failed",
+                message: mergeError.message
+            });
         } finally {
             // Clean up temporary files
             try {
@@ -464,11 +471,9 @@ const mergeVideos = async (req, res) => {
         }
 
     } catch (error) {
-        console.error('=== MERGE VIDEOS REQUEST FAILED ===');
-        console.error('Video merge error:', error);
-        console.error('Error stack:', error.stack);
+        console.error('Unexpected error in mergeVideos:', error);
         res.status(500).json({
-            error: "Failed to merge videos",
+            error: "Unexpected error",
             message: error.message
         });
     }
