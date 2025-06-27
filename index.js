@@ -46,10 +46,9 @@ app.use(session({
 app.use(cors({
     origin: [
         "https://viralstatus-frontend.vercel.app",
-        "https://viral-status-frontend.vercel.app",
-        "https://viral-status.vercel.app",
         "http://localhost:5173",
-        "http://13.200.235.104:4000"
+        "http://13.200.235.104:4000",
+        "https://legaleeai.com"
     ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
