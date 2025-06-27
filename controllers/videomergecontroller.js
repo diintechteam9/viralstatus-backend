@@ -471,11 +471,23 @@ const mergeVideos = async (req, res) => {
         }
 
     } catch (error) {
-        console.error('Unexpected error in mergeVideos:', error);
+        console.error('--- UNHANDLED ERROR IN MERGEVIDEOS ---', error);
         res.status(500).json({
-            error: "Unexpected error",
-            message: error.message
+            error: "Failed to merge video",
+            message: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
+    } finally {
+        // Clean up temporary directory
+        if (fs.existsSync(tempDir)) {
+            try {
+                await fs.rm(tempDir, { recursive: true, force: true });
+                console.log('Temporary directory cleaned up:', tempDir);
+            } catch (cleanupError) {
+                console.error('Failed to clean up temporary directory:', cleanupError);
+            }
+        }
+        console.log('=== MERGE VIDEOS REQUEST END ===');
     }
 };
 

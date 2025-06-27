@@ -45,6 +45,7 @@ app.use(session({
 // Configure CORS for Express
 app.use(cors({
     origin: [
+        "https://viralstatus-frontend-bco5ndg54-diintechteam9s-projects.vercel.app",
         "https://viralstatus-frontend.vercel.app",
         "http://localhost:5173",
         "http://13.200.235.104:4000",
