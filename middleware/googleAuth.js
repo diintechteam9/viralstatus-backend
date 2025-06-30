@@ -23,7 +23,7 @@ const verifyGoogleToken = async (req, res, next) => {
     // Verify the Google ID token
     const ticket = await googleClient.verifyIdToken({
       idToken: googleToken,
-      audience: process.env.GOOGLE_CLIENT_ID
+      audience: [process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_ANDROID_CLIENT_ID].filter(Boolean),
     });
 
     const payload = ticket.getPayload();
