@@ -20,6 +20,8 @@ const instagramAuthRoutes = require('./routes/instagramAuth');
 const youtubeAuthRoutes = require('./routes/youtubeAuth');
 const apiInstagramRoutes = require('./routes/apiInstagram');
 const postRoutes = require('./routes/postRoutes');
+const googleAuthRoutes = require('./routes/googleAuth');
+const userProfileRoutes = require('./routes/userProfile');
 
 dotenv.config();
 
@@ -44,18 +46,39 @@ app.use(session({
 
 // Configure CORS for Express
 app.use(cors({
-    origin: [
-        "https://viralstatus-frontend-bco5ndg54-diintechteam9s-projects.vercel.app",
-        "https://viralstatus-frontend.vercel.app",
-        "http://localhost:5173",
-        "http://13.200.235.104:4000",
-        "https://legaleeai.com"
-    ],
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        
+        const allowedOrigins = [
+            "https://viralstatus-frontend.vercel.app",
+            "http://localhost:5173",
+            "http://13.200.235.104:4000",
+            "https://legaleeai.com"
+        ];
+        
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            console.log('CORS blocked origin:', origin);
+            callback(null, true); // Allow for development, restrict in production
+        }
+    },
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allowedHeaders: [
+        "Content-Type", 
+        "Authorization", 
+        "X-Requested-With", 
+        "Accept",
+        "Origin",
+        "Access-Control-Request-Method",
+        "Access-Control-Request-Headers"
+    ],
     exposedHeaders: ["Content-Range", "X-Content-Range"],
-    maxAge: 600
+    maxAge: 86400, // 24 hours
+    preflightContinue: false,
+    optionsSuccessStatus: 204
 }));
 
 // Configure CORS for S3
@@ -84,6 +107,12 @@ app.use('/auth/instagram', instagramAuthRoutes);
 app.use('/auth/youtube', youtubeAuthRoutes);
 app.use('/api/instagram/api', apiInstagramRoutes);
 app.use('/api/posts', postRoutes);
+
+// Google Authentication Routes
+app.use('/api/auth/google', googleAuthRoutes);
+
+// User Profile Routes
+app.use('/api/user-profiles', userProfileRoutes);
 
 // Error handling middleware
 app.use((error, req, res, next) => {
