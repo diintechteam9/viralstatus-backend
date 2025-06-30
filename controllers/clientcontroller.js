@@ -9,6 +9,7 @@ const generateToken = (id) => {
   });
 };
 
+
 // // Login client
 const loginClient = async (req, res) => {
     try {

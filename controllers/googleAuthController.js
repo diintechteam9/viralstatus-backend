@@ -19,23 +19,57 @@ const verifyUser = async (req, res) => {
     if (!googleUser) {
       return res.status(400).json({
         success: false,
-        message: 'Google user information is required'
+        message: "Google user information is required",
       });
     }
-    // If we reach here, the Google token is valid
+
+    const { email, name, picture, emailVerified, googleToken } = googleUser;
+
+    // Find client by email
+    let client = await Client.findOne({ email });
+
+    // If client doesn't exist, create a new one from Google info
+    if (!client) {
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(
+        Math.random().toString(36).slice(-8),
+        salt
+      );
+
+      client = await Client.create({
+        name: name || email.split("@")[0],
+        email,
+        password: hashedPassword,
+        isGoogleUser: true,
+        googlePicture: picture,
+        emailVerified: emailVerified,
+        businessName: name ? `${name}'s Business` : "Google User Business",
+        gstNo: "GOOGLE" + Date.now(),
+        panNo: "GOOGLE" + Date.now(),
+        aadharNo: "GOOGLE" + Date.now(),
+        city: "Unknown",
+        pincode: "000000",
+      });
+    }
+
+    // Generate our own JWT token for session management
+    const authToken = generateToken(client._id);
+
+    // If we reach here, the Google token is valid and user is in our system
     return res.status(200).json({
       success: true,
-      message: 'Google token is valid',
-      email: googleUser.email,
-      name: googleUser.name,
-      emailVerified: googleUser.emailVerified,
-      googleToken:googleUser.googleToken
+      message: "User verified successfully",
+      authToken: authToken, // Your application's session token
+      email: client.email,
+      name: client.name,
+      emailVerified: client.emailVerified,
+      googleToken: googleToken, // The original Google token
     });
   } catch (error) {
-    console.error('Google verification error:', error);
+    console.error("Google verification error:", error);
     res.status(500).json({
       success: false,
-      message: error.message || 'An error occurred during verification'
+      message: error.message || "An error occurred during verification",
     });
   }
 };
