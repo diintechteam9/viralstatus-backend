@@ -10,6 +10,7 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
  * This middleware validates the Google ID token sent from the Flutter app
  */
 const verifyGoogleToken = async (req, res, next) => {
+  console.log(req);
   try {
     const { googleToken } = req.body;
 
@@ -34,9 +35,11 @@ const verifyGoogleToken = async (req, res, next) => {
       email: payload.email,
       name: payload.name,
       picture: payload.picture,
-      emailVerified: payload.email_verified
+      emailVerified: payload.email_verified,
+      googleToken: googleToken
     };
 
+    
     next();
   } catch (error) {
     console.error('Google token verification error:', error);

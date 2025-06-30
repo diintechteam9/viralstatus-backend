@@ -28,7 +28,8 @@ const verifyUser = async (req, res) => {
       message: 'Google token is valid',
       email: googleUser.email,
       name: googleUser.name,
-      emailVerified: googleUser.emailVerified
+      emailVerified: googleUser.emailVerified,
+      googleToken:googleUser.googleToken
     });
   } catch (error) {
     console.error('Google verification error:', error);
@@ -196,6 +197,7 @@ const updateProfile = async (req, res) => {
   try {
     const { user } = req;
     const updateData = req.body;
+  
 
     if (!user) {
       return res.status(401).json({
