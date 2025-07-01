@@ -37,10 +37,7 @@ const clientSchema = new mongoose.Schema({
   // Business fields (optional for Google users)
   businessName: {
     type: String,
-    required: function() {
-      // Business name is required only if not using Google auth
-      return !this.googleId;
-    },
+    
   },
   gstNo: {
     type: String,
@@ -68,15 +65,10 @@ const clientSchema = new mongoose.Schema({
   },
   city: {
     type: String,
-    required: function() {
-      return !this.googleId;
-    },
+    
   },
   pincode: {
     type: String,
-    required: function() {
-      return !this.googleId;
-    },
   },
   websiteUrl: {
     type: String,

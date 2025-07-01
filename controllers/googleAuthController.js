@@ -46,9 +46,9 @@ const verifyUser = async (req, res) => {
         businessName: name ? `${name}'s Business` : "Google User Business",
         gstNo: "GOOGLE" + Date.now(),
         panNo: "GOOGLE" + Date.now(),
-        aadharNo: "GOOGLE" + Date.now(),
-        city: "Unknown",
-        pincode: "000000",
+        city:'',
+        pincode:'',
+        aadharNo: "GOOGLE" + Date.now()
       });
     }
 

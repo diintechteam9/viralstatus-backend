@@ -112,7 +112,7 @@ app.use('/api/posts', postRoutes);
 app.use('/api/auth/google', googleAuthRoutes);
 
 // User Profile Routes
-app.use('/api/user-profiles', userProfileRoutes);
+app.use('/api/auth/user/profiles', userProfileRoutes);
 
 // Error handling middleware
 app.use((error, req, res, next) => {

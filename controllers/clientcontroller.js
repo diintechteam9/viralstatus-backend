@@ -35,12 +35,12 @@ const loginClient = async (req, res) => {
             name: name || email.split('@')[0],
             email,
             password: hashedPassword,
-            businessName: name ? `${name}'s Business` : "Google User Business",
+            businessName: '',
             gstNo: "GOOGLE" + Date.now(),
             panNo: "GOOGLE" + Date.now(),
             aadharNo: "GOOGLE" + Date.now(),
-            city: "Unknown",
-            pincode: "000000",
+            city: "",
+            pincode: "",
           });
           
           console.log('New Google-authenticated client created:', client._id);

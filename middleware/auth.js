@@ -28,6 +28,9 @@ exports.protect = async (req, res, next) => {
     // Try to get email from token first
     let userEmail = decoded.email || decoded.clientEmail || decoded.userEmail || decoded.user?.email;
     
+    // Normalize email for consistent lookups
+    if (userEmail) userEmail = userEmail.trim().toLowerCase();
+    
     // If no email in token, fetch client details from database
     if (!userEmail && decoded.id) {
       try {

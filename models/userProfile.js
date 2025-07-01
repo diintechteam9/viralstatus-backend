@@ -18,36 +18,35 @@ const userProfileSchema = new mongoose.Schema({
   },
   mobileNumber: {
     type: String,
-    required: [true, "Mobile number is required"],
-    trim: true
+    trim: true,
+    default: ""
   },
   city: {
     type: String,
-    required: [true, "City is required"],
     trim: true,
-    immutable: true // Makes this field read-only
+    immutable: true, // Makes this field read-only
+    default: ""
   },
   pincode: {
     type: String,
-    required: [true, "Pincode is required"],
     trim: true,
-    immutable: true // Makes this field read-only
+    immutable: true, // Makes this field read-only
+    default: ""
   },
   businessName: {
     type: String,
-    required: [true, "Business name is required"],
     trim: true,
-    immutable: true // Makes this field read-only
+    immutable: true, // Makes this field read-only
+    default: ""
   },
   gender: {
     type: String,
-    enum: ['Male', 'Female', 'Other', 'Prefer not to say'],
-    required: [true, "Gender is required"]
+    default: ""
   },
   ageRange: {
     type: String,
-    enum: ['18-24', '25-34', '35-44', '45-54', '55+'],
-    required: [true, "Age range is required"]
+    enum: ["", "18-24", "25-34", "35-44", "45-54", "55+"],
+    default: ""
   },
 
   // Business Interests (Multiple selection)
@@ -73,17 +72,20 @@ const userProfileSchema = new mongoose.Schema({
       'Home Decor & Interiors',
       'Pet Care',
       'Non-Profit & Social Causes'
-    ]
+    ],
+    default: undefined
   }],
   otherBusinessInterest: {
     type: String,
-    trim: true
+    trim: true,
+    default: ""
   },
 
   // Occupation
   occupation: {
     type: String,
     enum: [
+      "",
       'Student',
       'Freelancer',
       'Content Creator (Full-Time)',
@@ -98,24 +100,26 @@ const userProfileSchema = new mongoose.Schema({
       'Fitness Trainer',
       'Healthcare Professional'
     ],
-    required: [true, "Occupation is required"]
+    default: ""
   },
 
   // Education
   highestQualification: {
     type: String,
-    enum: ['High School', 'Diploma', 'Bachelor\'s Degree', 'Master\'s Degree', 'Doctorate', 'Other'],
-    required: [true, "Highest qualification is required"]
+    enum: ["",'High School', 'Diploma', 'Bachelor\'s Degree', 'Master\'s Degree', 'Doctorate', 'Other'],
+    default: ""
   },
   fieldOfStudy: {
     type: String,
-    trim: true
+    trim: true,
+    default: ""
   },
 
   // Skills (Multiple selection)
   skills: [{
     type: String,
     enum: [
+      "",
       'Content Creation',
       'Video Editing',
       'Photography',
@@ -129,11 +133,13 @@ const userProfileSchema = new mongoose.Schema({
       'Live Streaming',
       'Voice Over',
       'Community Engagement'
-    ]
+    ],
+    default: undefined
   }],
   otherSkills: {
     type: String,
-    trim: true
+    trim: true,
+    default: ""
   },
 
   // Social Media Profiles
@@ -141,63 +147,75 @@ const userProfileSchema = new mongoose.Schema({
     instagram: {
       handle: {
         type: String,
-        trim: true
+        trim: true,
+        default: ""
       },
       followersCount: {
         type: Number,
-        min: 0
+        min: 0,
+        default: 0
       }
     },
     youtube: {
       channelUrl: {
         type: String,
-        trim: true
+        trim: true,
+        default: ""
       },
       subscribers: {
         type: Number,
-        min: 0
+        min: 0,
+        default: 0
       }
     },
     twitter: {
       handle: {
         type: String,
-        trim: true
+        trim: true,
+        default: ""
       },
       followers: {
         type: Number,
-        min: 0
+        min: 0,
+        default: 0
       }
     },
     linkedin: {
       profileUrl: {
         type: String,
-        trim: true
+        trim: true,
+        default: ""
       },
       connections: {
         type: Number,
-        min: 0
+        min: 0,
+        default: 0
       }
     },
     pinterest: {
       profileUrl: {
         type: String,
-        trim: true
+        trim: true,
+        default: ""
       },
       followers: {
         type: Number,
-        min: 0
+        min: 0,
+        default: 0
       }
     },
     snapchat: {
       username: {
         type: String,
-        trim: true
+        trim: true,
+        default: ""
       }
     },
     website: {
       url: {
         type: String,
-        trim: true
+        trim: true,
+        default: ""
       }
     }
   },

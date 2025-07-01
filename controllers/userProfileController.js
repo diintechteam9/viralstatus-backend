@@ -56,17 +56,17 @@ const createUserProfile = async (req, res) => {
     }
 
     // Check if all required fields are filled
-    const requiredFields = [name, userEmail, mobileNumber, city, gender, ageRange, occupation, highestQualification];
+    const requiredFields = [name, userEmail,mobileNumber,city,pincode,businessName,gender,ageRange,occupation,highestQualification];
     const isProfileCompleted = requiredFields.every(field => field && field.trim() !== '');
 
-    // Create new user profile with auto-populated fields
+    // Create new user profile with request body prioritized, fallback to clientDetails if missing
     const userProfile = await UserProfile.create({
-      name: clientDetails?.name || name,
+      name: name || clientDetails?.name || "",
       email: userEmail,
       mobileNumber,
-      city: clientDetails?.city || city,
-      pincode: clientDetails?.pincode || pincode,
-      businessName: clientDetails?.businessName || businessName,
+      city: city || clientDetails?.city || "",
+      pincode: pincode || clientDetails?.pincode || "",
+      businessName: businessName || clientDetails?.businessName || "",
       gender,
       ageRange,
       businessInterests,
