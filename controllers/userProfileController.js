@@ -56,7 +56,7 @@ const createUserProfile = async (req, res) => {
     }
 
     // Check if all required fields are filled
-    const requiredFields = [name, userEmail,mobileNumber,city,pincode,businessName,gender,ageRange,occupation,highestQualification];
+    const requiredFields = [name, userEmail, mobileNumber, city, pincode, businessName, gender, ageRange, occupation, highestQualification];
     const isProfileCompleted = requiredFields.every(field => field && field.trim() !== '');
 
     // Create new user profile with request body prioritized, fallback to clientDetails if missing

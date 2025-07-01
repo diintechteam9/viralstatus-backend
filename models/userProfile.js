@@ -167,56 +167,6 @@ const userProfileSchema = new mongoose.Schema({
         min: 0,
         default: 0
       }
-    },
-    twitter: {
-      handle: {
-        type: String,
-        trim: true,
-        default: ""
-      },
-      followers: {
-        type: Number,
-        min: 0,
-        default: 0
-      }
-    },
-    linkedin: {
-      profileUrl: {
-        type: String,
-        trim: true,
-        default: ""
-      },
-      connections: {
-        type: Number,
-        min: 0,
-        default: 0
-      }
-    },
-    pinterest: {
-      profileUrl: {
-        type: String,
-        trim: true,
-        default: ""
-      },
-      followers: {
-        type: Number,
-        min: 0,
-        default: 0
-      }
-    },
-    snapchat: {
-      username: {
-        type: String,
-        trim: true,
-        default: ""
-      }
-    },
-    website: {
-      url: {
-        type: String,
-        trim: true,
-        default: ""
-      }
     }
   },
 
