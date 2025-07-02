@@ -24,19 +24,19 @@ const userProfileSchema = new mongoose.Schema({
   city: {
     type: String,
     trim: true,
-    immutable: true, // Makes this field read-only
+    immutable: true, 
     default: ""
   },
   pincode: {
     type: String,
     trim: true,
-    immutable: true, // Makes this field read-only
+    immutable: true, 
     default: ""
   },
   businessName: {
     type: String,
     trim: true,
-    immutable: true, // Makes this field read-only
+    immutable: true, 
     default: ""
   },
   gender: {

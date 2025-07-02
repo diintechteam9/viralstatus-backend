@@ -1,5 +1,6 @@
 const UserProfile = require("../models/userProfile");
 const Client = require("../models/client");
+const Group = require('../models/group');
 
 /**
  * Create a new user profile
@@ -79,6 +80,43 @@ const createUserProfile = async (req, res) => {
       socialMedia,
       isProfileCompleted
     });
+
+    // Automatically add user to groups for each business interest
+    if (Array.isArray(businessInterests)) {
+      for (const interest of businessInterests) {
+        // Find all groups for this interest, sorted by creation
+        let groups = await Group.find({ groupInterest: interest, isActive: true }).sort({ createdAt: 1 });
+        let group = groups.find(g => g.numberOfMembers < 100 && !g.groupMembers.some(m => m.email === userEmail));
+        // If no available group, create a new one
+        if (!group) {
+          const groupNumber = groups.length + 1;
+          const groupId = `${interest.toLowerCase().replace(/\s+/g, '-')}-${groupNumber}`;
+          group = new Group({
+            groupId,
+            groupInterest: interest,
+            isActive: true,
+            numberOfMembers: 1,
+            groupMembers: [{ email: userEmail, name: userProfile.name }]
+          });
+          await group.save();
+        } else {
+          // Add user if not already in group
+          if (!group.groupMembers.some(m => m.email === userEmail)) {
+            group.groupMembers.push({ email: userEmail, name: userProfile.name });
+            group.numberOfMembers = group.groupMembers.length;
+            await group.save();
+          }
+        }
+      }
+    }
+
+    // After creating the user profile, sync isProfileCompleted to Client if true
+    if (isProfileCompleted && userEmail) {
+      await Client.findOneAndUpdate(
+        { email: userEmail },
+        { isProfileCompleted: true }
+      );
+    }
 
     res.status(201).json({
       success: true,

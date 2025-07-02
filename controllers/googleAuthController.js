@@ -63,6 +63,7 @@ const verifyUser = async (req, res) => {
       email: client.email,
       name: client.name,
       emailVerified: client.emailVerified,
+      isProfileCompleted: client.isProfileCompleted,
       googleToken: googleToken, // The original Google token
     });
   } catch (error) {
