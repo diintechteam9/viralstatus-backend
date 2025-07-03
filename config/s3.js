@@ -20,6 +20,8 @@ if (missingEnvVars.length > 0) {
     process.exit(1);
 }
 
+
+
 module.exports = {
     s3: s3Client,
     BUCKET_NAME

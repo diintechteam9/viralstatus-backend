@@ -16,29 +16,37 @@ exports.joinGroup = async (req, res) => {
 
     // Find all groups for this interest, sorted by creation
     let groups = await Group.find({ groupInterest, isActive: true }).sort({ createdAt: 1 });
-    let group = groups.find(g => g.numberOfMembers < 100 && !g.groupMembers.some(m => m.email === email));
 
-    // If no available group, create a new one
-    if (!group) {
+    // Check if user is already in any group for this interest
+    let userGroup = groups.find(g => g.groupMembers.some(m => m.email === email));
+    if (userGroup) {
+      // User is already in a group for this interest, return that group
+      return res.json({ success: true, group: userGroup });
+    }
+
+    // Find a group with less than 100 members
+    let availableGroup = groups.find(g => g.numberOfMembers < 100);
+
+    if (availableGroup) {
+      // Add user to this group
+      availableGroup.groupMembers.push({ email, name });
+      availableGroup.numberOfMembers = availableGroup.groupMembers.length;
+      await availableGroup.save();
+      return res.json({ success: true, group: availableGroup });
+    } else {
+      // No available group, create a new one
       const groupNumber = groups.length + 1;
       const groupId = generateGroupId(groupInterest, groupNumber);
-      group = new Group({
+      let newGroup = new Group({
         groupId,
         groupInterest,
-        isActive: true,
+        isActive: false,
         numberOfMembers: 1,
         groupMembers: [{ email, name }]
       });
-      await group.save();
-    } else {
-      // Add user if not already in group
-      if (!group.groupMembers.some(m => m.email === email)) {
-        group.groupMembers.push({ email, name });
-        group.numberOfMembers = group.groupMembers.length;
-        await group.save();
-      }
+      await newGroup.save();
+      return res.json({ success: true, group: newGroup });
     }
-    return res.json({ success: true, group });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error' });

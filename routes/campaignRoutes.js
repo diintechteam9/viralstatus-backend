@@ -1,0 +1,26 @@
+const express = require('express');
+const router = express.Router();
+const campaignController = require('../controllers/campaignController');
+
+// Create a new campaign
+router.post('/', campaignController.createCampaign);
+
+// Get all active campaigns
+router.get('/active', campaignController.getActiveCampaigns);
+
+// Get campaign details by campaignId
+router.get('/:campaignId', async (req, res) => {
+  try {
+    const Campaign = require('../models/campaign');
+    const campaign = await Campaign.findOne({ campaignId: req.params.campaignId });
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+    res.json({ success: true, campaign });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+module.exports = router; 

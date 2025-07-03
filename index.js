@@ -22,6 +22,11 @@ const apiInstagramRoutes = require('./routes/apiInstagram');
 const postRoutes = require('./routes/postRoutes');
 const googleAuthRoutes = require('./routes/googleAuth');
 const userProfileRoutes = require('./routes/userProfile');
+const groupRoutes = require('./routes/grouproutes');
+const campaignRoutes = require('./routes/campaignRoutes');
+const poolRoutes = require('./routes/poolRoutes');
+const ta1000seriesRoutes = require('./routes/ta1000series');
+const videomergeta1000seriesRoutes = require('./routes/videomergeta1000series');
 
 dotenv.config();
 
@@ -54,7 +59,8 @@ app.use(cors({
             "https://viralstatus-frontend.vercel.app",
             "http://localhost:5173",
             "http://13.200.235.104:4000",
-            "https://legaleeai.com"
+            "https://legaleeai.com",
+            "http://localhost:4000"
         ];
         
         if (allowedOrigins.indexOf(origin) !== -1) {
@@ -113,6 +119,19 @@ app.use('/api/auth/google', googleAuthRoutes);
 
 // User Profile Routes
 app.use('/api/auth/user/profiles', userProfileRoutes);
+
+// Group Routes
+app.use('/api/auth/user/group', groupRoutes);
+
+// Campaign Routes
+app.use('/api/auth/user/campaign', campaignRoutes);
+
+// Pool Routes
+app.use('/api/pools', poolRoutes);
+
+// TA1000Series Routes
+app.use('/api/ta1000series', ta1000seriesRoutes);
+app.use('/api/reelta1000series', videomergeta1000seriesRoutes);
 
 // Error handling middleware
 app.use((error, req, res, next) => {
