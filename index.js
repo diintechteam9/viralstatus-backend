@@ -5,6 +5,7 @@ const session = require('express-session');
 const connectDB = require("./config/db");
 const { configureCors } = require("./config/s3Cors");
 
+const userRoutes= require('./routes/userroutes')
 const clientRoutes = require("./routes/clientroutes");
 const adminRoutes = require("./routes/adminroutes");
 const superadminRoutes = require("./routes/superadminroutes");
@@ -96,7 +97,8 @@ app.get("/", (req, res) => {
     res.send("Hello World");
 });
 
-app.use('/api/client', clientRoutes);   
+app.use('/api/client', clientRoutes); 
+app.use('/api/user', userRoutes);  
 app.use('/api/admin', adminRoutes);
 app.use('/api/superadmin', superadminRoutes);
 app.use('/api/datastore', datastoreRoutes);
@@ -126,8 +128,9 @@ app.use('/api/auth/user/group', groupRoutes);
 // Campaign Routes
 app.use('/api/auth/user/campaign', campaignRoutes);
 
-// Pool Routes
+// Pool Routes and Reel Routes (for uploading and managing reels)
 app.use('/api/pools', poolRoutes);
+
 
 // TA1000Series Routes
 app.use('/api/ta1000series', ta1000seriesRoutes);

@@ -6,44 +6,69 @@ const campaignSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
-  clientId: {
-    type: String,
-    required: true
-  },
-  campaignId: {
-    type: String,
-    required: true,
-    unique: true,
-    index: true
-  },
-  businessInterest: {
+  brandName:{
     type: String,
     required: true,
     trim: true
   },
-  numberOfGroups: {
-    type: Number,
-    default: 0
-  },
-  numberOfMembers: {
-    type: Number,
-    default: 0
-  },
-  maxMembers: {
-    type: Number,
+  goal:{
+    type: String,
     required: true
+  },
+  clientId: {
+    type: String,
+    required: true
+  },
+  activeParticipants: {
+    type: Number,
+    default: 0,
   },
   groupIds: {
     type: [String],
+    required: false
+  },
+  image: {
+    key: { type: String, required: true },
+  },
+  description: {
+    type: String,
     required: true
   },
-  startTime: {
+  startDate: {
     type: Date,
     required: true
   },
-  endTime: {
+  endDate: {
     type: Date,
     required: true
+  },
+  tags: {
+    type: [String],
+    required: false
+  },
+  limit: {
+    type: Number,
+    required: true
+  },
+  views:{
+    type: Number,
+    required: true
+  },
+  credits:{
+    type: Number,
+    required:true
+  },
+  location:{
+    type: String,
+    required: true
+  },
+  tNc:{
+    type: String,
+  },
+  status: {
+    type: String,
+    required: true,
+    default: "Active"
   },
   isActive: {
     type: Boolean,

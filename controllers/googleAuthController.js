@@ -1,6 +1,7 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const Client = require("../models/client");
+const User = require("../models/user");
 
 // Generate JWT Token
 const generateToken = (id) => {
@@ -13,65 +14,55 @@ const generateToken = (id) => {
  * Verify Google user and return success if token is valid
  * This is now a pure verification endpoint
  */
-const verifyUser = async (req, res) => {
+const verifyUserOrClient = async (req, res) => {
   try {
     const { googleUser } = req;
-    if (!googleUser) {
-      return res.status(400).json({
-        success: false,
-        message: "Google user information is required",
-      });
+    const { role } = req.body; // 'user' or 'client'
+
+    if (!googleUser || !role) {
+      return res.status(400).json({ success: false, message: "Google user info and role are required" });
     }
 
-    const { email, name, picture, emailVerified, googleToken } = googleUser;
+    const { email, name, picture, emailVerified, googleId } = googleUser;
 
-    // Find client by email
-    let client = await Client.findOne({ email });
+    let Model;
+    if (role === "user") {
+      Model = User;
+    } else if (role === "client") {
+      Model = Client;
+    } else {
+      return res.status(400).json({ success: false, message: "Invalid role" });
+    }
 
-    // If client doesn't exist, create a new one from Google info
-    if (!client) {
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(
-        Math.random().toString(36).slice(-8),
-        salt
-      );
-
-      client = await Client.create({
+    // Find or create user/client
+    let entity = await Model.findOne({ email });
+    if (!entity) {
+      entity = await Model.create({
         name: name || email.split("@")[0],
         email,
-        password: hashedPassword,
         isGoogleUser: true,
+        googleId: googleId,
         googlePicture: picture,
         emailVerified: emailVerified,
-        businessName: name ? `${name}'s Business` : "Google User Business",
-        gstNo: "GOOGLE" + Date.now(),
-        panNo: "GOOGLE" + Date.now(),
-        city:'',
-        pincode:'',
-        aadharNo: "GOOGLE" + Date.now()
+        password: "", // No password for Google users
       });
     }
 
-    // Generate our own JWT token for session management
-    const authToken = generateToken(client._id);
+    const authToken = generateToken(entity._id);
 
-    // If we reach here, the Google token is valid and user is in our system
     return res.status(200).json({
       success: true,
-      message: "User verified successfully",
-      authToken: authToken, // Your application's session token
-      email: client.email,
-      name: client.name,
-      emailVerified: client.emailVerified,
-      isProfileCompleted: client.isProfileCompleted,
-      googleToken: googleToken, // The original Google token
+      message: "Verified successfully",
+      authToken,
+      email: entity.email,
+      name: entity.name,
+      emailVerified: entity.emailVerified,
+      isProfileCompleted: true, // or your own logic
+      googleId: entity.googleId,
+      role,
     });
   } catch (error) {
-    console.error("Google verification error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message || "An error occurred during verification",
-    });
+    res.status(500).json({ success: false, message: error.message || "An error occurred during verification" });
   }
 };
 
@@ -286,7 +277,7 @@ const updateProfile = async (req, res) => {
 };
 
 module.exports = {
-  verifyUser,
+  verifyUserOrClient,
   completeProfile,
   getProfile,
   updateProfile

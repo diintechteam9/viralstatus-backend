@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { verifyGoogleToken, verifyJWTToken } = require('../middleware/googleAuth');
 const {
-  verifyUser,
+  verifyUserOrClient,
   completeProfile,
   getProfile,
   updateProfile
@@ -43,7 +43,7 @@ const {
  *   }
  * }
  */
-router.post('/verify', verifyGoogleToken, verifyUser);
+router.post('/verify', verifyGoogleToken, verifyUserOrClient);
 
 /**
  * @route   GET /api/auth/google/test

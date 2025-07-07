@@ -392,6 +392,34 @@ const updateUserProfile = async (req, res) => {
       });
     }
 
+    // Automatically add user to groups for each business interest after update
+    if (Array.isArray(updatedProfile.businessInterests)) {
+      for (const interest of updatedProfile.businessInterests) {
+        let groups = await Group.find({ groupInterest: interest, isActive: true }).sort({ createdAt: 1 });
+        let group = groups.find(g => g.numberOfMembers < 100 && !g.groupMembers.some(m => m.email === updatedProfile.email));
+        // If no available group, create a new one
+        if (!group) {
+          const groupNumber = groups.length + 1;
+          const groupId = `${interest.toLowerCase().replace(/\s+/g, '-')}-${groupNumber}`;
+          group = new Group({
+            groupId,
+            groupInterest: interest,
+            isActive: true,
+            numberOfMembers: 1,
+            groupMembers: [{ email: updatedProfile.email, name: updatedProfile.name }]
+          });
+          await group.save();
+        } else {
+          // Add user if not already in group
+          if (!group.groupMembers.some(m => m.email === updatedProfile.email)) {
+            group.groupMembers.push({ email: updatedProfile.email, name: updatedProfile.name });
+            group.numberOfMembers = group.groupMembers.length;
+            await group.save();
+          }
+        }
+      }
+    }
+
     res.status(200).json({
       success: true,
       message: "User profile updated successfully",

@@ -5,8 +5,17 @@ const campaignController = require('../controllers/campaignController');
 // Create a new campaign
 router.post('/', campaignController.createCampaign);
 
+// Upload campaign image to S3
+router.post('/upload', campaignController.uploadCampaignImage);
+
 // Get all active campaigns
 router.get('/active', campaignController.getActiveCampaigns);
+
+// Update a campaign by campaignId
+router.put('/:campaignId', campaignController.updateCampaign);
+
+// Delete a campaign by campaignId
+router.delete('/:campaignId', campaignController.deleteCampaign);
 
 // Get campaign details by campaignId
 router.get('/:campaignId', async (req, res) => {
@@ -22,5 +31,6 @@ router.get('/:campaignId', async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+
 
 module.exports = router; 
