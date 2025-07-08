@@ -17,6 +17,12 @@ router.put('/:campaignId', campaignController.updateCampaign);
 // Delete a campaign by campaignId
 router.delete('/:campaignId', campaignController.deleteCampaign);
 
+//registered user
+router.post('/register/:campaignId', campaignController.registeredCampaign);
+
+// Get a user's registered campaigns
+router.get('/registered', campaignController.getUserRegisteredCampaigns);
+
 // Get campaign details by campaignId
 router.get('/:campaignId', async (req, res) => {
   try {

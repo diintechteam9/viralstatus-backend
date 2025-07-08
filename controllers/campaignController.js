@@ -3,6 +3,7 @@ const Group = require('../models/group');
 const crypto = require('crypto');
 const { putobject, getobject } = require('../utils/s3');
 const multer = require('multer');
+const RegisteredCampaign = require('../models/RegisteredCampaign');
 
 // Helper to extract group index from groupId (e.g., travel-&-tourism-2 => 2)
 // function getGroupIndex(groupId) {
@@ -190,6 +191,55 @@ exports.deleteCampaign = async (req, res) => {
     res.json({ success: true, message: 'Campaign deleted', campaign: deletedCampaign });
   } catch (err) {
     console.error('Delete campaign error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Register a user for a campaign (add campaignId to user's registeredCampaignIds)
+exports.registeredCampaign = async (req, res) => {
+  try {
+    const { campaignId } = req.params;
+    const { userId } = req.body; // You can adapt this to use req.user if using auth middleware
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'Missing userId' });
+    }
+    // Find or create the RegisteredCampaign document for this user
+    let reg = await RegisteredCampaign.findOne({ userId });
+    if (!reg) {
+      reg = new RegisteredCampaign({ userId, registeredCampaignIds: [campaignId] });
+    } else {
+      // Only add if not already present
+      if (!reg.registeredCampaignIds.includes(campaignId)) {
+        reg.registeredCampaignIds.push(campaignId);
+      }
+    }
+    await reg.save();
+    res.json({ success: true, registeredCampaign: reg });
+  } catch (err) {
+    console.error('Register campaign error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Get a user's registered campaigns by userId or googleId
+exports.getUserRegisteredCampaigns = async (req, res) => {
+  try {
+    const { userId, googleId } = req.query;
+    if (!userId && !googleId) {
+      return res.status(400).json({ success: false, message: 'Missing userId or googleId' });
+    }
+    let reg;
+    if (userId) {
+      reg = await RegisteredCampaign.findOne({ userId }).populate('registeredCampaignIds');
+    } else if (googleId) {
+      reg = await RegisteredCampaign.findOne({ googleId }).populate('registeredCampaignIds');
+    }
+    if (!reg) {
+      return res.status(404).json({ success: false, message: 'No registered campaigns found for user' });
+    }
+    res.json({ success: true, registeredCampaigns: reg.registeredCampaignIds });
+  } catch (err) {
+    console.error('Get user registered campaigns error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 }; 
