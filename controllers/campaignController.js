@@ -56,7 +56,8 @@ exports.createCampaign = [
         endDate,
         limit,
         views,
-        status
+        status,
+        members
       } = req.body;
       if (!campaignName || !brandName || !goal || !clientId || !req.file || !description || !startDate || !endDate || !limit || !views || !credits || !location) {
         return res.status(400).json({ success: false, message: 'Missing required fields (campaignName, brandName, goal, clientId, image, description, startDate, endDate, limit, views, credits, location)' });
@@ -98,6 +99,7 @@ exports.createCampaign = [
         views,
         status: status || "Active",
         isActive: true,
+        members: members ? (Array.isArray(members) ? members : members.split(',')) : [],
       });
       await campaign.save();
       res.json({ success: true, campaign });
@@ -159,9 +161,11 @@ exports.uploadCampaignImage = [
 exports.updateCampaign = async (req, res) => {
   try {
     const { campaignId } = req.params;
+    console.log('campaignId param:', campaignId); // Should print the ObjectId string
     const updateData = req.body;
+    console.log('Update data received:', updateData);
     const updatedCampaign = await Campaign.findOneAndUpdate(
-      { campaignId },
+      { _id: campaignId },
       updateData,
       { new: true }
     );
@@ -179,7 +183,7 @@ exports.updateCampaign = async (req, res) => {
 exports.deleteCampaign = async (req, res) => {
   try {
     const { campaignId } = req.params;
-    const deletedCampaign = await Campaign.findOneAndDelete({ campaignId });
+    const deletedCampaign = await Campaign.findOneAndDelete({ _id: campaignId });
     if (!deletedCampaign) {
       return res.status(404).json({ success: false, message: 'Campaign not found' });
     }

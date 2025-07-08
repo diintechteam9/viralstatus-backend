@@ -21,7 +21,7 @@ router.delete('/:campaignId', campaignController.deleteCampaign);
 router.get('/:campaignId', async (req, res) => {
   try {
     const Campaign = require('../models/campaign');
-    const campaign = await Campaign.findOne({ campaignId: req.params.campaignId });
+    const campaign = await Campaign.findOne({ _id: req.params.campaignId });
     if (!campaign) {
       return res.status(404).json({ success: false, message: 'Campaign not found' });
     }

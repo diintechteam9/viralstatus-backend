@@ -23,9 +23,15 @@ const campaignSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  
   groupIds: {
     type: [String],
     required: false
+  },
+  members: {
+    type: [String],
+    required: false,
+    default: []
   },
   image: {
     key: { type: String, required: true },
@@ -51,7 +57,7 @@ const campaignSchema = new mongoose.Schema({
     required: true
   },
   views:{
-    type: Number,
+    type: String,
     required: true
   },
   credits:{
