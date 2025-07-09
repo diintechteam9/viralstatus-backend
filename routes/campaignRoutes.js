@@ -23,6 +23,12 @@ router.post('/register/:campaignId', campaignController.registeredCampaign);
 // Get a user's registered campaigns
 router.get('/registered', campaignController.getUserRegisteredCampaigns);
 
+// Get active participants (googleIds) for a campaign
+router.get('/activeparticipants/:campaignId', campaignController.getActiveParticipants);
+
+// Set active participants (googleIds) for a campaign
+router.post('/activeparticipants/:campaignId', campaignController.setActiveParticipant);
+
 // Get campaign details by campaignId
 router.get('/:campaignId', async (req, res) => {
   try {
@@ -30,13 +36,13 @@ router.get('/:campaignId', async (req, res) => {
     const campaign = await Campaign.findOne({ _id: req.params.campaignId });
     if (!campaign) {
       return res.status(404).json({ success: false, message: 'Campaign not found' });
-    }
+    }  
     res.json({ success: true, campaign });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
+  }  
+});  
 
 
 module.exports = router; 
