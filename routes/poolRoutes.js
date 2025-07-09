@@ -45,4 +45,10 @@ router.put('/:id', poolController.updatePool);
 // Delete pool by id
 router.delete('/:id', poolController.deletePool);
 
+//share reel algo
+router.post('/shared', reelController.assignReelsToUsersWithCount);
+
+// Fetch all shared reels for a user (by googleId)
+router.get('/shared/:userId', reelController.getSharedReelsForUser);
+
 module.exports = router; 

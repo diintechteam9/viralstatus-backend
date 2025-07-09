@@ -3,6 +3,8 @@ const { PutObjectCommand } = require('@aws-sdk/client-s3');
 const { s3Client, getobject, deleteObject } = require('../utils/s3');
 const Reel = require('../models/Reel');
 const Pool = require('../models/pool');
+const User = require('../models/user');
+const SharedReels = require('../models/SharedReels');
 
 exports.uploadReels = (req, res) => {
 //   const clientId = req.user.id
@@ -242,5 +244,111 @@ exports.deleteAllReelsFromPool = async (req, res) => {
   } catch (err) {
     console.error('Error deleting all reels from pool:', err);
     res.status(500).json({ error: 'Failed to delete reels from pool', details: err.message });
+  }
+};
+
+
+// Assign specified number of reels to each user (sequential with shuffled reels)
+exports.assignReelsToUsersWithCount = async (req, res) => {
+  const { userIds, reelIds, reelsPerUser } = req.body;
+  
+  // Validate inputs
+  if (!Array.isArray(userIds) || !Array.isArray(reelIds) || !reelsPerUser || reelsPerUser < 1) {
+    return res.status(400).json({ 
+      error: "userIds and reelIds must be arrays, and reelsPerUser must be a positive number." 
+    });
+  }
+
+  const totalReelsNeeded = userIds.length * reelsPerUser;
+  if (reelIds.length < totalReelsNeeded) {
+    return res.status(400).json({ 
+      error: `Not enough reels. Need ${totalReelsNeeded} reels for ${userIds.length} users with ${reelsPerUser} reels each, but only ${reelIds.length} reels provided.` 
+    });
+  }
+
+  try {
+    // Fetch users by googleId
+    const users = await User.find({ googleId: { $in: userIds } });
+    if (users.length !== userIds.length) {
+      return res.status(400).json({ 
+        error: "Some users not found. Please check the userIds." 
+      });
+    }
+
+    // Fetch reels by IDs
+    const reels = await Reel.find({ _id: { $in: reelIds } });
+    if (reels.length !== reelIds.length) {
+      return res.status(400).json({ 
+        error: "Some reels not found. Please check the reelIds." 
+      });
+    }
+
+    // Shuffle the reels array for fair distribution
+    const shuffledReels = [...reels].sort(() => Math.random() - 0.5);
+    
+    // Create assignments
+    const assignments = [];
+    let reelIndex = 0;
+
+    for (let i = 0; i < userIds.length; i++) {
+      const userId = userIds[i];
+      const userReels = [];
+
+      // Assign reelsPerUser reels to this user
+      for (let j = 0; j < reelsPerUser; j++) {
+        const reel = shuffledReels[reelIndex];
+        userReels.push({
+          reelId: reel._id,
+          s3Key: reel.s3Key,
+          s3Url: reel.s3Url,
+          isTaskCompleted: false
+        });
+        reelIndex++;
+      }
+      // Upsert: add all reels to the user's document, or create if not exists
+      await SharedReels.findOneAndUpdate(
+        { googleId: userId },
+        { $push: { reels: { $each: userReels } } },
+        { upsert: true, new: true }
+      );
+      assignments.push({
+        userId,
+        reels: userReels
+      });
+    }
+
+    res.json({
+      message: `Successfully assigned ${reelsPerUser} reels to each of ${userIds.length} users`,
+      assignments,
+      totalAssignments: assignments.length * reelsPerUser
+    });
+
+  } catch (err) {
+    console.error('Error assigning reels to users:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Cleanup script: Remove SharedReels documents with empty reels arrays
+exports.cleanupEmptySharedReels = async (req, res) => {
+  try {
+    const result = await SharedReels.deleteMany({ reels: { $size: 0 } });
+    res.json({ message: 'Cleanup complete', deletedCount: result.deletedCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+//to store in db
+exports.getSharedReelsForUser = async (req, res) => {
+  const { userId } = req.params; // userId is googleId
+  try {
+    const shared = await SharedReels.findOne({ googleId: userId });
+    if (!shared || !Array.isArray(shared.reels)) {
+      return res.json([]);
+    }
+    res.json(shared.reels);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };
