@@ -101,7 +101,7 @@ exports.createCampaign = [
         status: status || "Active",
         isActive: true,
         // members should be an array of googleId strings
-        members: members ? (Array.isArray(members) ? members : members.split(',')) : [],
+        userIds: members ? (Array.isArray(members) ? members : members.split(',')) : [],
       });
       await campaign.save();
       res.json({ success: true, campaign });
@@ -251,7 +251,7 @@ exports.getUserRegisteredCampaigns = async (req, res) => {
   }
 };
 
-// Get active participants (googleIds) for a campaign
+// Get active participants (userIds) for a campaign
 exports.getActiveParticipants = async (req, res) => {
   try {
     const { campaignId } = req.params;
@@ -259,37 +259,37 @@ exports.getActiveParticipants = async (req, res) => {
     if (!campaign) {
       return res.status(404).json({ success: false, message: "Campaign not found" });
     }
-    const googleIds = campaign.members || [];
+    const userIds = campaign.userIds || [];
     res.json({
       success: true,
-      activeParticipants: googleIds.length,
-      googleIds
+      activeParticipants: userIds.length,
+      userIds
     });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error", error: err.message });
   }
 };
 
-// Set (add) a single active participant (googleId) for a campaign
+// Set (add) a single active participant (userId) for a campaign
 exports.setActiveParticipant = async (req, res) => {
   try {
     const { campaignId } = req.params;
-    const { googleId } = req.body;
-    if (!googleId || typeof googleId !== 'string') {
-      return res.status(400).json({ success: false, message: "googleId must be provided as a string" });
+    const { userId } = req.body;
+    if (!userId || typeof userId !== 'string') {
+      return res.status(400).json({ success: false, message: "userId must be provided as a string" });
     }
     const campaign = await Campaign.findById(campaignId);
     if (!campaign) {
       return res.status(404).json({ success: false, message: "Campaign not found" });
     }
-    if (!campaign.members.includes(googleId)) {
-      campaign.members.push(googleId);
+    if (!campaign.userIds.includes(userId)) {
+      campaign.userIds.push(userId);
       await campaign.save();
     }
     res.json({
       success: true,
-      activeParticipants: campaign.members.length,
-      googleIds: campaign.members
+      activeParticipants: campaign.userIds.length,
+      userIds: campaign.userIds
     });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error", error: err.message });
