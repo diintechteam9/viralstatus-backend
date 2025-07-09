@@ -8,9 +8,9 @@ const RegisteredCampaignSchema = new Schema({
     required: true,
     unique: true, // One document per user
   },
-  registeredCampaignIds: [
+  registeredCampaigns: [
     {
-      type: Schema.Types.ObjectId,
+      type: Schema.Types.Mixed, // Store full campaign object
     },
   ],
 }, { timestamps: true });

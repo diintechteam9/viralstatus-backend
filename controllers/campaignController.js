@@ -195,7 +195,7 @@ exports.deleteCampaign = async (req, res) => {
   }
 };
 
-// Register a user for a campaign (add campaignId to user's registeredCampaignIds)
+// Register a user for a campaign (add full campaign object to user's registeredCampaigns)
 exports.registeredCampaign = async (req, res) => {
   try {
     const { campaignId } = req.params;
@@ -203,14 +203,19 @@ exports.registeredCampaign = async (req, res) => {
     if (!userId) {
       return res.status(400).json({ success: false, message: 'Missing userId' });
     }
+    // Find the campaign object
+    const campaign = await Campaign.findById(campaignId).lean();
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
     // Find or create the RegisteredCampaign document for this user
     let reg = await RegisteredCampaign.findOne({ userId });
     if (!reg) {
-      reg = new RegisteredCampaign({ userId, registeredCampaignIds: [campaignId] });
+      reg = new RegisteredCampaign({ userId, registeredCampaigns: [campaign] });
     } else {
-      // Only add if not already present
-      if (!reg.registeredCampaignIds.includes(campaignId)) {
-        reg.registeredCampaignIds.push(campaignId);
+      // Only add if not already present (by _id)
+      if (!reg.registeredCampaigns.some(c => c._id.toString() === campaign._id.toString())) {
+        reg.registeredCampaigns.push(campaign);
       }
     }
     await reg.save();
@@ -230,14 +235,14 @@ exports.getUserRegisteredCampaigns = async (req, res) => {
     }
     let reg;
     if (userId) {
-      reg = await RegisteredCampaign.findOne({ userId }).populate('registeredCampaignIds');
+      reg = await RegisteredCampaign.findOne({ userId });
     } else if (googleId) {
-      reg = await RegisteredCampaign.findOne({ googleId }).populate('registeredCampaignIds');
+      reg = await RegisteredCampaign.findOne({ googleId });
     }
     if (!reg) {
       return res.status(404).json({ success: false, message: 'No registered campaigns found for user' });
     }
-    res.json({ success: true, registeredCampaigns: reg.registeredCampaignIds });
+    res.json({ success: true, registeredCampaigns: reg.registeredCampaigns });
   } catch (err) {
     console.error('Get user registered campaigns error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
