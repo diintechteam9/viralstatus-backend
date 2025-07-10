@@ -29,7 +29,6 @@ const campaignSchema = new mongoose.Schema({
     required: false
   },
   userIds: {
-    // Array of userId strings (not emails)
     type: [String],
     required: false,
     default: []

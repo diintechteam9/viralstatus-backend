@@ -289,38 +289,61 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
     // Create assignments
     const assignments = [];
     let reelIndex = 0;
+    const duplicateReelsByUser = {};
 
     for (let i = 0; i < userIds.length; i++) {
       const userId = userIds[i];
       const userReels = [];
+      const duplicateReels = [];
+
+      // Fetch user's existing SharedReels document
+      const shared = await SharedReels.findOne({ googleId: userId });
+      const existingReelIds = shared ? shared.reels.map(r => r.reelId) : [];
 
       // Assign reelsPerUser reels to this user
-      for (let j = 0; j < reelsPerUser; j++) {
+      let assignedCount = 0;
+      while (assignedCount < reelsPerUser && reelIndex < shuffledReels.length) {
         const reel = shuffledReels[reelIndex];
+        reelIndex++;
+        if (existingReelIds.includes(reel._id.toString())) {
+          duplicateReels.push(reel._id.toString());
+          continue;
+        }
         userReels.push({
           reelId: reel._id,
           s3Key: reel.s3Key,
           s3Url: reel.s3Url,
           isTaskCompleted: false
         });
-        reelIndex++;
+        assignedCount++;
       }
-      // Upsert: add all reels to the user's document, or create if not exists
-      await SharedReels.findOneAndUpdate(
-        { googleId: userId },
-        { $push: { reels: { $each: userReels } } },
-        { upsert: true, new: true }
-      );
+      // Upsert: add all new reels to the user's document, or create if not exists
+      if (userReels.length > 0) {
+        await SharedReels.findOneAndUpdate(
+          { googleId: userId },
+          { $push: { reels: { $each: userReels } } },
+          { upsert: true, new: true }
+        );
+      }
       assignments.push({
         userId,
-        reels: userReels
+        assignedReels: userReels.map(r => r.reelId),
+        duplicateReels
       });
+      duplicateReelsByUser[userId] = duplicateReels;
     }
 
+    // Determine if there were any duplicates
+    const hasDuplicates = Object.values(duplicateReelsByUser).some(arr => arr.length > 0);
+    const responseMessage = hasDuplicates
+      ? 'Reel not assigned. Duplicate reels were not allowed.'
+      : `Successfully assigned up to ${reelsPerUser} new reels to each of ${userIds.length} users.`;
+
     res.json({
-      message: `Successfully assigned ${reelsPerUser} reels to each of ${userIds.length} users`,
+      message: responseMessage,
+      isDuplicate: hasDuplicates,
       assignments,
-      totalAssignments: assignments.length * reelsPerUser
+      duplicateReelsByUser
     });
 
   } catch (err) {

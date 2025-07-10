@@ -196,7 +196,6 @@ exports.deleteCampaign = async (req, res) => {
   }
 };
 
-
 // Register a user for a campaign (add full campaign object to user's registeredCampaigns)
 exports.registeredCampaign = async (req, res) => {
   try {
@@ -231,6 +230,7 @@ exports.registeredCampaign = async (req, res) => {
 // Get a user's registered campaigns by userId or googleId
 exports.getUserRegisteredCampaigns = async (req, res) => {
   try {
+    console.log(req.body);
     const { userId, googleId } = req.query;
     if (!userId && !googleId) {
       return res.status(400).json({ success: false, message: 'Missing userId or googleId' });
@@ -248,6 +248,35 @@ exports.getUserRegisteredCampaigns = async (req, res) => {
   } catch (err) {
     console.error('Get user registered campaigns error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+
+exports.setActiveParticipant = async (req, res) => {
+  try {
+    const { campaignId } = req.params;
+    const { userId } = req.body;
+    if (!userId || typeof userId !== 'string') {
+      return res.status(400).json({ success: false, message: "userId must be provided as a string" });
+    }
+    const campaign = await Campaign.findById(campaignId);
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: "Campaign not found" });
+    }
+    // Only add if not already present
+    if (!campaign.userIds.includes(userId)) {
+      campaign.userIds.push(userId);
+      // Increment activeParticipants by 1 only if user is new
+      campaign.activeParticipants = (campaign.activeParticipants || 0) + 1;
+      await campaign.save();
+    }
+    res.json({
+      success: true,
+      activeParticipants: campaign.activeParticipants,
+      userIds: campaign.userIds
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error", error: err.message });
   }
 };
 
@@ -270,28 +299,3 @@ exports.getActiveParticipants = async (req, res) => {
   }
 };
 
-// Set (add) a single active participant (userId) for a campaign
-exports.setActiveParticipant = async (req, res) => {
-  try {
-    const { campaignId } = req.params;
-    const { userId } = req.body;
-    if (!userId || typeof userId !== 'string') {
-      return res.status(400).json({ success: false, message: "userId must be provided as a string" });
-    }
-    const campaign = await Campaign.findById(campaignId);
-    if (!campaign) {
-      return res.status(404).json({ success: false, message: "Campaign not found" });
-    }
-    if (!campaign.userIds.includes(userId)) {
-      campaign.userIds.push(userId);
-      await campaign.save();
-    }
-    res.json({
-      success: true,
-      activeParticipants: campaign.userIds.length,
-      userIds: campaign.userIds
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Server error", error: err.message });
-  }
-};

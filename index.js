@@ -98,7 +98,7 @@ app.get("/", (req, res) => {
 });
 
 app.use('/api/client', clientRoutes); 
-app.use('/api/user', userRoutes);  
+app.use('/api/user', require('./routes/userroutes'));
 app.use('/api/admin', adminRoutes);
 app.use('/api/superadmin', superadminRoutes);
 app.use('/api/datastore', datastoreRoutes);
