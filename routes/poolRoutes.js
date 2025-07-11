@@ -52,7 +52,7 @@ router.post('/shared', reelController.assignReelsToUsersWithCount);
 router.get('/shared/:userId', reelController.getSharedReelsForUser);
 
 // Add user response URL
-router.post('/user/:userId/response', reelController.addUserResponseUrl);
+router.post('/user/response/:userId', reelController.addUserResponseUrl);
 
 //get user response url
 router.get('/user/:userId/response/get', reelController.getAddUserResponseUrl);

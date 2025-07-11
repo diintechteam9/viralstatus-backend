@@ -254,7 +254,7 @@ exports.deleteAllReelsFromPool = async (req, res) => {
 
 // Assign specified number of reels to each user (sequential with shuffled reels)
 exports.assignReelsToUsersWithCount = async (req, res) => {
-  const { userIds, reelIds, reelsPerUser } = req.body;
+  const { userIds, reelIds, reelsPerUser, campaignId } = req.body;
   // Validate inputs
   if (!Array.isArray(userIds) || !Array.isArray(reelIds) || !reelsPerUser || reelsPerUser < 1) {
     return res.status(400).json({ 
@@ -351,7 +351,8 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
       message: responseMessage,
       isDuplicate: hasDuplicates,
       assignments,
-      duplicateReelsByUser
+      duplicateReelsByUser,
+      campaignId // include campaignId in the response
     });
 
   } catch (err) {
