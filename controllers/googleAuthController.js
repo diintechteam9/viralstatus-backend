@@ -2,6 +2,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const Client = require("../models/client");
 const User = require("../models/user");
+const CreditWallet = require('../models/CreditWallet');
 
 // Generate JWT Token
 const generateToken = (id) => {
@@ -47,6 +48,11 @@ const verifyUserOrClient = async (req, res) => {
         password: "", // No password for Google users
       });
     }
+
+    const wallet = await CreditWallet.findOne({ userId: user.googleId || user._id });
+if (!wallet) {
+  await CreditWallet.create({ userId: user.googleId || user._id });
+}
 
     const authToken = generateToken(entity._id);
 

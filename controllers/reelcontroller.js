@@ -321,6 +321,7 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
           s3Key: reel.s3Key,
           s3Url: reel.s3Url,
           isTaskCompleted: false,
+          campaignId: campaignId // Add campaignId to each assigned reel
         });
         assignedCount++;
       }

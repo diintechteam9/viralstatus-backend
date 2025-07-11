@@ -1,6 +1,8 @@
 const User = require("../models/user");
 const bcrypt = require("bcryptjs");
 const jwt = require('jsonwebtoken');
+const CreditWallet = require('../models/CreditWallet');
+
 
 // Generate JWT Token for admin
 const generateToken = (id) => {
@@ -33,6 +35,11 @@ const loginUser = async (req, res) => {
           pincode: "",
         });
         console.log('New Google-authenticated user created:', user._id);
+      }
+      // Ensure CreditWallet exists for this user
+      const wallet = await CreditWallet.findOne({ userId: user._id });
+      if (!wallet) {
+        await CreditWallet.create({ userId: user._id });
       }
       const authToken = generateToken(user._id);
       console.log('Google login successful for user:', email);
@@ -77,6 +84,11 @@ const loginUser = async (req, res) => {
         success: false,
         message: "Invalid email or password"
       });
+    }
+    // Ensure CreditWallet exists for this user
+    const wallet = await CreditWallet.findOne({ userId: user._id });
+    if (!wallet) {
+      await CreditWallet.create({ userId: user._id });
     }
     const jwtToken = generateToken(user._id);
     console.log('Login successful for user email:', email);
@@ -161,6 +173,9 @@ const registerUser = async (req, res) => {
       pincode,
       websiteUrl
     });
+
+    // Ensure CreditWallet exists for this user
+    await CreditWallet.create({ userId: user._id });
 
     // Generate token
     const token = generateToken(user._id);

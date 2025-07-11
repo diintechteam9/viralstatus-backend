@@ -19,6 +19,9 @@ const sharedReelsSchema = new mongoose.Schema({
       s3Url: {
         type: String
       },
+      campaignId:{
+        type:String
+      },
       isTaskCompleted: {
         type: Boolean,
         default: false
