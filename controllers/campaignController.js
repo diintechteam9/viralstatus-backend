@@ -199,6 +199,7 @@ exports.deleteCampaign = async (req, res) => {
 // Register a user for a campaign (add full campaign object to user's registeredCampaigns)
 exports.registeredCampaign = async (req, res) => {
   try {
+    console.log(req.body);
     const { campaignId } = req.params;
     const { userId } = req.body; // You can adapt this to use req.user if using auth middleware
     if (!userId) {
@@ -230,7 +231,7 @@ exports.registeredCampaign = async (req, res) => {
 // Get a user's registered campaigns by userId or googleId
 exports.getUserRegisteredCampaigns = async (req, res) => {
   try {
-    console.log(req.body);
+    
     const { userId, googleId } = req.query;
     if (!userId && !googleId) {
       return res.status(400).json({ success: false, message: 'Missing userId or googleId' });
@@ -245,12 +246,12 @@ exports.getUserRegisteredCampaigns = async (req, res) => {
       return res.status(404).json({ success: false, message: 'No registered campaigns found for user' });
     }
     res.json({ success: true, registeredCampaigns: reg.registeredCampaigns });
+    console.log(res)
   } catch (err) {
     console.error('Get user registered campaigns error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
-
 
 exports.setActiveParticipant = async (req, res) => {
   try {
@@ -265,7 +266,7 @@ exports.setActiveParticipant = async (req, res) => {
     }
     // Only add if not already present
     if (!campaign.userIds.includes(userId)) {
-      campaign.userIds.push(userId);
+      campaign.userIds.push(userId);  
       // Increment activeParticipants by 1 only if user is new
       campaign.activeParticipants = (campaign.activeParticipants || 0) + 1;
       await campaign.save();
@@ -275,6 +276,7 @@ exports.setActiveParticipant = async (req, res) => {
       activeParticipants: campaign.activeParticipants,
       userIds: campaign.userIds
     });
+    console.log(res);
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error", error: err.message });
   }

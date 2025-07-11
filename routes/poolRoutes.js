@@ -51,4 +51,10 @@ router.post('/shared', reelController.assignReelsToUsersWithCount);
 // Fetch all shared reels for a user (by googleId)
 router.get('/shared/:userId', reelController.getSharedReelsForUser);
 
+// Add user response URL
+router.post('/user/:userId/response', reelController.addUserResponseUrl);
+
+//get user response url
+router.get('/user/:userId/response/get', reelController.getAddUserResponseUrl);
+
 module.exports = router; 

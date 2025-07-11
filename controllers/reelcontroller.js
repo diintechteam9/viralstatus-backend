@@ -5,6 +5,8 @@ const Reel = require('../models/Reel');
 const Pool = require('../models/pool');
 const User = require('../models/user');
 const SharedReels = require('../models/SharedReels');
+const UserResponse = require('../models/userResponse');
+const userResponse = require('../models/userResponse');
 
 exports.uploadReels = (req, res) => {
 //   const clientId = req.user.id
@@ -63,7 +65,7 @@ exports.uploadReels = (req, res) => {
         { $inc: { reelCount: reels.length } }
       );
     }
-    res.json({ reels });
+    res.json({ success: true, reels });
   });
 
   req.pipe(bb);
@@ -72,26 +74,26 @@ exports.uploadReels = (req, res) => {
 exports.getReelsByPool = async (req, res) => {
   const { poolId } = req.query;
   if (!poolId) {
-    return res.status(400).json({ error: "poolId is required" });
+    return res.status(400).json({ success: false, error: "poolId is required" });
   }
   try {
     const reels = await Reel.find({ poolId });
-    res.json({ reels });
+    res.json({ success: true, reels });
   } catch (err) {
-    res.status(500).json({ error: "Failed to fetch reels" });
+    res.status(500).json({ success: false, error: "Failed to fetch reels" });
   }
 };
 
 exports.getReelsByPoolId = async (req, res) => {
   const { poolId } = req.params;
   if (!poolId) {
-    return res.status(400).json({ error: "poolId is required" });
+    return res.status(400).json({ success: false, error: "poolId is required" });
   }
   try {
     const reels = await Reel.find({ poolId });
-    res.json({ reels });
+    res.json({ success: true, reels });
   } catch (err) {
-    res.status(500).json({ error: "Failed to fetch reels" });
+    res.status(500).json({ success: false, error: "Failed to fetch reels" });
   }
 };
 
@@ -105,7 +107,7 @@ exports.deleteReel = async (req, res) => {
     // Find the reel first
     const reel = await Reel.findById(reelId);
     if (!reel) {
-      return res.status(404).json({ error: 'Reel not found' });
+      return res.status(404).json({ success: false, error: 'Reel not found' });
     }
     
     // Delete from S3
@@ -131,10 +133,10 @@ exports.deleteReel = async (req, res) => {
     }
     
     console.log('Reel deleted successfully:', reelId);
-    res.json({ message: 'Reel deleted successfully' });
+    res.json({ success: true, message: 'Reel deleted successfully' });
   } catch (err) {
     console.error('Error deleting reel:', err);
-    res.status(500).json({ error: 'Failed to delete reel', details: err.message });
+    res.status(500).json({ success: false, error: 'Failed to delete reel', details: err.message });
   }
 };
 
@@ -144,7 +146,7 @@ exports.deleteMultipleReels = async (req, res) => {
     const { reelIds } = req.body;
     
     if (!reelIds || !Array.isArray(reelIds) || reelIds.length === 0) {
-      return res.status(400).json({ error: 'reelIds array is required' });
+      return res.status(400).json({ success: false, error: 'reelIds array is required' });
     }
     
     console.log('Deleting multiple reels:', reelIds);
@@ -153,7 +155,7 @@ exports.deleteMultipleReels = async (req, res) => {
     const reels = await Reel.find({ _id: { $in: reelIds } });
     
     if (reels.length === 0) {
-      return res.status(404).json({ error: 'No reels found to delete' });
+      return res.status(404).json({ success: false, error: 'No reels found to delete' });
     }
     
     // Group reels by poolId for count updates
@@ -190,12 +192,13 @@ exports.deleteMultipleReels = async (req, res) => {
     
     console.log('Multiple reels deleted successfully:', reelIds.length);
     res.json({ 
+      success: true,
       message: `${reels.length} reels deleted successfully`,
       deletedCount: reels.length
     });
   } catch (err) {
     console.error('Error deleting multiple reels:', err);
-    res.status(500).json({ error: 'Failed to delete reels', details: err.message });
+    res.status(500).json({ success: false, error: 'Failed to delete reels', details: err.message });
   }
 };
 
@@ -211,6 +214,7 @@ exports.deleteAllReelsFromPool = async (req, res) => {
     
     if (reels.length === 0) {
       return res.json({ 
+        success: true,
         message: 'No reels found in pool',
         deletedCount: 0
       });
@@ -238,30 +242,31 @@ exports.deleteAllReelsFromPool = async (req, res) => {
     
     console.log('All reels deleted from pool successfully:', reels.length);
     res.json({ 
+      success: true,
       message: `All reels deleted from pool successfully`,
       deletedCount: reels.length
     });
   } catch (err) {
     console.error('Error deleting all reels from pool:', err);
-    res.status(500).json({ error: 'Failed to delete reels from pool', details: err.message });
+    res.status(500).json({ success: false, error: 'Failed to delete reels from pool', details: err.message });
   }
 };
-
 
 // Assign specified number of reels to each user (sequential with shuffled reels)
 exports.assignReelsToUsersWithCount = async (req, res) => {
   const { userIds, reelIds, reelsPerUser } = req.body;
-  
   // Validate inputs
   if (!Array.isArray(userIds) || !Array.isArray(reelIds) || !reelsPerUser || reelsPerUser < 1) {
     return res.status(400).json({ 
-      error: "userIds and reelIds must be arrays, and reelsPerUser must be a positive number." 
+      success: false,
+      error: "userIds and reelIds must be arrays and reelsPerUser must be a positive number." 
     });
   }
 
   const totalReelsNeeded = userIds.length * reelsPerUser;
   if (reelIds.length < totalReelsNeeded) {
     return res.status(400).json({ 
+      success: false,
       error: `Not enough reels. Need ${totalReelsNeeded} reels for ${userIds.length} users with ${reelsPerUser} reels each, but only ${reelIds.length} reels provided.` 
     });
   }
@@ -271,6 +276,7 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
     const users = await User.find({ googleId: { $in: userIds } });
     if (users.length !== userIds.length) {
       return res.status(400).json({ 
+        success: false,
         error: "Some users not found. Please check the userIds." 
       });
     }
@@ -279,6 +285,7 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
     const reels = await Reel.find({ _id: { $in: reelIds } });
     if (reels.length !== reelIds.length) {
       return res.status(400).json({ 
+        success: false,
         error: "Some reels not found. Please check the reelIds." 
       });
     }
@@ -313,7 +320,7 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
           reelId: reel._id,
           s3Key: reel.s3Key,
           s3Url: reel.s3Url,
-          isTaskCompleted: false
+          isTaskCompleted: false,
         });
         assignedCount++;
       }
@@ -340,6 +347,7 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
       : `Successfully assigned up to ${reelsPerUser} new reels to each of ${userIds.length} users.`;
 
     res.json({
+      success: true,
       message: responseMessage,
       isDuplicate: hasDuplicates,
       assignments,
@@ -348,7 +356,7 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
 
   } catch (err) {
     console.error('Error assigning reels to users:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
@@ -356,9 +364,9 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
 exports.cleanupEmptySharedReels = async (req, res) => {
   try {
     const result = await SharedReels.deleteMany({ reels: { $size: 0 } });
-    res.json({ message: 'Cleanup complete', deletedCount: result.deletedCount });
+    res.json({ success: true, message: 'Cleanup complete', deletedCount: result.deletedCount });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
@@ -370,7 +378,42 @@ exports.getSharedReelsForUser = async (req, res) => {
     if (!shared || !Array.isArray(shared.reels)) {
       return res.json([]);
     }
-    res.json(shared.reels);
+    res.status(200).json({ success: true, reels: shared.reels });
+  } catch (err) { 
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Add or update a user's response URL
+exports.addUserResponseUrl = async (req, res) => {
+  const { userId } = req.params;
+  const { url, campaignId } = req.body;
+  if (!userId || !url || !campaignId) {
+    return res.status(400).json({ error: 'userId (param) and url, campaignId (body) are required.' });
+  }
+  try {
+    let userResponse = await UserResponse.findOne({ googleId: userId });
+    if (!userResponse) {
+      userResponse = new UserResponse({ googleId: userId, response: [{ urls: url, campaignId }] });
+    } else {
+      userResponse.response.push({ urls: url, campaignId });
+    }
+    await userResponse.save();
+    res.json({ success: true, userResponse });
+  } catch (err) {
+    console.error('Error saving user response:', err);
+    res.status(500).json({ error: 'Failed to save user response', details: err.message });
+  }
+};
+
+exports.getAddUserResponseUrl = async (req, res) =>{
+  const {userId} = req.params;
+  try{
+    const responsed = await userResponse.findOne({googleId: userId});
+    if (!responsed || !Array.isArray(responsed.response)) {
+      return res.json({ success: true, response: [] });
+    }
+    res.json({ success: true, response: responsed.response });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
