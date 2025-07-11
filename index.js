@@ -28,6 +28,8 @@ const campaignRoutes = require('./routes/campaignRoutes');
 const poolRoutes = require('./routes/poolRoutes');
 const ta1000seriesRoutes = require('./routes/ta1000series');
 const videomergeta1000seriesRoutes = require('./routes/videomergeta1000series');
+const viewRoutes = require("./routes/viewRoutes");
+
 
 dotenv.config();
 
@@ -131,6 +133,8 @@ app.use('/api/auth/user/campaign', campaignRoutes);
 // Pool Routes and Reel Routes (for uploading and managing reels)
 app.use('/api/pools', poolRoutes);
 
+//view route
+app.use('/api/views', viewRoutes);
 
 // TA1000Series Routes
 app.use('/api/ta1000series', ta1000seriesRoutes);
