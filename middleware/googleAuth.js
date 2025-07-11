@@ -10,11 +10,14 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
  * This middleware validates the Google ID token sent from the Flutter app
  */
 const verifyGoogleToken = async (req, res, next) => {
-  console.log(req);
+  // Log incoming request body and env for debugging
+  console.error('verifyGoogleToken: incoming body:', req.body);
+  console.error('verifyGoogleToken: GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID);
   try {
     const { googleToken } = req.body;
 
     if (!googleToken) {
+      console.error('verifyGoogleToken: googleToken missing in request body');
       return res.status(400).json({
         success: false,
         message: 'Google token is required'
@@ -42,10 +45,11 @@ const verifyGoogleToken = async (req, res, next) => {
     
     next();
   } catch (error) {
-    console.error('Google token verification error:', error);
+    console.error('verifyGoogleToken error:', error && error.stack ? error.stack : error);
     return res.status(401).json({
       success: false,
-      message: 'Invalid Google token'
+      message: 'Invalid Google token',
+      error: error && error.message ? error.message : error
     });
   }
 };

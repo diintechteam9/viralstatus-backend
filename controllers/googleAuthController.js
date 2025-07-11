@@ -20,6 +20,9 @@ const generateToken = (id) => {
  */
 const verifyUserOrClient = async (req, res) => {
   try {
+    // Log incoming googleUser and role for debugging
+    console.error('verifyUserOrClient: req.googleUser:', req.googleUser);
+    console.error('verifyUserOrClient: req.body.role:', req.body.role);
     const { googleUser } = req;
     const { role } = req.body; // 'user' or 'client'
 
@@ -52,7 +55,6 @@ const verifyUserOrClient = async (req, res) => {
       });
     }
 
-
     const authToken = generateToken(entity._id);
 
     return res.status(200).json({
@@ -67,7 +69,8 @@ const verifyUserOrClient = async (req, res) => {
       role,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message || "An error occurred during verification" });
+    console.error('verifyUserOrClient error:', error && error.stack ? error.stack : error);
+    res.status(500).json({ success: false, message: error.message || "An error occurred during verification", error: error && error.message ? error.message : error });
   }
 };
 
