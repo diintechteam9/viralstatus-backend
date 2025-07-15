@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const Client = require('../models/client');
 
 // Initialize Google OAuth2 client
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_ANDROID_CLIENT_ID);
 
 /**
  * Middleware to verify Google ID token
