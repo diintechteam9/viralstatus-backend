@@ -5,8 +5,8 @@ const jwt = require('jsonwebtoken');
 
 
 // Generate JWT Token for admin
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
+const generateToken = (id, userType) => {
+  return jwt.sign({ id, userType }, process.env.JWT_SECRET, {
     expiresIn: '7d'
   });
 };
@@ -33,6 +33,7 @@ const loginUser = async (req, res) => {
           aadharNo: "GOOGLE" + Date.now(),
           city: "",
           pincode: "",
+          googleId: token ? JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString()).sub : undefined,
         });
         console.log('New Google-authenticated user created:', user._id);
       }
@@ -41,7 +42,15 @@ const loginUser = async (req, res) => {
       // if (!wallet) {
       //   await CreditWallet.create({ userId: user._id });
       // }
-      const authToken = generateToken(user._id);
+      // Extract googleId from Google token's payload (sub field)
+      const googleId = token ? JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString()).sub : user.googleId;
+      const authToken = jwt.sign(
+        { id: user._id, googleId, userType: 'user' },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+      console.log('Generated Google login token:', authToken);
+      console.log('Decoded Google login token payload:', jwt.decode(authToken));
       console.log('Google login successful for user:', email);
       return res.status(200).json({
         success: true,
@@ -90,7 +99,13 @@ const loginUser = async (req, res) => {
     if (!wallet) {
       await CreditWallet.create({ userId: user._id });
     }
-    const jwtToken = generateToken(user._id);
+    const jwtToken = jwt.sign(
+      { id: user._id, googleId: user.googleId, userType: 'user' },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    console.log('Generated regular login token:', jwtToken);
+    console.log('Decoded regular login token payload:', jwt.decode(jwtToken));
     console.log('Login successful for user email:', email);
     res.status(200).json({
       success: true,
@@ -178,7 +193,13 @@ const registerUser = async (req, res) => {
     await CreditWallet.create({ userId: user._id });
 
     // Generate token
-    const token = generateToken(user._id);
+    const token = jwt.sign(
+      { id: user._id, googleId: user.googleId, userType: 'user' },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    console.log('Generated registration token:', token);
+    console.log('Decoded registration token payload:', jwt.decode(token));
 
     res.status(201).json({
       success: true,

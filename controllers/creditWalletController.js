@@ -1,0 +1,1 @@
+const CreditWallet = require('../models/CreditWallet');

@@ -5,6 +5,7 @@ const session = require('express-session');
 const connectDB = require("./config/db");
 const { configureCors } = require("./config/s3Cors");
 
+
 const userRoutes= require('./routes/userroutes')
 const clientRoutes = require("./routes/clientroutes");
 const adminRoutes = require("./routes/adminroutes");
@@ -28,6 +29,7 @@ const campaignRoutes = require('./routes/campaignRoutes');
 const poolRoutes = require('./routes/poolRoutes');
 const ta1000seriesRoutes = require('./routes/ta1000series');
 const videomergeta1000seriesRoutes = require('./routes/videomergeta1000series');
+const creditWalletRoutes = require("./routes/creditWalletRoute");
 
 
 dotenv.config();
@@ -98,10 +100,6 @@ app.get("/", (req, res) => {
     res.send("Hello World");
 });
 
-app.use('/api/client', clientRoutes); 
-app.use('/api/user', require('./routes/userroutes'));
-app.use('/api/admin', adminRoutes);
-app.use('/api/superadmin', superadminRoutes);
 app.use('/api/datastore', datastoreRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/folders', folderRoutes);
@@ -120,17 +118,25 @@ app.use('/api/posts', postRoutes);
 // Google Authentication Routes
 app.use('/api/auth/google', googleAuthRoutes);
 
+app.use('/api/user', require('./routes/userroutes'));
+app.use('/api/client', clientRoutes); 
+app.use('/api/admin', adminRoutes);
+app.use('/api/superadmin', superadminRoutes);
+
 // User Profile Routes
 app.use('/api/auth/user/profiles', userProfileRoutes);
 
 // Group Routes
-app.use('/api/auth/user/group', groupRoutes);
+// app.use('/api/auth/user/group', groupRoutes);
 
 // Campaign Routes
 app.use('/api/auth/user/campaign', campaignRoutes);
 
 // Pool Routes and Reel Routes (for uploading and managing reels)
 app.use('/api/pools', poolRoutes);
+
+//credit Routes
+// app.use('/api/user/creditWallet', creditWalletRoutes);
 
 // TA1000Series Routes
 app.use('/api/ta1000series', ta1000seriesRoutes);

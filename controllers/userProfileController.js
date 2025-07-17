@@ -1,6 +1,7 @@
 const UserProfile = require("../models/userProfile");
 const Client = require("../models/client");
 const Group = require('../models/group');
+const mongoose = require('mongoose');
 
 /**
  * Create a new user profile
@@ -23,8 +24,12 @@ const createUserProfile = async (req, res) => {
       fieldOfStudy,
       skills,
       otherSkills,
-      socialMedia
+      socialMedia,
+      googleId
     } = req.body;
+
+    // Prefer googleId from authenticated user (JWT), fallback to body
+    const profileGoogleId = req.user?.googleId || googleId || undefined;
 
     // Use authenticated user's email if available, otherwise use provided email
     const userEmail = req.user?.email || email;
@@ -78,7 +83,8 @@ const createUserProfile = async (req, res) => {
       skills,
       otherSkills,
       socialMedia,
-      isProfileCompleted
+      isProfileCompleted,
+      googleId: profileGoogleId
     });
 
     // Automatically add user to groups for each business interest
@@ -205,21 +211,23 @@ const getAllUserProfiles = async (req, res) => {
 const getUserProfileById = async (req, res) => {
   try {
     const { id } = req.params;
-
-    const userProfile = await UserProfile.findById(id);
-    
+    let userProfile;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      userProfile = await UserProfile.findById(id);
+    }
+    if (!userProfile) {
+      userProfile = await UserProfile.findOne({ googleId: id });
+    }
     if (!userProfile) {
       return res.status(404).json({
         success: false,
         message: "User profile not found"
       });
     }
-
     res.status(200).json({
       success: true,
       userProfile
     });
-
   } catch (error) {
     console.error('Get user profile by ID error:', error);
     res.status(500).json({
@@ -363,6 +371,7 @@ const updateUserProfile = async (req, res) => {
     // Remove fields that shouldn't be updated
     delete updateData._id;
     delete updateData.createdAt;
+    delete updateData.googleId;
 
     // Check if all required fields are filled after update
     const requiredFields = [
@@ -379,11 +388,21 @@ const updateUserProfile = async (req, res) => {
     const isProfileCompleted = requiredFields.every(field => field && field.trim() !== '');
     updateData.isProfileCompleted = isProfileCompleted;
 
-    const updatedProfile = await UserProfile.findByIdAndUpdate(
-      id,
-      updateData,
-      { new: true, runValidators: true }
-    );
+    let updatedProfile;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      updatedProfile = await UserProfile.findByIdAndUpdate(
+        id,
+        updateData,
+        { new: true, runValidators: true }
+      );
+    }
+    if (!updatedProfile) {
+      updatedProfile = await UserProfile.findOneAndUpdate(
+        { googleId: id },
+        updateData,
+        { new: true, runValidators: true }
+      );
+    }
 
     if (!updatedProfile) {
       return res.status(404).json({
@@ -441,9 +460,13 @@ const updateUserProfile = async (req, res) => {
 const deleteUserProfile = async (req, res) => {
   try {
     const { id } = req.params;
-
-    const deletedProfile = await UserProfile.findByIdAndDelete(id);
-
+    let deletedProfile;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      deletedProfile = await UserProfile.findByIdAndDelete(id);
+    }
+    if (!deletedProfile) {
+      deletedProfile = await UserProfile.findOneAndDelete({ googleId: id });
+    }
     if (!deletedProfile) {
       return res.status(404).json({
         success: false,
@@ -472,13 +495,21 @@ const verifyUserProfile = async (req, res) => {
   try {
     const { id } = req.params;
     const { isVerified } = req.body;
-
-    const updatedProfile = await UserProfile.findByIdAndUpdate(
-      id,
-      { isVerified },
-      { new: true }
-    );
-
+    let updatedProfile;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      updatedProfile = await UserProfile.findByIdAndUpdate(
+        id,
+        { isVerified },
+        { new: true }
+      );
+    }
+    if (!updatedProfile) {
+      updatedProfile = await UserProfile.findOneAndUpdate(
+        { googleId: id },
+        { isVerified },
+        { new: true }
+      );
+    }
     if (!updatedProfile) {
       return res.status(404).json({
         success: false,

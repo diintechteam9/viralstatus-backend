@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { putobject, getobject } = require('../utils/s3');
 const multer = require('multer');
 const RegisteredCampaign = require('../models/RegisteredCampaign');
+const sharp = require('sharp');
 
 // Helper to extract group index from groupId (e.g., travel-&-tourism-2 => 2)
 // function getGroupIndex(groupId) {
@@ -20,10 +21,10 @@ function generateCampaignId(name) {
   return `${base}-${suffix}`;
 }
 
-// Deactivate campaigns whose endTime has passed
+// Deactivate campaigns whose endDate has passed
 async function deactivateExpiredCampaigns() {
   const now = new Date();
-  await Campaign.updateMany({ isActive: true, endTime: { $lt: now } }, { isActive: false });
+  await Campaign.updateMany({ isActive: true, endDate: { $lt: now } }, { isActive: false });
 }
 
 // Add multer file filter for images only
@@ -65,9 +66,12 @@ exports.createCampaign = [
       }
       // Generate campaignId for S3 key
       const campaignId = generateCampaignId(campaignName);
-      const originalName = req.file.originalname.replace(/\s+/g, '_');
+      // Convert the uploaded image to PNG using sharp
+      const pngBuffer = await sharp(req.file.buffer).png().toBuffer();
+      // Change the file extension to .png
+      const originalName = req.file.originalname.replace(/\s+/g, '_').replace(/\.[^/.]+$/, ".png");
       const s3Key = `${clientId}/${campaignId}/${originalName}`;
-      const contentType = req.file.mimetype;
+      const contentType = 'image/png';
       console.log('Preparing to upload to S3:', s3Key, contentType);
       // Actually upload the file to S3 using AWS SDK
       const { s3Client } = require('../utils/s3');
@@ -75,7 +79,7 @@ exports.createCampaign = [
       await s3Client.send(new PutObjectCommand({
         Bucket: process.env.S3_BUCKET_NAME,
         Key: s3Key,
-        Body: req.file.buffer,
+        Body: pngBuffer, // Use the converted PNG buffer
         ContentType: contentType,
       }));
       // Generate presigned GET URL for the uploaded image
@@ -119,6 +123,24 @@ exports.getActiveCampaigns = async (req, res) => {
     const { clientId } = req.query;
     const filter = { isActive: true };
     if (clientId) filter.clientId = clientId;
+
+    // Fetch user by id from JWT, then get googleId
+    let registeredCampaignIds = [];
+    if (req.user && req.user.id) {
+      const userDoc = await require('../models/user').findById(req.user.id);
+      const googleId = userDoc ? userDoc.googleId : undefined;
+      console.log(googleId);
+      if (googleId) {
+        const reg = await RegisteredCampaign.findOne({ userId: googleId });
+        if (reg && reg.registeredCampaigns) {
+          registeredCampaignIds = reg.registeredCampaigns.map(c => c._id?.toString?.() || c._id);
+        }
+      }
+    }
+    if (registeredCampaignIds.length > 0) {
+      filter._id = { $nin: registeredCampaignIds };
+    }
+
     const campaigns = await Campaign.find(filter).lean();
 
     // Generate fresh presigned GET URLs for each campaign image
@@ -127,7 +149,6 @@ exports.getActiveCampaigns = async (req, res) => {
         campaign.image.url = await getobject(campaign.image.key);
       }
     }
-
     res.json({ success: true, campaigns });
   } catch (err) {
     console.error(err);

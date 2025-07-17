@@ -22,9 +22,13 @@ const sharedReelsSchema = new mongoose.Schema({
       campaignId:{
         type:String
       },
-      isTaskCompleted: {
-        type: Boolean,
-        default: false
+      title: {
+        type: String,
+        default: ''
+      },
+      campaignImageKey: {
+        type: String,
+        default: ''
       }
     }
   ]

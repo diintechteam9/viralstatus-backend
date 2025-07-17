@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const campaignController = require('../controllers/campaignController');
+const {verifyToken} = require('../middleware/authmiddleware');
+
+// router.use(verifyToken);
 
 // Create a new campaign
 router.post('/', campaignController.createCampaign);
@@ -9,7 +12,7 @@ router.post('/', campaignController.createCampaign);
 router.post('/upload', campaignController.uploadCampaignImage);
 
 // Get all active campaigns
-router.get('/active', campaignController.getActiveCampaigns);
+router.get('/active', verifyToken, campaignController.getActiveCampaigns);
 
 // Update a campaign by campaignId
 router.put('/:campaignId', campaignController.updateCampaign);

@@ -11,6 +11,10 @@ const reelSchema = mongoose.Schema({
     },
     s3Url:{
         type:String
+    },
+    title: {
+        type: String,
+        default: ''
     }
 },
 {

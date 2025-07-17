@@ -183,8 +183,11 @@ const userProfileSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
-
-  // Timestamps
+  googleId: {
+    type: String,
+    trim: true,
+    default: ""
+  },
   createdAt: {
     type: Date,
     default: Date.now

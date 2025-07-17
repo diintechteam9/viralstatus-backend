@@ -14,6 +14,26 @@ const userResponseSchema= new mongoose.Schema({
         campaignId: {
             type: String,
             required: true
+        },
+        isTaskCompleted: {
+            type: Boolean,
+            default: false
+        },
+        views: {
+            type: Number,
+            default: 0
+        },
+        isCreditAccepted: {
+            type: Boolean,
+            default: false
+        },
+        creditAmount: {
+            type: Number,
+            default: 0
+        },
+        status: {
+            type: String,
+            default: 'pending'
         }
     }
     ]

@@ -7,15 +7,38 @@ const User = require('../models/user');
 const SharedReels = require('../models/SharedReels');
 const UserResponse = require('../models/userResponse');
 const userResponse = require('../models/userResponse');
+const Campaign = require('../models/campaign'); // Add this import at the top if not present
 
-exports.uploadReels = (req, res) => {
-//   const clientId = req.user.id
+exports.uploadReels = async (req, res) => {
+  //   const clientId = req.user.id
   const bb = busboy({ headers: req.headers });
   const { poolId } = req.params; // Get poolId from URL params
   const reels = [];
   let fileUploadPromises = [];
 
+  // Fetch campaign name using poolId
+  let campaignName = 'campaign';
+  try {
+    const pool = await Pool.findById(poolId);
+    if (pool && pool.name) {
+      campaignName = pool.name.replace(/\s+/g, '_'); // Replace spaces with underscores
+    }
+  } catch (err) {
+    console.error('Error fetching pool for campaign name:', err);
+  }
+
+  // Count existing reels for this pool to determine the next reel number
+  let reelCount = 0;
+  try {
+    reelCount = await Reel.countDocuments({ poolId });
+  } catch (err) {
+    console.error('Error counting reels for pool:', err);
+  }
+
+  let reelNumber = reelCount + 1;
+
   bb.on('file', (fieldname, file, filename, encoding, mimetype) => {
+    const currentReelNumber = reelNumber++; // Assign and increment immediately for each file
     // Buffer the file chunks in memory
     const chunks = [];
     file.on('data', (chunk) => {
@@ -25,9 +48,12 @@ exports.uploadReels = (req, res) => {
       const fileBuffer = Buffer.concat(chunks);
       // Ensure filename is a string
       if (typeof filename !== 'string' || !filename) {
-        filename = `video-${Date.now()}.mp4`;
+        filename = `${campaignName}_reel${currentReelNumber}.mp4`;
+      } else {
+        // Replace original filename with campaignName_reel{n}.mp4
+        filename = `${campaignName}_reel${currentReelNumber}.mp4`;
       }
-      const s3Key = `${poolId}/reels/${Date.now()}-${filename}`;
+      const s3Key = `${poolId}/reels/${filename}`;
       const uploadParams = {
         Bucket: process.env.S3_BUCKET_NAME,
         Key: s3Key,
@@ -45,6 +71,7 @@ exports.uploadReels = (req, res) => {
             poolId,
             s3Key,
             s3Url,
+            title: `${campaignName} Reel ${currentReelNumber}`
           });
           reels.push(reelDoc);
         })
@@ -272,6 +299,11 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
   }
 
   try {
+    // Fetch campaign to get image key
+    const Campaign = require('../models/campaign');
+    const campaign = await Campaign.findById(campaignId);
+    const campaignImageKey = campaign && campaign.image && campaign.image.key ? campaign.image.key : null;
+
     // Fetch users by googleId
     const users = await User.find({ googleId: { $in: userIds } });
     if (users.length !== userIds.length) {
@@ -320,8 +352,9 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
           reelId: reel._id,
           s3Key: reel.s3Key,
           s3Url: reel.s3Url,
-          isTaskCompleted: false,
-          campaignId: campaignId // Add campaignId to each assigned reel
+          campaignId: campaignId,
+          title: reel.title || '',
+          campaignImageKey: campaignImageKey
         });
         assignedCount++;
       }
@@ -336,7 +369,8 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
       assignments.push({
         userId,
         assignedReels: userReels.map(r => r.reelId),
-        duplicateReels
+        duplicateReels,
+        reels: userReels // include full reel info in response
       });
       duplicateReelsByUser[userId] = duplicateReels;
     }
@@ -378,9 +412,20 @@ exports.getSharedReelsForUser = async (req, res) => {
   try {
     const shared = await SharedReels.findOne({ googleId: userId });
     if (!shared || !Array.isArray(shared.reels)) {
-      return res.json([]);
+      return res.json({ success: true, reels: [] });
     }
-    res.status(200).json({ success: true, reels: shared.reels });
+    // Generate fresh S3 URLs for each reel and for campaign image
+    const reelsWithFreshUrls = await Promise.all(shared.reels.map(async r => ({
+      reelId: r.reelId,
+      s3Key: r.s3Key,
+      s3Url: r.s3Key ? await getobject(r.s3Key) : '',
+      campaignId: r.campaignId,
+      title: r.title || '',
+      campaignImageKey: r.campaignImageKey || '',
+      campaignImageUrl: r.campaignImageKey ? await getobject(r.campaignImageKey) : '',
+      _id: r._id
+    })));
+    res.status(200).json({ success: true, reels: reelsWithFreshUrls });
   } catch (err) { 
     res.status(500).json({ error: err.message });
   }
@@ -394,11 +439,27 @@ exports.addUserResponseUrl = async (req, res) => {
     return res.status(400).json({ error: 'userId (param) and url, campaignId (body) are required.' });
   }
   try {
+    // Find the campaign and get its credits value
+    const campaign = await Campaign.findById(campaignId);
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    const creditAmount = campaign.credits || 0;
+
     let userResponse = await UserResponse.findOne({ googleId: userId });
+    const responseEntry = {
+      urls: url,
+      campaignId,
+      isTaskCompleted: true,
+      views: 0,
+      isCreditAccepted: false,
+      creditAmount: creditAmount,
+      status: 'pending'
+    };
     if (!userResponse) {
-      userResponse = new UserResponse({ googleId: userId, response: [{ urls: url, campaignId }] });
+      userResponse = new UserResponse({ googleId: userId, response: [responseEntry] });
     } else {
-      userResponse.response.push({ urls: url, campaignId });
+      userResponse.response.push(responseEntry);
     }
     await userResponse.save();
     res.json({ success: true, userResponse });
