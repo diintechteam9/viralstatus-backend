@@ -8,6 +8,7 @@ const SharedReels = require('../models/SharedReels');
 const UserResponse = require('../models/userResponse');
 const userResponse = require('../models/userResponse');
 const Campaign = require('../models/campaign'); // Add this import at the top if not present
+const getYoutubeStats = require('../utils/getYoutubeStats'); // You need to implement this backend utility or mock it for now
 
 exports.uploadReels = async (req, res) => {
   //   const clientId = req.user.id
@@ -445,6 +446,7 @@ exports.addUserResponseUrl = async (req, res) => {
       return res.status(404).json({ error: 'Campaign not found' });
     }
     const creditAmount = campaign.credits || 0;
+    const cutoff = campaign.cutoff || 0;
 
     let userResponse = await UserResponse.findOne({ googleId: userId });
     const responseEntry = {
@@ -452,6 +454,7 @@ exports.addUserResponseUrl = async (req, res) => {
       campaignId,
       isTaskCompleted: true,
       views: 0,
+      cutoff: cutoff,
       isCreditAccepted: false,
       creditAmount: creditAmount,
       status: 'pending'
@@ -477,6 +480,87 @@ exports.getAddUserResponseUrl = async (req, res) =>{
       return res.json({ success: true, response: [] });
     }
     res.json({ success: true, response: responsed.response });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.approveCreditsForUser = async (req, res) => {
+  const { campaignId } = req.params;
+  try {
+    // Find all userResponses with at least one response for this campaign
+    const userResponses = await UserResponse.find({ 'response.campaignId': campaignId });
+    let updatedUsers = [];
+    let allApprovedEntries = [];
+    for (const userResponse of userResponses) {
+      let updated = false;
+      let approvedEntries = [];
+      for (let entry of userResponse.response) {
+        if (String(entry.campaignId) !== String(campaignId)) continue;
+        const videoId = extractYoutubeId(entry.urls);
+        if (!videoId) {
+          console.log('No videoId extracted for URL:', entry.urls);
+          continue;
+        }
+        const stats = await getYoutubeStats(videoId);
+        const latestViews = parseInt(stats.views || '0', 10);
+        console.log('User:', userResponse.googleId, 'Entry URL:', entry.urls);
+        console.log('  Previous stored views:', entry.views);
+        console.log('  Latest views:', latestViews);
+        console.log('  Cutoff:', entry.cutoff);
+        console.log('  isCreditAccepted:', entry.isCreditAccepted);
+        // Always update views
+        entry.views = latestViews;
+        updated = true;
+        if (latestViews >= entry.cutoff && !entry.isCreditAccepted) {
+          console.log('  Approving credit: views', latestViews, '>= cutoff', entry.cutoff);
+          entry.isCreditAccepted = true;
+          entry.status = 'approved';
+          approvedEntries.push({ url: entry.urls, views: latestViews });
+        }
+      }
+      if (updated) {
+        console.log('Saving updated userResponse for userId:', userResponse.googleId);
+        await userResponse.save();
+        updatedUsers.push(userResponse.googleId);
+        allApprovedEntries.push(...approvedEntries);
+      }
+    }
+    res.json({ success: true, updatedUsers, approvedEntries: allApprovedEntries });
+  } catch (err) {
+    console.error('Error in approveCreditsForUser:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Helper function to extract YouTube video ID from a URL
+function extractYoutubeId(url) {
+  // Simple regex for YouTube video ID extraction
+  if (!url) return null;
+  // Try youtu.be short links
+  let match = url.match(/youtu\.be\/([\w-]{11})/);
+  if (match) return match[1];
+  // Try youtube.com/watch?v=ID
+  match = url.match(/[?&]v=([\w-]{11})/);
+  if (match) return match[1];
+  // Try shorts
+  match = url.match(/youtube\.com\/shorts\/([\w-]{11})/);
+  if (match) return match[1];
+  // Try embed
+  match = url.match(/youtube\.com\/embed\/([\w-]{11})/);
+  if (match) return match[1];
+  return null;
+}
+
+exports.getYoutubeVideoStats = async (req, res) => {
+  // Accept videoId from query or body
+  const videoId = req.query.videoId || req.body.videoId;
+  if (!videoId) {
+    return res.status(400).json({ error: 'videoId is required' });
+  }
+  try {
+    const stats = await getYoutubeStats(videoId);
+    res.json({ success: true, stats });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

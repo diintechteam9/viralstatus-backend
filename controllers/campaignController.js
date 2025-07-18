@@ -59,7 +59,8 @@ exports.createCampaign = [
         limit,
         views,
         status,
-        members
+        members,
+        cutoff
       } = req.body;
       if (!campaignName || !brandName || !goal || !clientId || !req.file || !description || !startDate || !endDate || !limit || !views || !credits || !location) {
         return res.status(400).json({ success: false, message: 'Missing required fields (campaignName, brandName, goal, clientId, image, description, startDate, endDate, limit, views, credits, location)' });
@@ -104,6 +105,7 @@ exports.createCampaign = [
         views,
         status: status || "Active",
         isActive: true,
+        cutoff: cutoff !== undefined ? Number(cutoff) : undefined,
         // members should be an array of googleId strings
         userIds: members ? (Array.isArray(members) ? members : members.split(',')) : [],
       });
@@ -196,6 +198,9 @@ exports.updateCampaign = async (req, res) => {
     const { campaignId } = req.params;
     console.log('campaignId param:', campaignId); // Should print the ObjectId string
     const updateData = req.body;
+    if (updateData.cutoff !== undefined) {
+      updateData.cutoff = Number(updateData.cutoff);
+    }
     console.log('Update data received:', updateData);
     const updatedCampaign = await Campaign.findOneAndUpdate(
       { _id: campaignId },

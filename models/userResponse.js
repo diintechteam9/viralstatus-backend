@@ -23,6 +23,9 @@ const userResponseSchema= new mongoose.Schema({
             type: Number,
             default: 0
         },
+        cutoff:{
+            type: Number,
+        },
         isCreditAccepted: {
             type: Boolean,
             default: false

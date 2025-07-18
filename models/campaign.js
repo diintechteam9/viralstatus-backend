@@ -79,6 +79,10 @@ const campaignSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  cutoff:{
+    type: Number,
+    required: true
   }
 }, { timestamps: true });
 

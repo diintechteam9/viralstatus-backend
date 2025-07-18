@@ -136,7 +136,7 @@ app.use('/api/auth/user/campaign', campaignRoutes);
 app.use('/api/pools', poolRoutes);
 
 //credit Routes
-// app.use('/api/user/creditWallet', creditWalletRoutes);
+app.use('/api/user/creditWallet', creditWalletRoutes);
 
 // TA1000Series Routes
 app.use('/api/ta1000series', ta1000seriesRoutes);

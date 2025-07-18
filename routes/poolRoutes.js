@@ -19,6 +19,12 @@ router.delete('/reels', reelController.deleteMultipleReels);
 // Delete all reels from a pool
 router.delete('/:poolId/reels', reelController.deleteAllReelsFromPool);
 
+//approved credits
+router.post('/reels/approved/:campaignId', reelController.approveCreditsForUser);
+
+// Route to get YouTube video stats
+router.get('/stats', reelController.getYoutubeVideoStats);
+
 // Create a new pool
 router.post('/', poolController.createPool);
 
@@ -55,6 +61,6 @@ router.get('/shared/:userId', reelController.getSharedReelsForUser);
 router.post('/user/response/:userId', reelController.addUserResponseUrl);
 
 //get user response url
-router.get('/user/:userId/response/get', reelController.getAddUserResponseUrl);
+router.get('/user/response/get/:userId', reelController.getAddUserResponseUrl);
 
 module.exports = router; 
