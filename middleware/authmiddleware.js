@@ -73,23 +73,31 @@ const verifyToken = async (req, res, next) => {
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     console.log(decoded)
-    // Find user by id
-    const user = await User.findById(decoded.id).select('-password');
-    if (!user) {
-      return res.status(401).json({ success: false, message: 'Invalid token' });
+    // Try to find user by id
+    let user = await User.findById(decoded.id).select('-password');
+    if (user) {
+      req.user = {
+        id: user._id,
+        email: user.email,
+        googleId: user.googleId,
+        adminAccess: user.adminAccess
+      };
+      console.log('req.user set in middleware:', req.user.googleId);
+      return next();
     }
-    
-    // Add user to request object
-    req.user = {
-      id: user._id,
-      email: user.email,
-      googleId: decoded.googleId, // Ensure googleId is set from JWT
-      userType: decoded.userType,
-      adminAccess: decoded.adminAccess
-    };
-    console.log('Decoded JWT:', decoded);
-    console.log('req.user set in middleware:', req.user.googleId);
-    next();
+    // If not a user, try to find client by id
+    let client = await Client.findById(decoded.id);
+    if (client) {
+      req.client = {
+        id: client._id,
+        googleId: client.googleId,
+        email: client.email
+      };
+      console.log('req.client set in middleware:', req.client.id);
+      return next();
+    }
+    // If neither user nor client found
+    return res.status(401).json({ success: false, message: 'Invalid token: user/client not found' });
   } catch (error) {
     console.error('Token verification error:', error);
     return res.status(401).json({ success: false, message: 'Invalid token' });

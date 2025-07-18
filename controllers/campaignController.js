@@ -122,7 +122,17 @@ exports.getActiveCampaigns = async (req, res) => {
     await deactivateExpiredCampaigns(); // Ensure expired campaigns are deactivated
     const { clientId } = req.query;
     const filter = { isActive: true };
-    if (clientId) filter.clientId = clientId;
+    const Client = require('../models/client');
+    if (clientId) {
+      // If clientId is a MongoDB _id, fetch the client document and use its clientId field
+      const clientDoc = await Client.findById(clientId);
+      if (clientDoc) {
+        filter.clientId = clientDoc.clientId || clientDoc._id;
+      } else {
+        // If not found, fallback to using the provided clientId directly
+        filter.clientId = clientId;
+      }
+    }
 
     // Fetch user by id from JWT, then get googleId
     let registeredCampaignIds = [];
