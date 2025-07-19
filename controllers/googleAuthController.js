@@ -56,11 +56,13 @@ const verifyUserOrClient = async (req, res) => {
     }
 
     const authToken = generateToken(entity._id);
+    const MongoId = entity._id;
 
     return res.status(200).json({
       success: true,
       message: "Verified successfully",
       authToken,
+      MongoId,
       email: entity.email,
       name: entity.name,
       emailVerified: entity.emailVerified,
