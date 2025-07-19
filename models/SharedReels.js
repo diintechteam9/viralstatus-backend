@@ -29,6 +29,10 @@ const sharedReelsSchema = new mongoose.Schema({
       campaignImageKey: {
         type: String,
         default: ''
+      },
+      isTaskAccepted: {
+        type: Boolean,
+        default: false
       }
     }
   ]

@@ -355,7 +355,8 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
           s3Url: reel.s3Url,
           campaignId: campaignId,
           title: reel.title || '',
-          campaignImageKey: campaignImageKey
+          campaignImageKey: campaignImageKey,
+          isTaskAccepted: false
         });
         assignedCount++;
       }
@@ -424,6 +425,7 @@ exports.getSharedReelsForUser = async (req, res) => {
       title: r.title || '',
       campaignImageKey: r.campaignImageKey || '',
       campaignImageUrl: r.campaignImageKey ? await getobject(r.campaignImageKey) : '',
+      isTaskAccepted: r.isTaskAccepted || false,
       _id: r._id
     })));
     res.status(200).json({ success: true, reels: reelsWithFreshUrls });

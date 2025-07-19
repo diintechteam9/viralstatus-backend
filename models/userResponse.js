@@ -37,7 +37,7 @@ const userResponseSchema= new mongoose.Schema({
         status: {
             type: String,
             default: 'pending'
-        }
+        },
     }
     ]
 });
