@@ -32,6 +32,13 @@ router.get('/activeparticipants/:campaignId', campaignController.getActivePartic
 // Set active participants (googleIds) for a campaign
 router.post('/activeparticipants/:campaignId', campaignController.setActiveParticipant);
 
+// Get all campaigns for a client by clientId
+router.get('/client/:clientId', campaignController.getCampaignsByClientId);
+
+// Get campaign data (totals) by campaignId
+router.get('/data/:campaignId', campaignController.getCamapignData);
+
+
 // Get campaign details by campaignId
 router.get('/:campaignId', async (req, res) => {
   try {
@@ -46,6 +53,5 @@ router.get('/:campaignId', async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }  
 });  
-
 
 module.exports = router; 

@@ -57,6 +57,9 @@ router.post('/shared', reelController.assignReelsToUsersWithCount);
 // Fetch all shared reels for a user (by googleId)
 router.get('/shared/:userId', reelController.getSharedReelsForUser);
 
+// Route to update task completed status
+router.post('/shared/complete/:userId/:reelId', reelController.updateTaskCompleted);
+
 // Add user response URL
 router.post('/user/response/:userId', reelController.addUserResponseUrl);
 

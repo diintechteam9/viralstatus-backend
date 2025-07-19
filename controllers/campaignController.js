@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { putobject, getobject } = require('../utils/s3');
 const multer = require('multer');
 const RegisteredCampaign = require('../models/RegisteredCampaign');
+const userResponse = require('../models/userResponse')
 const sharp = require('sharp');
 
 // Helper to extract group index from groupId (e.g., travel-&-tourism-2 => 2)
@@ -334,6 +335,67 @@ exports.getActiveParticipants = async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
+// Get all campaigns for a client by clientId
+exports.getCampaignsByClientId = async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    if (!clientId) {
+      return res.status(400).json({ success: false, message: 'Missing clientId' });
+    }
+    const campaigns = await Campaign.find({ clientId });
+    res.json({ success: true, campaigns });
+  } catch (err) {
+    console.error('Error fetching campaigns by clientId:', err);
+    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+  }
+};
+
+// get campaigns data 
+exports.getCamapignData = async(req, res)=> {
+  try{
+    const { campaignId } = req.params;
+    
+    // Find all user responses for this campaign
+    const userResponses = await userResponse.find({ 'response.campaignId': campaignId });
+    
+    let totalResponses = 0;
+    let totalViews = 0;
+    let totalLikes = 0;
+    let totalComments = 0;
+    
+    // Sum up all metrics from all responses for this campaign
+    userResponses.forEach(userResp => {
+      userResp.response.forEach(resp => {
+        if (String(resp.campaignId) === String(campaignId)) {
+          totalResponses++;
+          totalViews += resp.views || 0;
+          totalLikes += resp.likes || 0;
+          totalComments += resp.comments || 0;
+        }
+      });
+    });
+    
+    res.json({
+      success: true,
+      campaignId,
+      data: {
+        totalResponses,
+        totalViews,
+        totalLikes,
+        totalComments
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error getting campaign data:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get campaign data',
+      message: error.message
+    });
   }
 };
 
