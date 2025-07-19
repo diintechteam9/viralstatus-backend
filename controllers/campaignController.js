@@ -4,8 +4,9 @@ const crypto = require('crypto');
 const { putobject, getobject } = require('../utils/s3');
 const multer = require('multer');
 const RegisteredCampaign = require('../models/RegisteredCampaign');
-const userResponse = require('../models/userResponse')
+const userResponse = require('../models/userResponse');
 const sharp = require('sharp');
+const campaign = require('../models/campaign');
 
 // Helper to extract group index from groupId (e.g., travel-&-tourism-2 => 2)
 // function getGroupIndex(groupId) {
@@ -399,3 +400,83 @@ exports.getCamapignData = async(req, res)=> {
   }
 };
 
+// Get all responded URLs (videos) and time for a campaign
+exports.getCampaignResponseUrls = async (req, res) => {
+  try {
+    const { campaignId } = req.params;
+    if (!campaignId) {
+      return res.status(400).json({ success: false, message: 'Missing campaignId' });
+    }
+
+    // Find all userResponses that have at least one response for this campaign
+    const userResponses = await userResponse.find({ 'response.campaignId': campaignId });
+
+    // Collect all urls and createdAt for this campaign
+    const urls = [];
+    userResponses.forEach(userResp => {
+      userResp.response.forEach(resp => {
+        if (String(resp.campaignId) === String(campaignId) && resp.urls) {
+          urls.push({
+            url: resp.urls,
+            Time: resp.createdAt || userResp.createdAt
+          });
+        }
+      });
+    });
+
+    res.json({ success: true, campaignId, urls });
+  } catch (err) {
+    console.error('Error fetching campaign response URLs:', err);
+    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+  }
+};
+
+exports.getAllClientsCampaignData = async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    if (!clientId) {
+      return res.status(400).json({ success: false, message: 'Missing clientId' });
+    }
+    // Find all campaigns for this client
+    const campaigns = await campaign.find({ clientId });
+    if (!campaigns.length) {
+      return res.status(404).json({ success: false, message: 'No campaigns found for this client' });
+    }
+    // Get all campaignIds
+    const campaignIds = campaigns.map(c => String(c._id));
+
+    // Find all userResponses that have responses for any of these campaigns
+    const userResponses = await userResponse.find({ 'response.campaignId': { $in: campaignIds } });
+
+    let totalVideos = 0;
+    let totalViews = 0;
+    let totalLikes = 0;
+    let totalComments = 0;
+
+    // Aggregate stats from all responses for these campaigns
+    userResponses.forEach(userResp => {
+      userResp.response.forEach(resp => {
+        if (campaignIds.includes(String(resp.campaignId))) {
+          totalVideos++;
+          totalViews += resp.views || 0;
+          totalLikes += resp.likes || 0;
+          totalComments += resp.comments || 0;
+        }
+      });
+    });
+
+    res.json({
+      success: true,
+      clientId,
+      stats: {
+        totalVideos,
+        totalViews,
+        totalLikes,
+        totalComments
+      }
+    });
+  } catch (err) {
+    console.error('Error in getAllClientsCampaignData:', err);
+    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+  }
+};

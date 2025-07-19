@@ -38,6 +38,11 @@ router.get('/client/:clientId', campaignController.getCampaignsByClientId);
 // Get campaign data (totals) by campaignId
 router.get('/data/:campaignId', campaignController.getCamapignData);
 
+// Get all responded URLs and createdAt for a campaign
+router.get('/videos/:campaignId', campaignController.getCampaignResponseUrls);
+
+//Get all the client campaign's Data
+router.get('/client/data/:clientId', campaignController.getAllClientsCampaignData)
 
 // Get campaign details by campaignId
 router.get('/:campaignId', async (req, res) => {
