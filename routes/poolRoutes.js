@@ -25,6 +25,23 @@ router.post('/reels/approved/:campaignId', reelController.approveCreditsForUser)
 // Route to get YouTube video stats
 router.get('/stats', reelController.getYoutubeVideoStats);
 
+//share reel algo
+router.post('/shared', reelController.assignReelsToUsersWithCount);
+
+// Fetch all shared reels for a user (by googleId)
+router.get('/shared/:userId', reelController.getSharedReelsForUser);
+
+// Route to update task completed status
+router.post('/shared/complete/:userId/:reelId', reelController.updateTaskCompleted);
+
+// Add user response URL
+router.post('/user/response/:userId', reelController.addUserResponseUrl);
+
+//Get user response url
+router.get('/user/response/get/:userId', reelController.getAddUserResponseUrl);
+
+// ------------pool controls--------------
+
 // Create a new pool
 router.post('/', poolController.createPool);
 
@@ -51,19 +68,5 @@ router.put('/:id', poolController.updatePool);
 // Delete pool by id
 router.delete('/:id', poolController.deletePool);
 
-//share reel algo
-router.post('/shared', reelController.assignReelsToUsersWithCount);
-
-// Fetch all shared reels for a user (by googleId)
-router.get('/shared/:userId', reelController.getSharedReelsForUser);
-
-// Route to update task completed status
-router.post('/shared/complete/:userId/:reelId', reelController.updateTaskCompleted);
-
-// Add user response URL
-router.post('/user/response/:userId', reelController.addUserResponseUrl);
-
-//get user response url
-router.get('/user/response/get/:userId', reelController.getAddUserResponseUrl);
 
 module.exports = router; 

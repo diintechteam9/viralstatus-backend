@@ -480,3 +480,40 @@ exports.getAllClientsCampaignData = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error', error: err.message });
   }
 };
+
+exports.getUserDashboardStats = async (req, res) => {
+  const { userId } = req.params; // userId is googleId
+  try {
+    // Find the user response document by googleId
+    const responsed = await userResponse.findOne({ googleId: userId });
+    if (!responsed || !Array.isArray(responsed.response)) {
+      return res.json({
+        success: true,
+        totalVideos: 0,
+        totalViews: 0,
+        totalLikes: 0,
+        totalComments: 0
+      });
+    }
+    // Aggregate stats
+    let totalVideos = responsed.response.length;
+    let totalViews = 0;
+    let totalLikes = 0;
+    let totalComments = 0;
+    for (const entry of responsed.response) {
+      totalViews += entry.views || 0;
+      totalLikes += entry.likes || 0;
+      totalComments += entry.comments || 0;
+    }
+    res.json({
+      success: true,
+      totalVideos,
+      totalViews,
+      totalLikes,
+      totalComments
+    });
+  } catch (err) {
+    console.error('Error fetching user dashboard stats:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch user dashboard stats', details: err.message });
+  }
+};

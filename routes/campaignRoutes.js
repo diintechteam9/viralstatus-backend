@@ -3,7 +3,6 @@ const router = express.Router();
 const campaignController = require('../controllers/campaignController');
 const {verifyToken} = require('../middleware/authmiddleware');
 
-// router.use(verifyToken);
 
 // Create a new campaign
 router.post('/', campaignController.createCampaign);
@@ -42,7 +41,10 @@ router.get('/data/:campaignId', campaignController.getCamapignData);
 router.get('/videos/:campaignId', campaignController.getCampaignResponseUrls);
 
 //Get all the client campaign's Data
-router.get('/client/data/:clientId', campaignController.getAllClientsCampaignData)
+router.get('/client/data/:clientId', campaignController.getAllClientsCampaignData);
+
+//Get user Dashboard Data
+router.get('/response/data/:userId', campaignController.getUserDashboardStats);
 
 // Get campaign details by campaignId
 router.get('/:campaignId', async (req, res) => {
