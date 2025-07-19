@@ -416,8 +416,10 @@ exports.getSharedReelsForUser = async (req, res) => {
     if (!shared || !Array.isArray(shared.reels)) {
       return res.json({ success: true, reels: [] });
     }
+    // Filter out reels where isTaskCompleted is true
+    const incompleteReels = shared.reels.filter(r => !r.isTaskAccepted);
     // Generate fresh S3 URLs for each reel and for campaign image
-    const reelsWithFreshUrls = await Promise.all(shared.reels.map(async r => ({
+    const reelsWithFreshUrls = await Promise.all(incompleteReels.map(async r => ({
       reelId: r.reelId,
       s3Key: r.s3Key,
       s3Url: r.s3Key ? await getobject(r.s3Key) : '',
