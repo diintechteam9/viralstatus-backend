@@ -120,16 +120,19 @@ exports.createCampaign = [
   }
 ];
 
-// Get all active campaigns (isActive: true)
+// Get all active campaigns (isActive: true) user/client specific
 exports.getActiveCampaigns = async (req, res) => {
+  console.log('getActiveCampaigns called');
   try {
     await deactivateExpiredCampaigns(); // Ensure expired campaigns are deactivated
     const { clientId } = req.query;
+    console.log('clientId from query:', clientId);
     const filter = { isActive: true };
     const Client = require('../models/client');
     if (clientId) {
       // If clientId is a MongoDB _id, fetch the client document and use its clientId field
       const clientDoc = await Client.findById(clientId);
+      console.log('clientDoc found for clientId:', clientDoc);
       if (clientDoc) {
         filter.clientId = clientDoc.clientId || clientDoc._id;
       } else {
@@ -138,34 +141,60 @@ exports.getActiveCampaigns = async (req, res) => {
       }
     }
 
-    // Fetch user by id from JWT, then get googleId
+    // Fetch user or client by id from JWT, then get googleId
     let registeredCampaignIds = [];
-    if (req.user && req.user.id) {
-      const userDoc = await require('../models/user').findById(req.user.id);
-      const googleId = userDoc ? userDoc.googleId : undefined;
-      console.log(googleId);
+    let googleId;
+    const id = req.user?.id || req.client?.id;
+
+    if (id) {
+      console.log('Found ID in request:', id);
+      // Try user model first
+      const User = require('../models/user');
+      const userDoc = await User.findById(id);
+      console.log('userDoc:', userDoc);
+      if (userDoc && userDoc.googleId) {
+        googleId = userDoc.googleId;
+        console.log('Found googleId in userDoc:', googleId);
+      } else {
+        // Try client model if not found in user
+        const Client = require('../models/client');
+        const clientDoc = await Client.findById(id);
+        console.log('clientDoc for id:', clientDoc);
+        if (clientDoc && clientDoc.googleId) {
+          googleId = clientDoc.googleId;
+          console.log('Found googleId in clientDoc:', googleId);
+        }
+      }
       if (googleId) {
+        const RegisteredCampaign = require('../models/RegisteredCampaign');
         const reg = await RegisteredCampaign.findOne({ userId: googleId });
+        console.log('RegisteredCampaign for googleId:', reg);
         if (reg && reg.registeredCampaigns) {
           registeredCampaignIds = reg.registeredCampaigns.map(c => c._id?.toString?.() || c._id);
+          console.log('registeredCampaignIds:', registeredCampaignIds);
         }
       }
     }
     if (registeredCampaignIds.length > 0) {
       filter._id = { $nin: registeredCampaignIds };
+      console.log('Filter after excluding registeredCampaignIds:', filter);
     }
 
+    const Campaign = require('../models/campaign');
     const campaigns = await Campaign.find(filter).lean();
+    console.log('Campaigns found:', campaigns.length);
 
     // Generate fresh presigned GET URLs for each campaign image
     for (const campaign of campaigns) {
       if (campaign.image && campaign.image.key) {
         campaign.image.url = await getobject(campaign.image.key);
+        console.log('Generated presigned URL for campaign:', campaign._id);
       }
     }
     res.json({ success: true, campaigns });
+    console.log('Response sent with campaigns');
   } catch (err) {
-    console.error(err);
+    console.error('Error in getActiveCampaigns:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
