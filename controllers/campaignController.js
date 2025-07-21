@@ -273,7 +273,7 @@ exports.registeredCampaign = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing userId' });
     }
     // Find the campaign object
-    const campaign = await Campaign.findById(campaignId);
+    const campaign = await Campaign.findById(campaignId).lean();
     if (!campaign) {
       return res.status(404).json({ success: false, message: 'Campaign not found' });
     }
@@ -288,18 +288,7 @@ exports.registeredCampaign = async (req, res) => {
       }
     }
     await reg.save();
-    
-    // Convert to a plain object to modify before sending
-    const regObject = reg.toObject();
-
-    // Generate fresh presigned GET URLs for each campaign image in the response
-    for (const camp of regObject.registeredCampaigns) {
-      if (camp.image && camp.image.key) {
-        camp.image.url = await getobject(camp.image.key);
-      }
-    }
-
-    res.json({ success: true, registeredCampaign: regObject });
+    res.json({ success: true, registeredCampaign: reg });
   } catch (err) {
     console.error('Register campaign error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -309,30 +298,27 @@ exports.registeredCampaign = async (req, res) => {
 // Get a user's registered campaigns by userId or googleId
 exports.getUserRegisteredCampaigns = async (req, res) => {
   try {
+    
     const { userId, googleId } = req.query;
     if (!userId && !googleId) {
       return res.status(400).json({ success: false, message: 'Missing userId or googleId' });
     }
     let reg;
     if (userId) {
-      reg = await RegisteredCampaign.findOne({ userId });
+      reg = await RegisteredCampaign.findOne({ userId }).lean();
     } else if (googleId) {
-      reg = await RegisteredCampaign.findOne({ googleId });
+      reg = await RegisteredCampaign.findOne({ googleId }).lean();
     }
     if (!reg) {
       return res.status(404).json({ success: false, message: 'No registered campaigns found for user' });
     }
-
-    // Create a mutable copy for modification
-    const registeredCampaigns = reg.registeredCampaigns.map(c => c.toObject());
-
-    // Generate fresh presigned GET URLs for each campaign image
-    for (const campaign of registeredCampaigns) {
+     for (const campaign of reg.registeredCampaigns) {
       if (campaign.image && campaign.image.key) {
         campaign.image.url = await getobject(campaign.image.key);
       }
     }
-    res.json({ success: true, registeredCampaigns });
+    res.json({ success: true, registeredCampaigns: reg.registeredCampaigns });
+    console.log(res)
   } catch (err) {
     console.error('Get user registered campaigns error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
