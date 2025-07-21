@@ -18,6 +18,10 @@ const datastoreSchema = new mongoose.Schema({
         trim: true,
         default: ''
     },
+    filekey:{
+        type: String,
+        trim: true,
+    },
     fileUrl: {
         type: String,
         required: true,

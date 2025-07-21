@@ -26,6 +26,7 @@ const createCategory = async (req, res) => {
             category
         });
     } catch (err) {
+        console.log(err)
         console.error("CREATE CATEGORY ERROR:", err);
         res.status(500).json({
             error: "Failed to create category",
@@ -88,6 +89,7 @@ const getAllCategories = async (req, res) => {
             categories
         });
     } catch (err) {
+        console.log(err)
         console.error("GET CATEGORIES ERROR:", err);
         res.status(500).json({
             error: "Failed to fetch categories",

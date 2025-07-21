@@ -70,9 +70,18 @@ exports.syncCreditWallet = async (req, res) => {
 exports.getCreditWallet = async (req, res) => {
   const { userId } = req.params;
   try {
-    const wallet = await CreditWallet.findOne({ userId });
+    let wallet = await CreditWallet.findOne({ userId });
     if (!wallet) {
-      return res.status(404).json({ error: 'Credit wallet not found' });
+      // If wallet not found, create a new one with default values
+      wallet = new CreditWallet({
+        userId,
+        totalBalance: 0,
+        acceptedCredits: 0,
+        pendingCredits: 0,
+        rejectedCredits: 0,
+        totalCampaigns: 0
+      });
+      await wallet.save();
     }
     res.json({ success: true, wallet });
   } catch (err) {
