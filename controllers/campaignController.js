@@ -273,7 +273,7 @@ exports.registeredCampaign = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing userId' });
     }
     // Find the campaign object
-    const campaign = await Campaign.findById(campaignId).lean();
+    const campaign = await Campaign.findById(campaignId);
     if (!campaign) {
       return res.status(404).json({ success: false, message: 'Campaign not found' });
     }
@@ -288,7 +288,18 @@ exports.registeredCampaign = async (req, res) => {
       }
     }
     await reg.save();
-    res.json({ success: true, registeredCampaign: reg });
+    
+    // Convert to a plain object to modify before sending
+    const regObject = reg.toObject();
+
+    // Generate fresh presigned GET URLs for each campaign image in the response
+    for (const camp of regObject.registeredCampaigns) {
+      if (camp.image && camp.image.key) {
+        camp.image.url = await getobject(camp.image.key);
+      }
+    }
+
+    res.json({ success: true, registeredCampaign: regObject });
   } catch (err) {
     console.error('Register campaign error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -298,7 +309,6 @@ exports.registeredCampaign = async (req, res) => {
 // Get a user's registered campaigns by userId or googleId
 exports.getUserRegisteredCampaigns = async (req, res) => {
   try {
-    
     const { userId, googleId } = req.query;
     if (!userId && !googleId) {
       return res.status(400).json({ success: false, message: 'Missing userId or googleId' });
@@ -312,8 +322,17 @@ exports.getUserRegisteredCampaigns = async (req, res) => {
     if (!reg) {
       return res.status(404).json({ success: false, message: 'No registered campaigns found for user' });
     }
-    res.json({ success: true, registeredCampaigns: reg.registeredCampaigns });
-    console.log(res)
+
+    // Create a mutable copy for modification
+    const registeredCampaigns = reg.registeredCampaigns.map(c => c.toObject());
+
+    // Generate fresh presigned GET URLs for each campaign image
+    for (const campaign of registeredCampaigns) {
+      if (campaign.image && campaign.image.key) {
+        campaign.image.url = await getobject(campaign.image.key);
+      }
+    }
+    res.json({ success: true, registeredCampaigns });
   } catch (err) {
     console.error('Get user registered campaigns error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -375,7 +394,15 @@ exports.getCampaignsByClientId = async (req, res) => {
     if (!clientId) {
       return res.status(400).json({ success: false, message: 'Missing clientId' });
     }
-    const campaigns = await Campaign.find({ clientId });
+    const campaigns = await Campaign.find({ clientId }).lean();
+
+    // Generate fresh presigned GET URLs for each campaign image
+    for (const campaign of campaigns) {
+      if (campaign.image && campaign.image.key) {
+        campaign.image.url = await getobject(campaign.image.key);
+      }
+    }
+
     res.json({ success: true, campaigns });
   } catch (err) {
     console.error('Error fetching campaigns by clientId:', err);
