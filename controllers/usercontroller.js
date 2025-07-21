@@ -33,6 +33,7 @@ const loginUser = async (req, res) => {
           aadharNo: "GOOGLE" + Date.now(),
           city: "",
           pincode: "",
+          isClient: false,
           googleId: token ? JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString()).sub : undefined,
         });
         console.log('New Google-authenticated user created:', user._id);
@@ -59,6 +60,7 @@ const loginUser = async (req, res) => {
           _id: user._id,
           name: user.name,
           email: user.email,
+          isClient: false,
           businessName: user.businessName,
           gstNo: user.gstNo,
           panNo: user.panNo,
@@ -114,6 +116,7 @@ const loginUser = async (req, res) => {
         _id: user._id,
         name: user.name,
         email: user.email,
+        isClient: false,
         businessName: user.businessName,
         gstNo: user.gstNo,
         panNo: user.panNo,

@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const Client = require("../models/client");
 const User = require("../models/user");
 const { OAuth2Client } = require('google-auth-library');
+const { USER_REFRESH_ACCOUNT_TYPE } = require("google-auth-library/build/src/auth/refreshclient");
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // const CreditWallet = require('../models/CreditWallet');
@@ -22,24 +23,25 @@ const verifyUserOrClient = async (req, res) => {
   try {
     // Log incoming googleUser and role for debugging
     console.error('verifyUserOrClient: req.googleUser:', req.googleUser);
-    console.error('verifyUserOrClient: req.body.role:', req.body.role);
     const { googleUser } = req;
-    const { role } = req.body; // 'user' or 'client'
+    // const { role } = req.body; // 'user' or 'client'
 
-    if (!googleUser || !role) {
-      return res.status(400).json({ success: false, message: "Google user info and role are required" });
-    }
+    // if (!googleUser || !role) {
+    //   return res.status(400).json({ success: false, message: "Google user info and role are required" });
+    // }
 
     const { email, name, picture, emailVerified, googleId } = googleUser;
 
-    let Model;
-    if (role === "user") {
-      Model = User;
-    } else if (role === "client") {
-      Model = Client;
-    } else {
-      return res.status(400).json({ success: false, message: "Invalid role" });
-    }
+    let Model = User;
+    // if (role === "user") {
+    //   Model = User;
+    // } else if (role === "client") {
+    //   Model = Client;
+    // } else {
+    //   return res.status(400).json({ success: false, message: "Invalid role" });
+    // }
+    
+
 
     // Find or create user/client
     let entity = await Model.findOne({ email });
@@ -51,6 +53,7 @@ const verifyUserOrClient = async (req, res) => {
         googleId: googleId,
         googlePicture: picture,
         emailVerified: emailVerified,
+        isClient:false,
         password: "", // No password for Google users
       });
     }
@@ -63,12 +66,12 @@ const verifyUserOrClient = async (req, res) => {
       message: "Verified successfully",
       authToken,
       MongoId,
+      isClient: entity.isClient,
       email: entity.email,
       name: entity.name,
       emailVerified: entity.emailVerified,
       isProfileCompleted: true, // or your own logic
       googleId: entity.googleId,
-      role,
     });
   } catch (error) {
     console.error('verifyUserOrClient error:', error && error.stack ? error.stack : error);
