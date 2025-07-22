@@ -358,6 +358,7 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
           campaignImageKey: campaignImageKey,
           isTaskComplete: false,
           isTaskAccepted: false,
+          TaskStatus: 'assigned',
         });
         assignedCount++;
       }
@@ -428,7 +429,7 @@ exports.getSharedReelsForUser = async (req, res) => {
       title: r.title || '',
       campaignImageKey: r.campaignImageKey || '',
       campaignImageUrl: r.campaignImageKey ? await getobject(r.campaignImageKey) : '',
-      isTaskComplete: r.isTaskComplete || false,
+      TaskStatus: r.TaskStatus || 'assigned',
       _id: r._id
     })));
     res.status(200).json({ success: true, reels: reelsWithFreshUrls });
@@ -641,6 +642,79 @@ exports.updateTaskAccepted = async (req, res) => {
     });
   } catch (err) {
     console.error('Error updating task accepted:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.updateTaskStatusAccepted = async (req, res) => {
+  const { userId, googleId } = req.params;
+  
+}
+
+// Update TaskStatus to 'accepted' for a specific reel (POST)
+exports.acceptTaskStatus = async (req, res) => {
+  const { userId, reelId } = req.params;
+  try {
+    if (!userId || !reelId) {
+      return res.status(400).json({ error: 'Missing userId or reelId' });
+    }
+    const SharedReels = require('../models/SharedReels');
+    // Find the user's SharedReels document
+    const sharedReels = await SharedReels.findOne({ googleId: userId });
+    if (!sharedReels) {
+      return res.status(404).json({ error: 'User shared reels not found' });
+    }
+    // Find the specific reel and update TaskStatus
+    const reelIndex = sharedReels.reels.findIndex(reel => 
+      reel.reelId.toString() === reelId || reel._id.toString() === reelId
+    );
+    if (reelIndex === -1) {
+      return res.status(404).json({ error: 'Reel not found for this user' });
+    }
+    // Update TaskStatus to 'accepted'
+    sharedReels.reels[reelIndex].TaskStatus = 'accepted';
+    await sharedReels.save();
+    res.json({ 
+      success: true, 
+      message: 'Task status updated to accepted',
+      updatedReel: sharedReels.reels[reelIndex]
+    });
+  } catch (err) {
+    console.error('Error updating TaskStatus:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Update TaskStatus to 'completed' for a specific reel (POST)
+exports.completeTaskStatus = async (req, res) => {
+  const { userId, reelId } = req.params;
+  try {
+    if (!userId || !reelId) {
+      return res.status(400).json({ error: 'Missing userId or reelId' });
+    }
+    const SharedReels = require('../models/SharedReels');
+    // Find the user's SharedReels document
+    const sharedReels = await SharedReels.findOne({ googleId: userId });
+    if (!sharedReels) {
+      return res.status(404).json({ error: 'User shared reels not found' });
+    }
+    // Find the specific reel and update TaskStatus
+    const reelIndex = sharedReels.reels.findIndex(reel => 
+      reel.reelId.toString() === reelId || reel._id.toString() === reelId
+    );
+    if (reelIndex === -1) {
+      return res.status(404).json({ error: 'Reel not found for this user' });
+    }
+    // Update TaskStatus to 'completed'
+    sharedReels.reels[reelIndex].TaskStatus = 'completed';
+    await sharedReels.save();
+    res.json({ 
+      success: true, 
+      message: 'Task status updated to completed',
+      updatedReel: sharedReels.reels[reelIndex]
+    });
+  } catch (err) {
+    console.error('Error updating TaskStatus:', err);
     res.status(500).json({ error: err.message });
   }
 };

@@ -37,6 +37,12 @@ router.post('/shared/complete/:userId/:reelId', reelController.updateTaskComplet
 // Route to update task accepted status
 router.post('/shared/accepted/:userId/:reelId', reelController.updateTaskAccepted);
 
+// Route to update TaskStatus to accept
+router.post('/shared/task-accepted/:userId/:reelId', reelController.acceptTaskStatus);
+
+// Route to update TaskStatus to accept
+router.post('/shared/task-completed/:userId/:reelId', reelController.completeTaskStatus);
+
 // Add user response URL
 router.post('/user/response/:userId', reelController.addUserResponseUrl);
 

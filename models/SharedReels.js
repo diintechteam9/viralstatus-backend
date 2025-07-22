@@ -37,6 +37,10 @@ const sharedReelsSchema = new mongoose.Schema({
       isTaskAccepted: {
         type: Boolean,
         default: false
+      },
+      TaskStatus : {
+        type: String,
+        default: 'assigned'
       }
     }
   ]
