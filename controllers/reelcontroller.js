@@ -610,3 +610,37 @@ exports.updateTaskCompleted = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+// Update isTaskAccepted to true for a specific reel
+exports.updateTaskAccepted = async (req, res) => {
+  const { userId, reelId } = req.params;
+  try {
+    // Find the user's SharedReels document
+    const sharedReels = await SharedReels.findOne({ googleId: userId });
+    if (!sharedReels) {
+      return res.status(404).json({ error: 'User shared reels not found' });
+    }
+
+    // Find the specific reel and update isTaskAccepted
+    const reelIndex = sharedReels.reels.findIndex(reel => 
+      reel.reelId.toString() === reelId || reel._id.toString() === reelId
+    );
+
+    if (reelIndex === -1) {
+      return res.status(404).json({ error: 'Reel not found for this user' });
+    }
+
+    // Update isTaskAccepted to true
+    sharedReels.reels[reelIndex].isTaskAccepted = true;
+    await sharedReels.save();
+
+    res.json({ 
+      success: true, 
+      message: 'Task accepted successfully',
+      updatedReel: sharedReels.reels[reelIndex]
+    });
+  } catch (err) {
+    console.error('Error updating task accepted:', err);
+    res.status(500).json({ error: err.message });
+  }
+};

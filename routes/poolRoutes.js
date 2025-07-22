@@ -34,6 +34,9 @@ router.get('/shared/:userId', reelController.getSharedReelsForUser);
 // Route to update task completed status
 router.post('/shared/complete/:userId/:reelId', reelController.updateTaskCompleted);
 
+// Route to update task accepted status
+router.post('/shared/accepted/:userId/:reelId', reelController.updateTaskAccepted);
+
 // Add user response URL
 router.post('/user/response/:userId', reelController.addUserResponseUrl);
 
