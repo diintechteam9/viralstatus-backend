@@ -526,30 +526,48 @@ exports.getAllClientsCampaignData = async (req, res) => {
 exports.getUserDashboardStats = async (req, res) => {
   const { userId } = req.params; // userId is googleId
   try {
-    // Find the user response document by googleId
-    const responsed = await userResponse.findOne({ googleId: userId });
-    if (!responsed || !Array.isArray(responsed.response)) {
-      return res.json({
-        success: true,
-        totalVideos: 0,
-        totalViews: 0,
-        totalLikes: 0,
-        totalComments: 0
-      });
+    // 1. Registered Campaigns
+    const RegisteredCampaign = require('../models/RegisteredCampaign');
+    const SharedReels = require('../models/SharedReels');
+    const userResponse = require('../models/userResponse');
+
+    // Get totalCampaigns
+    const regDoc = await RegisteredCampaign.findOne({ userId });
+    const totalCampaigns = regDoc && Array.isArray(regDoc.registeredCampaigns) ? regDoc.registeredCampaigns.length : 0;
+
+    // Get acceptedTask from SharedReels (sum of isTaskAccepted true in reels[])
+    let acceptedTask = 0;
+    const sharedReelsDoc = await SharedReels.findOne({ googleId: userId });
+    if (sharedReelsDoc && Array.isArray(sharedReelsDoc.reels)) {
+      acceptedTask = sharedReelsDoc.reels.filter(r => r.isTaskAccepted === true).length;
     }
-    // Aggregate stats
-    let totalVideos = responsed.response.length;
+
+    // Get userResponse doc
+    const responsed = await userResponse.findOne({ googleId: userId });
+    let completedTask = 0;
+    let pendingTask = 0;
+    let totalCredits = 0;
     let totalViews = 0;
     let totalLikes = 0;
     let totalComments = 0;
-    for (const entry of responsed.response) {
-      totalViews += entry.views || 0;
-      totalLikes += entry.likes || 0;
-      totalComments += entry.comments || 0;
+    if (responsed && Array.isArray(responsed.response)) {
+      for (const entry of responsed.response) {
+        if (entry.isTaskCompleted) completedTask++;
+        if (entry.status === 'pending') pendingTask++;
+        if (entry.isCreditAccepted) totalCredits += entry.creditAmount || 0;
+        totalViews += entry.views || 0;
+        totalLikes += entry.likes || 0;
+        totalComments += entry.comments || 0;
+      }
     }
+
     res.json({
       success: true,
-      totalVideos,
+      totalCampaigns,
+      acceptedTask,
+      pendingTask,
+      completedTask,
+      totalCredits,
       totalViews,
       totalLikes,
       totalComments
