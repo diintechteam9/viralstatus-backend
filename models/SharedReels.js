@@ -30,6 +30,10 @@ const sharedReelsSchema = new mongoose.Schema({
         type: String,
         default: ''
       },
+      isTaskComplete: {
+        type: Boolean,
+        default: false
+      },
       isTaskAccepted: {
         type: Boolean,
         default: false

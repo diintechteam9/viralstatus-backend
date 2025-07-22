@@ -356,7 +356,8 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
           campaignId: campaignId,
           title: reel.title || '',
           campaignImageKey: campaignImageKey,
-          isTaskAccepted: false
+          isTaskComplete: false,
+          isTaskAccepted: false,
         });
         assignedCount++;
       }
@@ -417,7 +418,7 @@ exports.getSharedReelsForUser = async (req, res) => {
       return res.json({ success: true, reels: [] });
     }
     // Filter out reels where isTaskCompleted is true
-    const incompleteReels = shared.reels.filter(r => !r.isTaskAccepted);
+    const incompleteReels = shared.reels.filter(r => !r.isTaskComplete);
     // Generate fresh S3 URLs for each reel and for campaign image
     const reelsWithFreshUrls = await Promise.all(incompleteReels.map(async r => ({
       reelId: r.reelId,
@@ -427,7 +428,7 @@ exports.getSharedReelsForUser = async (req, res) => {
       title: r.title || '',
       campaignImageKey: r.campaignImageKey || '',
       campaignImageUrl: r.campaignImageKey ? await getobject(r.campaignImageKey) : '',
-      isTaskAccepted: r.isTaskAccepted || false,
+      isTaskComplete: r.isTaskComplete || false,
       _id: r._id
     })));
     res.status(200).json({ success: true, reels: reelsWithFreshUrls });
@@ -456,7 +457,7 @@ exports.addUserResponseUrl = async (req, res) => {
     const responseEntry = {
       urls: url,
       campaignId,
-      isTaskCompleted: true,
+      isTaskCompleted: false,
       views: 0,
       cutoff: cutoff,
       isCreditAccepted: false,
@@ -576,7 +577,7 @@ exports.getYoutubeVideoStats = async (req, res) => {
   }
 };
 
-// Update isTaskAccepted to true for a specific reel
+// Update isTaskComplete to true for a specific reel
 exports.updateTaskCompleted = async (req, res) => {
   const { userId, reelId } = req.params;
   try {
@@ -586,7 +587,7 @@ exports.updateTaskCompleted = async (req, res) => {
       return res.status(404).json({ error: 'User shared reels not found' });
     }
 
-    // Find the specific reel and update isTaskAccepted
+    // Find the specific reel and update isTaskComplete
     const reelIndex = sharedReels.reels.findIndex(reel => 
       reel.reelId.toString() === reelId || reel._id.toString() === reelId
     );
@@ -595,8 +596,8 @@ exports.updateTaskCompleted = async (req, res) => {
       return res.status(404).json({ error: 'Reel not found for this user' });
     }
 
-    // Update isTaskAccepted to true
-    sharedReels.reels[reelIndex].isTaskAccepted = true;
+    // Update isTaskComplete to true
+    sharedReels.reels[reelIndex].isTaskComplete = true;
     await sharedReels.save();
 
     res.json({ 

@@ -473,6 +473,7 @@ exports.getCampaignResponseUrls = async (req, res) => {
   }
 };
 
+//client's total data of his all campaigns
 exports.getAllClientsCampaignData = async (req, res) => {
   try {
     const { clientId } = req.params;
@@ -482,7 +483,16 @@ exports.getAllClientsCampaignData = async (req, res) => {
     // Find all campaigns for this client
     const campaigns = await campaign.find({ clientId });
     if (!campaigns.length) {
-      return res.status(404).json({ success: false, message: 'No campaigns found for this client' });
+      return res.json({
+        success: true,
+        clientId,
+        stats: {
+          totalVideos: 0,
+          totalViews: 0,
+          totalLikes: 0,
+          totalComments: 0
+        }
+      });
     }
     // Get all campaignIds
     const campaignIds = campaigns.map(c => String(c._id));
@@ -523,6 +533,7 @@ exports.getAllClientsCampaignData = async (req, res) => {
   }
 };
 
+//user dashboard data
 exports.getUserDashboardStats = async (req, res) => {
   const { userId } = req.params; // userId is googleId
   try {
@@ -535,11 +546,11 @@ exports.getUserDashboardStats = async (req, res) => {
     const regDoc = await RegisteredCampaign.findOne({ userId });
     const totalCampaigns = regDoc && Array.isArray(regDoc.registeredCampaigns) ? regDoc.registeredCampaigns.length : 0;
 
-    // Get acceptedTask from SharedReels (sum of isTaskAccepted true in reels[])
+    // Get acceptedTask from SharedReels (sum of isTaskComplete true in reels[])
     let acceptedTask = 0;
     const sharedReelsDoc = await SharedReels.findOne({ googleId: userId });
     if (sharedReelsDoc && Array.isArray(sharedReelsDoc.reels)) {
-      acceptedTask = sharedReelsDoc.reels.filter(r => r.isTaskAccepted === true).length;
+      acceptedTask = sharedReelsDoc.reels.filter(r => r.isTaskComplete === true).length;
     }
 
     // Get userResponse doc
@@ -575,5 +586,59 @@ exports.getUserDashboardStats = async (req, res) => {
   } catch (err) {
     console.error('Error fetching user dashboard stats:', err);
     res.status(500).json({ success: false, error: 'Failed to fetch user dashboard stats', details: err.message });
+  }
+};
+
+//user dashboard campaign data
+exports.getUserCampaignData = async (req, res) => {
+  try {
+    const { userId } = req.params; // userId is googleId
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'Missing userId (googleId)' });
+    }
+    const RegisteredCampaign = require('../models/RegisteredCampaign');
+    const userResponse = require('../models/userResponse');
+    const { getobject } = require('../utils/s3');
+
+    // Find registered campaigns for the user
+    const regDoc = await RegisteredCampaign.findOne({ userId });
+    if (!regDoc || !Array.isArray(regDoc.registeredCampaigns)) {
+      return res.json({ success: true, campaigns: [] });
+    }
+    // Get all user responses for this user
+    const userRespDoc = await userResponse.findOne({ googleId: userId });
+    const userResponses = userRespDoc && Array.isArray(userRespDoc.response) ? userRespDoc.response : [];
+
+    // Prepare campaign data only for registered campaignIds
+    const campaigns = [];
+    for (const camp of regDoc.registeredCampaigns) {
+      const campaignId = camp._id?.toString?.() || camp._id;
+      // Aggregate stats for this campaign from userResponses
+      let totalViews = 0, totalLikes = 0, totalComments = 0;
+      for (const resp of userResponses) {
+        if (String(resp.campaignId) === String(campaignId)) {
+          totalViews += resp.views || 0;
+          totalLikes += resp.likes || 0;
+          totalComments += resp.comments || 0;
+        }
+      }
+      // Generate image URL
+      let key = camp.image?.key || '';
+      let url = key ? await getobject(key) : '';
+      campaigns.push({
+        campaignName: camp.campaignName,
+        campaignId: camp._id,
+        key,
+        url,
+        isActive: camp.isActive,
+        totalViews,
+        totalLikes,
+        totalComments
+      });
+    }
+    res.json({ success: true, campaigns });
+  } catch (err) {
+    console.error('Error in getUserCampaign:', err);
+    res.status(500).json({ success: false, message: 'Server error', error: err.message });
   }
 };

@@ -46,6 +46,9 @@ router.get('/client/data/:clientId', campaignController.getAllClientsCampaignDat
 //Get user Dashboard Data
 router.get('/response/data/:userId', campaignController.getUserDashboardStats);
 
+//Get user Dashboard campaign data
+router.get('/response/campaign/data/:userId', campaignController.getUserCampaignData);
+
 // Get campaign details by campaignId
 router.get('/:campaignId', async (req, res) => {
   try {
