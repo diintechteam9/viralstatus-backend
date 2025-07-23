@@ -418,20 +418,31 @@ exports.getSharedReelsForUser = async (req, res) => {
     if (!shared || !Array.isArray(shared.reels)) {
       return res.json({ success: true, reels: [] });
     }
-    // Filter out reels where isTaskCompleted is true
-    const incompleteReels = shared.reels.filter(r => !r.isTaskComplete);
-    // Generate fresh S3 URLs for each reel and for campaign image
-    const reelsWithFreshUrls = await Promise.all(incompleteReels.map(async r => ({
-      reelId: r.reelId,
-      s3Key: r.s3Key,
-      s3Url: r.s3Key ? await getobject(r.s3Key) : '',
-      campaignId: r.campaignId,
-      title: r.title || '',
-      campaignImageKey: r.campaignImageKey || '',
-      campaignImageUrl: r.campaignImageKey ? await getobject(r.campaignImageKey) : '',
-      TaskStatus: r.TaskStatus || 'assigned',
-      _id: r._id
-    })));
+    // Remove the filter for isTaskCompleted, include all reels
+    // const incompleteReels = shared.reels.filter(r => !r.isTaskComplete);
+    const reelsToReturn = shared.reels;
+
+    // Fetch userResponse for this user
+    const userRespDoc = await UserResponse.findOne({ googleId: userId });
+    const userResponses = userRespDoc && Array.isArray(userRespDoc.response) ? userRespDoc.response : [];
+
+    // Generate fresh S3 URLs for each reel and for campaign image, and add status from userResponse
+    const reelsWithFreshUrls = await Promise.all(reelsToReturn.map(async r => {
+      // Find matching userResponse entry by reelId and userId
+      const userRespEntry = userResponses.find(ur => String(ur.reelId) === String(r.reelId));
+      return {
+        reelId: r.reelId,
+        s3Key: r.s3Key,
+        s3Url: r.s3Key ? await getobject(r.s3Key) : '',
+        campaignId: r.campaignId,
+        title: r.title || '',
+        campaignImageKey: r.campaignImageKey || '',
+        campaignImageUrl: r.campaignImageKey ? await getobject(r.campaignImageKey) : '',
+        TaskStatus: r.TaskStatus || 'assigned',
+        _id: r._id,
+        status: userRespEntry ? userRespEntry.status : 'pending'
+      };
+    }));
     res.status(200).json({ success: true, reels: reelsWithFreshUrls });
   } catch (err) { 
     res.status(500).json({ error: err.message });
@@ -441,7 +452,7 @@ exports.getSharedReelsForUser = async (req, res) => {
 // Add or update a user's response URL
 exports.addUserResponseUrl = async (req, res) => {
   const { userId } = req.params;
-  const { url, campaignId } = req.body;
+  const { url, campaignId, reelId } = req.body; // Accept reelId from body
   if (!userId || !url || !campaignId) {
     return res.status(400).json({ error: 'userId (param) and url, campaignId (body) are required.' });
   }
@@ -458,6 +469,7 @@ exports.addUserResponseUrl = async (req, res) => {
     const responseEntry = {
       urls: url,
       campaignId,
+      reelId, // Add reelId to the response entry
       isTaskCompleted: false,
       views: 0,
       cutoff: cutoff,
