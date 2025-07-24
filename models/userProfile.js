@@ -188,6 +188,10 @@ const userProfileSchema = new mongoose.Schema({
     trim: true,
     default: ""
   },
+  isClient: {
+    type: Boolean,
+    default: false
+  },
   createdAt: {
     type: Date,
     default: Date.now

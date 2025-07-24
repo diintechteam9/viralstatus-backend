@@ -2,6 +2,7 @@ const UserProfile = require("../models/userProfile");
 const Client = require("../models/client");
 const Group = require('../models/group');
 const mongoose = require('mongoose');
+const User = require("../models/user");
 
 /**
  * Create a new user profile
@@ -25,7 +26,8 @@ const createUserProfile = async (req, res) => {
       skills,
       otherSkills,
       socialMedia,
-      googleId
+      googleId,
+      isClient,
     } = req.body;
 
     // Prefer googleId from authenticated user (JWT), fallback to body
@@ -84,7 +86,8 @@ const createUserProfile = async (req, res) => {
       otherSkills,
       socialMedia,
       isProfileCompleted,
-      googleId: profileGoogleId
+      googleId: profileGoogleId,
+      isClient: false // Always set to false when creating a new profile
     });
 
     // Automatically add user to groups for each business interest
@@ -274,7 +277,19 @@ const getCurrentUserProfile = async (req, res) => {
   try {
     // Get user email from the authenticated user (assuming it's in req.user)
     let userEmail = req.user?.email;
-    
+    let userMongoId = req.user?.id;
+    let syncedIsClient = false;
+    // Try to fetch isClient from User model using MongoId
+    if (userMongoId) {
+      try {
+        const userDoc = await User.findById(userMongoId).select('isClient');
+        if (userDoc) {
+          syncedIsClient = userDoc.isClient;
+        }
+      } catch (err) {
+        console.error('Error syncing isClient from User model:', err);
+      }
+    }
     // If no email in req.user, try to fetch from database using client ID
     if (!userEmail && req.client?.id) {
       try {
@@ -286,16 +301,13 @@ const getCurrentUserProfile = async (req, res) => {
         console.error('Error fetching client email in controller:', dbError);
       }
     }
-    
     if (!userEmail) {
       return res.status(401).json({
         success: false,
         message: "User not authenticated or email not found"
       });
     }
-
     const userProfile = await UserProfile.findOne({ email: userEmail });
-    
     if (!userProfile) {
       // Get client details for auto-population
       let clientDetails = req.clientDetails;
@@ -314,7 +326,6 @@ const getCurrentUserProfile = async (req, res) => {
           console.error('Error fetching client details in controller:', dbError);
         }
       }
-      
       // Return empty profile structure for new users with auto-populated fields
       return res.status(200).json({
         success: true,
@@ -322,6 +333,7 @@ const getCurrentUserProfile = async (req, res) => {
           name: clientDetails?.name || "",
           email: userEmail,
           mobileNumber: "",
+          isClient: syncedIsClient, // Use synced value
           city: clientDetails?.city || "",
           pincode: clientDetails?.pincode || "",
           businessName: clientDetails?.businessName || "",
@@ -345,12 +357,13 @@ const getCurrentUserProfile = async (req, res) => {
         }
       });
     }
-
+    // Sync isClient in the returned profile with User model
+    const profileObj = userProfile.toObject();
+    profileObj.isClient = syncedIsClient;
     res.status(200).json({
       success: true,
-      userProfile
+      userProfile: profileObj
     });
-
   } catch (error) {
     console.error('Get current user profile error:', error);
     res.status(500).json({
