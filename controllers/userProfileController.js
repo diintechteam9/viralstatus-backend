@@ -26,12 +26,9 @@ const createUserProfile = async (req, res) => {
       skills,
       otherSkills,
       socialMedia,
-      googleId,
       isClient,
     } = req.body;
 
-    // Prefer googleId from authenticated user (JWT), fallback to body
-    const profileGoogleId = req.user?.googleId || googleId || undefined;
 
     // Use authenticated user's email if available, otherwise use provided email
     const userEmail = req.user?.email || email;
@@ -67,6 +64,14 @@ const createUserProfile = async (req, res) => {
     const requiredFields = [name, userEmail, mobileNumber, city, pincode, businessName, gender, ageRange, occupation, highestQualification];
     const isProfileCompleted = requiredFields.every(field => field && field.trim() !== '');
 
+    // Fetch the user's MongoDB ObjectId from the User model
+    let userMongoId = undefined;
+    if (userEmail) {
+      const userDoc = await User.findOne({ email: userEmail }).select('_id');
+      if (userDoc) {
+        userMongoId = userDoc._id;
+      }
+    }
     // Create new user profile with request body prioritized, fallback to clientDetails if missing
     const userProfile = await UserProfile.create({
       name: name || clientDetails?.name || "",
@@ -86,8 +91,8 @@ const createUserProfile = async (req, res) => {
       otherSkills,
       socialMedia,
       isProfileCompleted,
-      googleId: profileGoogleId,
-      isClient: false // Always set to false when creating a new profile
+      isClient: false, // Always set to false when creating a new profile
+      userId: userMongoId // Save the user's MongoDB ObjectId
     });
 
     // Automatically add user to groups for each business interest
@@ -378,7 +383,8 @@ const getCurrentUserProfile = async (req, res) => {
  */
 const updateUserProfile = async (req, res) => {
   try {
-    const { id } = req.params;
+    // Get the user's MongoDB ObjectId from the decoded token
+    const userMongoId = req.user?.id;
     const updateData = req.body;
 
     // Remove fields that shouldn't be updated
@@ -402,16 +408,9 @@ const updateUserProfile = async (req, res) => {
     updateData.isProfileCompleted = isProfileCompleted;
 
     let updatedProfile;
-    if (mongoose.Types.ObjectId.isValid(id)) {
-      updatedProfile = await UserProfile.findByIdAndUpdate(
-        id,
-        updateData,
-        { new: true, runValidators: true }
-      );
-    }
-    if (!updatedProfile) {
+    if (userMongoId && mongoose.Types.ObjectId.isValid(userMongoId)) {
       updatedProfile = await UserProfile.findOneAndUpdate(
-        { googleId: id },
+        { userId: userMongoId },
         updateData,
         { new: true, runValidators: true }
       );

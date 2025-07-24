@@ -12,6 +12,7 @@ const {
   verifyUserProfile,
   getProfileStats
 } = require('../controllers/userProfileController');
+const { verifyToken } = require('../middleware/authmiddleware');
 
 /**
  * @route   POST /api/user-profiles
@@ -132,7 +133,7 @@ router.get('/:id', getUserProfileById);
  * Request body: Any fields to update
  * Example: PUT /api/user-profiles/507f1f77bcf86cd799439011
  */
-router.put('/:id', protect, updateUserProfile);
+router.put('/update', protect ,verifyToken, updateUserProfile);
 
 /**
  * @route   DELETE /api/user-profiles/:id
