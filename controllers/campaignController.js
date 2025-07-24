@@ -170,7 +170,7 @@ exports.getActiveCampaigns = async (req, res) => {
         const reg = await RegisteredCampaign.findOne({ userId: googleId });
         console.log('RegisteredCampaign for googleId:', reg);
         if (reg && reg.registeredCampaigns) {
-          registeredCampaignIds = reg.registeredCampaigns.map(c => c._id?.toString?.() || c._id);
+          registeredCampaignIds = reg.registeredCampaigns.map(c => c.campaign && c.campaign._id?.toString?.());
           console.log('registeredCampaignIds:', registeredCampaignIds);
         }
       }
@@ -280,11 +280,11 @@ exports.registeredCampaign = async (req, res) => {
     // Find or create the RegisteredCampaign document for this user
     let reg = await RegisteredCampaign.findOne({ userId });
     if (!reg) {
-      reg = new RegisteredCampaign({ userId, registeredCampaigns: [campaign] });
+      reg = new RegisteredCampaign({ userId, registeredCampaigns: [{ campaign, registeredAt: new Date() }] });
     } else {
       // Only add if not already present (by _id)
-      if (!reg.registeredCampaigns.some(c => c._id.toString() === campaign._id.toString())) {
-        reg.registeredCampaigns.push(campaign);
+      if (!reg.registeredCampaigns.some(c => c.campaign && c.campaign._id.toString() === campaign._id.toString())) {
+        reg.registeredCampaigns.push({ campaign, registeredAt: new Date() });
       }
     }
     await reg.save();
@@ -298,7 +298,6 @@ exports.registeredCampaign = async (req, res) => {
 // Get a user's registered campaigns by userId or googleId
 exports.getUserRegisteredCampaigns = async (req, res) => {
   try {
-    
     const { userId, googleId } = req.query;
     if (!userId && !googleId) {
       return res.status(400).json({ success: false, message: 'Missing userId or googleId' });
@@ -312,9 +311,9 @@ exports.getUserRegisteredCampaigns = async (req, res) => {
     if (!reg) {
       return res.status(404).json({ success: false, message: 'No registered campaigns found for user' });
     }
-     for (const campaign of reg.registeredCampaigns) {
-      if (campaign.image && campaign.image.key) {
-        campaign.image.url = await getobject(campaign.image.key);
+    for (const entry of reg.registeredCampaigns) {
+      if (entry.campaign && entry.campaign.image && entry.campaign.image.key) {
+        entry.campaign.image.url = await getobject(entry.campaign.image.key);
       }
     }
     res.json({ success: true, registeredCampaigns: reg.registeredCampaigns });
@@ -609,10 +608,14 @@ exports.getUserCampaignData = async (req, res) => {
     const userRespDoc = await userResponse.findOne({ googleId: userId });
     const userResponses = userRespDoc && Array.isArray(userRespDoc.response) ? userRespDoc.response : [];
 
-    // Prepare campaign data only for registered campaignIds
-    const campaigns = [];
-    for (const camp of regDoc.registeredCampaigns) {
-      const campaignId = camp._id?.toString?.() || camp._id;
+    // Prepare campaign data only for registered campaign objects
+    const campaigns = await Promise.all(regDoc.registeredCampaigns.map(async (entry) => {
+      // entry: { campaign, registeredAt }
+      const camp = entry.campaign;
+      const campaignId = camp?._id?.toString?.() || camp?._id || camp?.campaignId;
+      const campaignName = camp?.campaignName || '';
+      const key = camp?.image?.key || '';
+      const url = key ? await getobject(key) : '';
       // Aggregate stats for this campaign from userResponses
       let totalViews = 0, totalLikes = 0, totalComments = 0;
       for (const resp of userResponses) {
@@ -622,23 +625,21 @@ exports.getUserCampaignData = async (req, res) => {
           totalComments += resp.comments || 0;
         }
       }
-      // Generate image URL
-      let key = camp.image?.key || '';
-      let url = key ? await getobject(key) : '';
-      campaigns.push({
-        campaignName: camp.campaignName,
-        campaignId: camp._id,
+      return {
+        campaignId,
+        campaignName,
         key,
         url,
-        isActive: camp.isActive,
-        totalViews,
-        totalLikes,
-        totalComments
-      });
-    }
+        isActive: camp?.isActive,
+        registeredAt: entry.registeredAt,
+        views: totalViews,
+        likes: totalLikes,
+        comments: totalComments
+      };
+    }));
     res.json({ success: true, campaigns });
   } catch (err) {
     console.error('Error in getUserCampaign:', err);
     res.status(500).json({ success: false, message: 'Server error', error: err.message });
   }
-};
+};  

@@ -10,9 +10,14 @@ const RegisteredCampaignSchema = new Schema({
   },
   registeredCampaigns: [
     {
-      type: Schema.Types.Mixed, // Store full campaign object
+      campaign: {
+        type: Schema.Types.Mixed, // Store full campaign object
+      },
+      registeredAt: {
+        type: Date,
+        default: Date.now
+      }
     },
   ],
 }, { timestamps: true });
-
 module.exports = mongoose.model('RegisteredCampaign', RegisteredCampaignSchema);
