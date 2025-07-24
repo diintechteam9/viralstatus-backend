@@ -604,7 +604,7 @@ exports.getUserCampaignData = async (req, res) => {
     // Find registered campaigns for the user
     const regDoc = await RegisteredCampaign.findOne({ userId });
     if (!regDoc || !Array.isArray(regDoc.registeredCampaigns)) {
-      return res.json({ success: true, campaigns: [] });
+      return res.status(200).json({ success: true, campaigns: [], message: 'No registered campaigns found' });
     }
     // Get all user responses for this user
     const userRespDoc = await userResponse.findOne({ googleId: userId });
