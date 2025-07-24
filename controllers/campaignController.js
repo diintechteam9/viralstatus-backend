@@ -288,6 +288,8 @@ exports.registeredCampaign = async (req, res) => {
       }
     }
     await reg.save();
+    // Sort registeredCampaigns by registeredAt descending (most recent first)
+    reg.registeredCampaigns.sort((a, b) => new Date(b.registeredAt) - new Date(a.registeredAt));
     res.json({ success: true, registeredCampaign: reg });
   } catch (err) {
     console.error('Register campaign error:', err);
