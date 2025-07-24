@@ -611,7 +611,7 @@ exports.getUserCampaignData = async (req, res) => {
     const userResponses = userRespDoc && Array.isArray(userRespDoc.response) ? userRespDoc.response : [];
 
     // Prepare campaign data only for registered campaign objects
-    const campaigns = await Promise.all(regDoc.registeredCampaigns.map(async (entry) => {
+    let campaigns = await Promise.all(regDoc.registeredCampaigns.map(async (entry) => {
       // entry: { campaign, registeredAt }
       const camp = entry.campaign;
       const campaignId = camp?._id?.toString?.() || camp?._id || camp?.campaignId;
@@ -627,7 +627,7 @@ exports.getUserCampaignData = async (req, res) => {
           totalComments += resp.comments || 0;
         }
       }
-      return {
+      return (campaignId && campaignName) ? {
         campaignId,
         campaignName,
         key,
@@ -637,8 +637,13 @@ exports.getUserCampaignData = async (req, res) => {
         views: totalViews,
         likes: totalLikes,
         comments: totalComments
-      };
+      } : null;
     }));
+    // Filter out nulls (invalid campaigns)
+    campaigns = campaigns.filter(c => c);
+    if (campaigns.length === 0) {
+      return res.status(200).json({ success: true, campaigns: [], message: 'No registered campaigns found' });
+    }
     res.json({ success: true, campaigns });
   } catch (err) {
     console.error('Error in getUserCampaign:', err);

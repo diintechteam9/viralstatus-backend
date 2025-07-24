@@ -419,7 +419,7 @@ exports.getSharedReelsForUser = async (req, res) => {
       return res.json({ success: true, reels: [] });
     }
     // Remove the filter for isTaskCompleted, include all reels
-    // const incompleteReels = shared.reels.filter(r => !r.isTaskComplete);
+    const incompleteReels = shared.reels.filter(r => !r.isTaskComplete);
     const reelsToReturn = shared.reels;
 
     // Fetch userResponse for this user
@@ -430,6 +430,7 @@ exports.getSharedReelsForUser = async (req, res) => {
     const reelsWithFreshUrls = await Promise.all(reelsToReturn.map(async r => {
       // Find matching userResponse entry by reelId and userId
       const userRespEntry = userResponses.find(ur => String(ur.reelId) === String(r.reelId));
+      console.log(userRespEntry);
       return {
         reelId: r.reelId,
         s3Key: r.s3Key,
