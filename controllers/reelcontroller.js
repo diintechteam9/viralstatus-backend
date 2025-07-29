@@ -99,18 +99,6 @@ exports.uploadReels = async (req, res) => {
   req.pipe(bb);
 };
 
-exports.getReelsByPool = async (req, res) => {
-  const { poolId } = req.query;
-  if (!poolId) {
-    return res.status(400).json({ success: false, error: "poolId is required" });
-  }
-  try {
-    const reels = await Reel.find({ poolId });
-    res.json({ success: true, reels });
-  } catch (err) {
-    res.status(500).json({ success: false, error: "Failed to fetch reels" });
-  }
-};
 
 exports.getReelsByPoolId = async (req, res) => {
   const { poolId } = req.params;
@@ -119,8 +107,28 @@ exports.getReelsByPoolId = async (req, res) => {
   }
   try {
     const reels = await Reel.find({ poolId });
-    res.json({ success: true, reels });
+    
+    // Generate fresh S3 URLs for each reel to prevent expiration
+    const reelsWithFreshUrls = await Promise.all(
+      reels.map(async (reel) => {
+        try {
+          // Generate a fresh pre-signed URL for each reel
+          const freshUrl = await getobject(reel.s3Key);
+          return {
+            ...reel.toObject(),
+            s3Url: freshUrl
+          };
+        } catch (urlError) {
+          console.error(`Error generating fresh URL for reel ${reel._id}:`, urlError);
+          // Return reel with original URL if fresh URL generation fails
+          return reel.toObject();
+        }
+      })
+    );
+    
+    res.json({ success: true, reels: reelsWithFreshUrls });
   } catch (err) {
+    console.error('Error fetching reels by pool ID:', err);
     res.status(500).json({ success: false, error: "Failed to fetch reels" });
   }
 };
