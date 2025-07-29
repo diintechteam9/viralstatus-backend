@@ -56,6 +56,7 @@ app.use(session({
 // Configure CORS for Express
 app.use(cors({
     origin: function (origin, callback) {
+        console.log('CORS request from origin:', origin);
         // Allow requests with no origin (like mobile apps or curl requests)
         if (!origin) return callback(null, true);
         
@@ -68,6 +69,7 @@ app.use(cors({
         ];
         
         if (allowedOrigins.indexOf(origin) !== -1) {
+            console.log('CORS allowed for origin:', origin);
             callback(null, true);
         } else {
             console.log('CORS blocked origin:', origin);
@@ -90,6 +92,27 @@ app.use(cors({
     preflightContinue: false,
     optionsSuccessStatus: 204
 }));
+
+// Additional CORS middleware for all routes
+app.use((req, res, next) => {
+    console.log('Request method:', req.method, 'URL:', req.url, 'Origin:', req.headers.origin);
+    
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+        res.header('Access-Control-Allow-Origin', req.headers.origin || 'https://viralstatus-frontend.vercel.app');
+        res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+        res.header('Access-Control-Allow-Credentials', 'true');
+        res.status(200).end();
+        return;
+    }
+    
+    // Add CORS headers for all responses
+    res.header('Access-Control-Allow-Origin', req.headers.origin || 'https://viralstatus-frontend.vercel.app');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    
+    next();
+});
 
 // Configure CORS for S3
 configureCors().catch(console.error);

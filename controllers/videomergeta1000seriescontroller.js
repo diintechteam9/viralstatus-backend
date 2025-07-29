@@ -18,6 +18,7 @@ const DEFAULT_TRANSITION_DURATION = 1; // seconds
 
 const mergeReel = async (req, res) => {
   try {
+    console.log('mergeReel started:', new Date().toISOString());
     const { images, music, transition, totalDuration } = req.body;
     if (!images || !Array.isArray(images) || images.length === 0) {
       return res.status(400).json({ error: 'No images provided' });
@@ -44,8 +45,10 @@ const mergeReel = async (req, res) => {
     // Create temp dir
     const tempDir = path.join(os.tmpdir(), `ta1000series-reel-${Date.now()}`);
     await fs.mkdir(tempDir, { recursive: true });
+    console.log('Temp directory created:', tempDir);
 
     // Save images to temp files
+    console.log('Saving images to temp files...');
     const imagePaths = [];
     for (let i = 0; i < n; i++) {
       const img = images[i];
@@ -53,12 +56,15 @@ const mergeReel = async (req, res) => {
       const base64Data = img.replace(/^data:[^;]+;base64,/, '');
       await fs.writeFile(imgPath, Buffer.from(base64Data, 'base64'));
       imagePaths.push(imgPath);
+      console.log(`Image ${i + 1}/${n} saved`);
     }
 
     // Save music to temp file
+    console.log('Saving music file...');
     const musicPath = path.join(tempDir, 'music.mp3');
     const musicBase64 = music.replace(/^data:[^;]+;base64,/, '');
     await fs.writeFile(musicPath, Buffer.from(musicBase64, 'base64'));
+    console.log('Music file saved');
 
     // Output path
     const outputPath = path.join(tempDir, `reel_${Date.now()}.mp4`);
@@ -95,11 +101,29 @@ const mergeReel = async (req, res) => {
     args.push('-t', T.toString()); // ensure output duration
     args.push('-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'fast', '-crf', '28', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outputPath);
 
-    // Run ffmpeg
+    console.log('Starting FFmpeg processing...');
+    console.log('FFmpeg args:', args.join(' '));
+
+    // Run ffmpeg with timeout
     await new Promise((resolve, reject) => {
       const ff = spawn(ffmpegStatic, args);
+      
+      // Set a timeout (5 minutes)
+      const timeout = setTimeout(() => {
+        ff.kill('SIGTERM');
+        reject(new Error('FFmpeg processing timed out after 5 minutes'));
+      }, 5 * 60 * 1000);
+      
       ff.stderr.on('data', data => console.log('ffmpeg:', data.toString()));
-      ff.on('close', code => code === 0 ? resolve() : reject(new Error('ffmpeg failed')));
+      ff.on('close', code => {
+        clearTimeout(timeout);
+        console.log('FFmpeg processing completed with code:', code);
+        code === 0 ? resolve() : reject(new Error('ffmpeg failed'));
+      });
+      ff.on('error', (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
     });
 
     // Read output video
