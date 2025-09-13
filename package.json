@@ -15,6 +15,9 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.816.0",
     "@aws-sdk/s3-request-presigner": "^3.816.0",
+    "@deepgram/sdk": "^4.11.2",
+    "@elevenlabs/elevenlabs-js": "^2.15.0",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "aws-sdk": "^2.1692.0",
     "axios": "^1.10.0",
     "bcrypt": "^6.0.0",
@@ -30,6 +33,7 @@
     "google-auth-library": "^9.10.0",
     "googleapis": "^150.0.1",
     "jsonwebtoken": "^9.0.2",
+    "lmnt-node": "^2.10.0",
     "mongoose": "^8.15.0",
     "multer": "^2.0.0",
     "nodemon": "^3.1.10",

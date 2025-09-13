@@ -31,6 +31,7 @@ const ta1000seriesRoutes = require('./routes/ta1000series');
 const videomergeta1000seriesRoutes = require('./routes/videomergeta1000series');
 const creditWalletRoutes = require("./routes/creditWalletRoute");
 
+const videocardRoute=require('./routes/aivideogen');  // generate videocard
 
 dotenv.config();
 
@@ -164,6 +165,9 @@ app.use('/api/user/creditWallet', creditWalletRoutes);
 // TA1000Series Routes
 app.use('/api/ta1000series', ta1000seriesRoutes);
 app.use('/api/reelta1000series', videomergeta1000seriesRoutes);
+
+
+app.use('/api/videocard',videocardRoute);
 
 // Error handling middleware
 app.use((error, req, res, next) => {
