@@ -1044,6 +1044,7 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
         .input(inputFile)
         .inputOptions(['-f', 'concat', '-safe', '0'])
         .outputOptions(['-r', '30', '-pix_fmt', 'yuv420p', '-y'])
+        .addOption('-loglevel', 'verbose')
         .output(tempVideoPath)
         .on('start', (cmd) => {
           console.log('[ffmpeg-async] base video command:', cmd);
@@ -1110,6 +1111,7 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
           .input(audioPath)
           .complexFilter(complex)
           .outputOptions(['-map', '[vout]', '-map', '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-t', audioDuration.toString(), '-y'])
+          .addOption('-loglevel', 'verbose')
           .output(outputPath)
           .on('start', (cmd) => {
             console.log('FFmpeg complex filter length:', complex.length);
