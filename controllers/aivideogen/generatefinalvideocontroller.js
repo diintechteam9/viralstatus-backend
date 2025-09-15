@@ -4,8 +4,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const ffprobeStatic = require('ffprobe-static');
 const VideoStorageService = require('../../services/videoStorageService');
-const https = require('https');
-const http = require('http');
+// Removed https/http: no longer downloading fonts
 
 // Initialize video storage service
 const videoStorage = new VideoStorageService();
@@ -13,6 +12,23 @@ const videoStorage = new VideoStorageService();
 // Set FFmpeg paths
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 ffmpeg.setFfprobePath(ffprobeStatic.path);
+
+// Optional bundled font to avoid system font dependency
+const BUNDLED_FONT_PATH = path.join(__dirname, '../../assets/fonts/NotoSans-Regular.ttf');
+const hasBundledFont = fs.existsSync(BUNDLED_FONT_PATH);
+
+// Build drawtext filter using bundled font when available (avoids system fonts)
+const buildDrawtextFilter = (text) => {
+  const base = `text='${text}':fontcolor=0xFFFFFF:fontsize=45:box=1:boxcolor=black@0.8:boxborderw=8:x=(w-text_w)/2:y=(h-text_h-250):line_spacing=10`;
+  if (hasBundledFont) {
+    // Use fontfile to avoid fontconfig/system fonts
+    const fontPathUnix = BUNDLED_FONT_PATH.replace(/\\/g, '/');
+    return `drawtext=fontfile='${fontPathUnix}':${base}`;
+  }
+  // Fallback to system font discovery if bundled font missing
+  console.warn('[drawtext] Bundled font not found, falling back to system fonts');
+  return `drawtext=${base}`;
+};
 
 // Comprehensive cleanup function for temporary files
 const cleanupTempFiles = (filePaths) => {
@@ -94,182 +110,15 @@ const cleanTextForDrawtext = (text) => {
     .trim();
 };
 
-// Function to detect if text contains Hindi characters
-const containsHindiText = (text) => {
-  if (!text) return false;
-  // Hindi Unicode range: \u0900-\u097F
-  return /[\u0900-\u097F]/.test(text);
-};
+// Removed Hindi language detection and font selection
 
-// Function to get appropriate font for text (Hindi or English)
-const getFontForText = (text) => {
-  if (containsHindiText(text)) {
-    // Use a font that supports Hindi characters
-    // Try system fonts that commonly support Hindi
-    const hindiFonts = [
-      'Arial Unicode MS',
-      'Nirmala UI',
-      'Mangal',
-      'Kokila',
-      'Arial',
-      'DejaVu Sans'
-    ];
-    
-    // For FFmpeg, we'll use a generic approach that should work
-    return 'Arial Unicode MS';
-  } else {
-    // Use default font for English text
-    return 'Arial';
-  }
-};
+// Removed downloadFile helper
 
-// Function to download a file
-const downloadFile = (url, filepath) => {
-  return new Promise((resolve, reject) => {
-    const protocol = url.startsWith('https:') ? https : http;
-    const file = fs.createWriteStream(filepath);
-    
-    protocol.get(url, (response) => {
-      response.pipe(file);
-      file.on('finish', () => {
-        file.close();
-        resolve(filepath);
-      });
-    }).on('error', (err) => {
-      fs.unlink(filepath, () => {}); // Delete the file async
-      reject(err);
-    });
-  });
-};
+// Removed Hindi font path resolution logic
 
-// Function to get font file path for Hindi text
-const getHindiFontPath = async () => {
-  const platform = process.platform;
-  const possibleFonts = [];
-  
-  if (platform === 'win32') {
-    // Windows font paths - more comprehensive list
-    possibleFonts.push(
-      'C:/Windows/Fonts/arial.ttf',
-      'C:/Windows/Fonts/calibri.ttf',
-      'C:/Windows/Fonts/msyh.ttf',
-      'C:/Windows/Fonts/msgothic.ttc',
-      'C:/Windows/Fonts/arialuni.ttf',
-      'C:/Windows/Fonts/calibri.ttf',
-      'C:/Windows/Fonts/cambria.ttc',
-      'C:/Windows/Fonts/consola.ttf'
-    );
-  } else if (platform === 'darwin') {
-    // macOS font paths
-    possibleFonts.push(
-      '/System/Library/Fonts/Arial Unicode.ttf',
-      '/System/Library/Fonts/Arial.ttf',
-      '/Library/Fonts/Arial Unicode MS.ttf',
-      '/System/Library/Fonts/Helvetica.ttc',
-      '/System/Library/Fonts/Menlo.ttc'
-    );
-  } else {
-    // Linux font paths
-    possibleFonts.push(
-      '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-      '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-      '/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf',
-      '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
-      '/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf'
-    );
-  }
-  
-  // Check if any of these fonts exist
-  for (const fontPath of possibleFonts) {
-    if (fs.existsSync(fontPath)) {
-      console.log(`Found Hindi-compatible font: ${fontPath}`);
-      return fontPath;
-    }
-  }
-  
-  // If no system font found, try to download a Hindi-compatible font
-  const tempDir = path.join(__dirname, '../temp');
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
-  
-  const downloadedFontPath = path.join(tempDir, 'hindi-font.ttf');
-  
-  // Check if we already downloaded the font
-  if (fs.existsSync(downloadedFontPath)) {
-    console.log(`Using previously downloaded Hindi font: ${downloadedFontPath}`);
-    return downloadedFontPath;
-  }
-  
-  // Try to download a Hindi-compatible font (Google Fonts - Noto Sans Devanagari)
-  try {
-    console.log('Downloading Hindi-compatible font...');
-    const fontUrl = 'https://github.com/google/fonts/raw/main/ofl/notosansdevanagari/NotoSansDevanagari-Regular.ttf';
-    await downloadFile(fontUrl, downloadedFontPath);
-    console.log(`Downloaded Hindi font: ${downloadedFontPath}`);
-    return downloadedFontPath;
-  } catch (error) {
-    console.warn('Failed to download Hindi font:', error.message);
-    console.warn('Using default font for Hindi text');
-    return null;
-  }
-};
+// Removed Hindi-specific drawtext builder
 
-// Function to create a more robust drawtext filter for Hindi text
-const createHindiDrawtextFilter = (text, fontPath) => {
-  // Escape special characters in text for FFmpeg
-  const escapedText = text
-    .replace(/'/g, "\\'")
-    .replace(/:/g, ' ')
-    .replace(/;/g, ',')
-    .replace(/\\/g, '/')
-    .replace(/\[/g, '(')
-    .replace(/\]/g, ')')
-    .replace(/\{/g, '(')
-    .replace(/\}/g, ')')
-    .replace(/%/g, 'percent')
-    .replace(/=/g, ' equals ');
-  
-  if (fontPath) {
-    // Use fontfile with proper escaping
-    return `drawtext=text='${escapedText}':fontfile='${fontPath.replace(/\\/g, '/')}':fontcolor=0xFFFFFF:fontsize=40:box=1:boxcolor=black@0.8:boxborderw=8:x=(w-text_w)/2:y=(h-text_h-250):line_spacing=8:enable='between(t,0,999999)'`;
-  } else {
-    // Fallback without fontfile
-    return `drawtext=text='${escapedText}':fontcolor=0xFFFFFF:fontsize=35:box=1:boxcolor=black@0.9:boxborderw=10:x=(w-text_w)/2:y=(h-text_h-250):enable='between(t,0,999999)'`;
-  }
-};
-
-// Function to create a text overlay using a different approach
-const createTextOverlayImage = async (text, tempDir, index) => {
-  try {
-    // Create a simple text overlay using ImageMagick or similar
-    // For now, we'll use a simple approach with FFmpeg text2image
-    const textImagePath = path.join(tempDir, `text_overlay_${index}.png`);
-    
-    // Create a simple colored background with text
-    const escapedText = text.replace(/'/g, "\\'").replace(/"/g, '\\"');
-    
-    await new Promise((resolve, reject) => {
-      ffmpeg()
-        .input('color=c=black:s=1080x200:d=1')
-        .inputFormat('lavfi')
-        .outputOptions([
-          '-vf', `drawtext=text='${escapedText}':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=(h-text_h)/2`,
-          '-frames:v', '1',
-          '-y'
-        ])
-        .output(textImagePath)
-        .on('end', resolve)
-        .on('error', reject)
-        .run();
-    });
-    
-    return textImagePath;
-  } catch (error) {
-    console.warn('Failed to create text overlay image:', error.message);
-    return null;
-  }
-};
+// Removed alternative text overlay image approach
 
 const generateFinalVideo = async (req, res) => {
   try {
@@ -624,28 +473,8 @@ const generateFinalVideo = async (req, res) => {
           continue;
         }
 
-        // Get appropriate font for the text
-        const fontFamily = getFontForText(cleanText);
-        const isHindi = containsHindiText(cleanText);
-        console.log(`Text language: ${isHindi ? 'Hindi' : 'English'}, Font: ${fontFamily}`);
-        
-        // Create drawtext filter with appropriate font and settings
-        let drawtextFilter;
-        if (isHindi) {
-          // Hindi text needs special handling
-          try {
-            const hindiFontPath = await getHindiFontPath();
-            console.log(`Using Hindi font path: ${hindiFontPath}`);
-            drawtextFilter = createHindiDrawtextFilter(cleanText, hindiFontPath);
-          } catch (error) {
-            console.warn('Failed to get Hindi font path:', error.message);
-            // Use simple fallback
-            drawtextFilter = createHindiDrawtextFilter(cleanText, null);
-          }
-        } else {
-          // English text
-          drawtextFilter = `drawtext=text='${cleanText}':fontcolor=0xFFFFFF:fontsize=45:box=1:boxcolor=black@0.8:boxborderw=8:x=(w-text_w)/2:y=(h-text_h-250):line_spacing=10`;
-        }
+        // Create drawtext filter (English-only path) using bundled font when available
+        let drawtextFilter = buildDrawtextFilter(cleanText);
         
         await new Promise((resolve, reject) => {
           const ffmpegCommand = ffmpeg()
@@ -672,68 +501,7 @@ const generateFinalVideo = async (req, res) => {
             .on('error', (err) => {
               console.error(`Segment ${i + 1} error:`, err);
               
-              // If Hindi text failed, try alternative approach
-              if (isHindi) {
-                console.log(`Trying alternative approach for Hindi text in segment ${i + 1}`);
-                
-                // Try multiple alternative approaches for Hindi text
-                const alternativeApproaches = [
-                  // Approach 1: Simple drawtext without font specification
-                  `drawtext=text='${cleanText}':fontcolor=0xFFFFFF:fontsize=35:box=1:boxcolor=black@0.9:boxborderw=10:x=(w-text_w)/2:y=(h-text_h-250)`,
-                  
-                  // Approach 2: Using different font specification
-                  `drawtext=text='${cleanText}':font='Arial':fontcolor=0xFFFFFF:fontsize=35:box=1:boxcolor=black@0.9:boxborderw=10:x=(w-text_w)/2:y=(h-text_h-250)`,
-                  
-                  // Approach 3: Using subtitle filter
-                  `subtitles=text='${cleanText}':fontcolor=white:fontsize=35:force_style='FontName=Arial,FontSize=35,PrimaryColour=&Hffffff,OutlineColour=&H000000,BackColour=&H80000000,Bold=1,Outline=2'`,
-                  
-                  // Approach 4: Using ass subtitle format
-                  `ass=text='${cleanText}'`,
-                  
-                  // Approach 5: Using a very simple drawtext with minimal parameters
-                  `drawtext=text='${cleanText}':fontcolor=white:fontsize=30:x=(w-text_w)/2:y=(h-text_h-250)`
-                ];
-                
-                let currentApproach = 0;
-                
-                const tryNextApproach = () => {
-                  if (currentApproach >= alternativeApproaches.length) {
-                    console.error(`All alternative approaches failed for segment ${i + 1}`);
-                    reject(new Error('All Hindi text rendering approaches failed'));
-                    return;
-                  }
-                  
-                  const alternativeFilter = alternativeApproaches[currentApproach];
-                  console.log(`Trying approach ${currentApproach + 1} for Hindi text:`, alternativeFilter);
-                  
-                  ffmpeg()
-                    .input(tempVideoPath)
-                    .inputOptions(['-ss', entry.startTime.toString()])
-                    .outputOptions([
-                      '-t', segmentDuration.toString(),
-                      '-vf', alternativeFilter,
-                      '-c:v', 'libx264',
-                      '-c:a', 'copy',
-                      '-avoid_negative_ts', 'make_zero',
-                      '-y'
-                    ])
-                    .output(segmentPath)
-                    .on('end', () => {
-                      console.log(`Segment ${i + 1} completed with approach ${currentApproach + 1}`);
-                      resolve();
-                    })
-                    .on('error', (altErr) => {
-                      console.error(`Approach ${currentApproach + 1} failed for segment ${i + 1}:`, altErr.message);
-                      currentApproach++;
-                      tryNextApproach();
-                    })
-                    .run();
-                };
-                
-                tryNextApproach();
-              } else {
-                reject(err);
-              }
+              reject(err);
             })
             .run();
         });
