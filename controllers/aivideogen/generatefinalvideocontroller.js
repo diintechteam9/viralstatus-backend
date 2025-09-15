@@ -1054,11 +1054,22 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
 
       // Build drawtext filters directly on the base video, one per subtitle segment
       const drawFilters = [];
-      const makeSafeText = (t) => t
-        .replace(/\\/g, '/')
-        .replace(/'/g, "\\'")
-        .replace(/:/g, ' ')
-        .replace(/\n/g, ' ');
+      // Use robust cleaner to avoid breaking filter_complex with special characters
+      const makeSafeText = (t) => {
+        const cleaned = cleanTextForDrawtext(t || '');
+        // Extra hardening for ffmpeg drawtext: remove commas and semicolons which separate args
+        // and brackets/equals/percent that can confuse parser
+        return cleaned
+          .replace(/,/g, ' ')
+          .replace(/;/g, ',')
+          .replace(/\[/g, '(')
+          .replace(/\]/g, ')')
+          .replace(/\{/g, '(')
+          .replace(/\}/g, ')')
+          .replace(/%/g, ' percent ')
+          .replace(/=/g, ' equals ')
+          .trim();
+      };
 
       let lastLabel = '0:v';
       for (let i = 0; i < overlayTimings.length; i++) {
@@ -1080,6 +1091,10 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
           .complexFilter(complex)
           .outputOptions(['-map', '[vout]', '-map', '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-t', audioDuration.toString(), '-y'])
           .output(outputPath)
+          .on('start', (cmd) => {
+            console.log('FFmpeg complex filter:', complex);
+            console.log('FFmpeg overlay (async) command:', cmd);
+          })
           .on('end', resolve)
           .on('error', reject)
           .run();
