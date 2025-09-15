@@ -844,6 +844,14 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
 
       // Build drawtext filters directly on the base video, one per subtitle segment
       const drawFilters = [];
+      // Prefer bundled font to avoid fontconfig/missing-font issues in minimal runtimes
+      const fontPathUnix = BUNDLED_FONT_PATH.replace(/\\/g, '/');
+      const fontClause = hasBundledFont ? `:fontfile='${fontPathUnix}'` : '';
+      if (!hasBundledFont) {
+        console.warn('[drawtext] Bundled font not found in async path, relying on system fonts');
+      } else {
+        console.log('[drawtext] Using bundled font for async overlays:', fontPathUnix);
+      }
       // Use robust cleaner to avoid breaking filter_complex with special characters
       const makeSafeText = (t) => {
         const cleaned = cleanTextForDrawtext(t || '');
@@ -867,7 +875,7 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
         const safe = makeSafeText(seg.text);
         const outLabel = i === overlayTimings.length - 1 ? 'vout' : `v${i}`;
         // Bottom-centered with slight margin, minimal padding via boxborderw
-        const filter = `[${lastLabel}]drawtext=text='${safe}':fontcolor=white:fontsize=42:box=1:boxcolor=black@0.55:boxborderw=12:x=(w-text_w)/2:y=h-(text_h+220):enable='between(t,${seg.start},${seg.end})'[${outLabel}]`;
+        const filter = `[${lastLabel}]drawtext=text='${safe}'${fontClause}:fontcolor=white:fontsize=42:box=1:boxcolor=black@0.55:boxborderw=12:x=(w-text_w)/2:y=h-(text_h+220):enable='between(t,${seg.start},${seg.end})'[${outLabel}]`;
         drawFilters.push(filter);
         lastLabel = outLabel;
       }
