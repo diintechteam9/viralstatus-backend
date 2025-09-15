@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const ffprobeStatic = require('ffprobe-static');
@@ -62,7 +63,7 @@ const cleanupTempFiles = (filePaths) => {
 
 // Manual cleanup function for temp directory (can be called separately if needed)
 const cleanupTempDirectory = () => {
-  const tempDir = path.join(__dirname, '../temp');
+  const tempDir = path.join(os.tmpdir(), 'vs-video');
   if (!fs.existsSync(tempDir)) {
     console.log('Temp directory does not exist, nothing to clean');
     return;
@@ -155,7 +156,7 @@ const generateFinalVideo = async (req, res) => {
     });
 
     // Create temporary directory for processing
-    const tempDir = path.join(__dirname, '../temp');
+    const tempDir = path.join(os.tmpdir(), 'vs-video');
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
@@ -694,7 +695,7 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
     console.log('[async-video] 5% Initializing at', new Date().toISOString());
 
     // Create temporary directory for processing
-    const tempDir = path.join(__dirname, '../temp');
+    const tempDir = path.join(os.tmpdir(), 'vs-video');
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
@@ -881,6 +882,9 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
           .outputOptions(['-map', '[vout]', '-map', '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-t', audioDuration.toString(), '-y'])
           .addOption('-loglevel', 'verbose')
           .output(outputPath)
+          .on('stderr', (line) => {
+            console.log('[ffmpeg-async][stderr]', line);
+          })
           .on('start', (cmd) => {
             console.log('FFmpeg complex filter length:', complex.length);
             console.log('FFmpeg complex filter head:', complex.slice(0, 400));
