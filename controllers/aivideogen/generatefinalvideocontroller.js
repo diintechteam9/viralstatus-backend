@@ -251,7 +251,8 @@ const createTextOverlayImage = async (text, tempDir, index) => {
     
     await new Promise((resolve, reject) => {
       ffmpeg()
-        .input('color=black:size=1080x200:duration=1')
+        .input('color=c=black:s=1080x200:d=1')
+        .inputFormat('lavfi')
         .outputOptions([
           '-vf', `drawtext=text='${escapedText}':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=(h-text_h)/2`,
           '-frames:v', '1',
@@ -491,7 +492,7 @@ const generateFinalVideo = async (req, res) => {
             resolve();
           })
           .run();
-      });
+      }); 
       
       return finalImagePath;
     };
@@ -884,8 +885,267 @@ const generateFinalVideo = async (req, res) => {
   }
 };
 
+// Async version of generateFinalVideo for background processing
+const generateFinalVideoAsync = async (requestData, options = {}) => {
+  const { onProgress } = options;
+  
+  try {
+    // Clean up any leftover files from previous runs
+    console.log('Cleaning up any leftover files from previous runs...');
+    cleanupTempDirectory();
+    
+    // Extract data from request
+    const { images, audio, srt, imageSrt, deepSrt } = requestData;
+    
+    if (!images || !Array.isArray(images) || images.length === 0) {
+      throw new Error('No images provided');
+    }
+    
+    if (!audio) {
+      throw new Error('No audio provided');
+    }
+
+    if (!srt) {
+      throw new Error('No overlay SRT provided');
+    }
+
+    // imageSrt is required for image timing; fall back to deepSrt alias if provided
+    const imageTimingSrt = imageSrt || deepSrt;
+    if (!imageTimingSrt) {
+      throw new Error('No Deepgram SRT provided for image timing (imageSrt)');
+    }
+
+    console.log('Async video generation started:', {
+      imageCount: images.length,
+      hasAudio: !!audio,
+      hasOverlaySRT: !!srt,
+      hasImageTimingSRT: !!imageTimingSrt
+    });
+
+    if (onProgress) onProgress(5, 'Initializing video generation...');
+
+    // Create temporary directory for processing
+    const tempDir = path.join(__dirname, '../temp');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    if (onProgress) onProgress(10, 'Processing audio...');
+
+    // Save audio file
+    const audioBuffer = Buffer.from(audio, 'base64');
+    const audioPath = path.join(tempDir, 'input_audio.mp3');
+    fs.writeFileSync(audioPath, audioBuffer);
+
+    // Get audio duration using ffprobe
+    const getAudioDuration = () => new Promise((resolve, reject) => {
+      ffmpeg.ffprobe(audioPath, (err, metadata) => {
+        if (err) return reject(err);
+        resolve(metadata.format.duration);
+      });
+    });
+
+    const audioDuration = await getAudioDuration();
+    console.log('Audio duration:', audioDuration, 'seconds');
+
+    if (onProgress) onProgress(15, 'Processing SRT files...');
+
+    // Parse SRT to extract timing and text
+    const parseSRT = (srtContent) => {
+      const lines = srtContent.trim().split('\n');
+      const subtitles = [];
+      
+      for (let i = 0; i < lines.length; i += 4) {
+        if (lines[i] && !isNaN(lines[i])) {
+          const timeLine = lines[i + 1];
+          const text = lines[i + 2];
+          
+          if (timeLine && text) {
+            const [startTime, endTime] = timeLine.split(' --> ');
+            if (startTime && endTime) {
+              subtitles.push({
+                start: parseTimeToSeconds(startTime),
+                end: parseTimeToSeconds(endTime),
+                text: text.trim()
+              });
+            }
+          }
+        }
+      }
+      
+      return subtitles;
+    };
+
+    const parseTimeToSeconds = (timeStr) => {
+      const [time, ms] = timeStr.split(',');
+      const [hours, minutes, seconds] = time.split(':').map(Number);
+      return hours * 3600 + minutes * 60 + seconds + ms / 1000;
+    };
+
+    const sentenceTimings = parseSRT(imageTimingSrt);
+    const overlayTimings = parseSRT(srt);
+
+    console.log(`Parsed ${sentenceTimings.length} image timing segments and ${overlayTimings.length} overlay segments`);
+
+    if (onProgress) onProgress(20, 'Processing images...');
+
+    // Save images and create image sequence
+    const imagePaths = [];
+    for (let i = 0; i < images.length; i++) {
+      // Accept either base64 string or object with { image: base64 }
+      const rawImage = images[i];
+      const base64Data = typeof rawImage === 'string' ? rawImage : (rawImage && rawImage.image);
+      if (!base64Data || typeof base64Data !== 'string') {
+        throw new Error(`Invalid image data at index ${i} - expected base64 string or { image: base64 }`);
+      }
+      const imageBuffer = Buffer.from(base64Data, 'base64');
+      const imagePath = path.join(tempDir, `image_${i}.jpg`);
+      fs.writeFileSync(imagePath, imageBuffer);
+      imagePaths.push(imagePath);
+    }
+
+    if (onProgress) onProgress(30, 'Creating image sequence...');
+
+    // Create image sequence based on sentence timings
+    const inputFile = path.join(tempDir, 'input.txt');
+    let inputContent = '';
+    
+    for (let i = 0; i < sentenceTimings.length; i++) {
+      const timing = sentenceTimings[i];
+      const imageIndex = i % images.length;
+      const imagePath = imagePaths[imageIndex];
+      const duration = timing.end - timing.start;
+      
+      inputContent += `file '${imagePath}'\n`;
+      inputContent += `duration ${duration}\n`;
+    }
+    
+    // Add the last image for the remaining duration
+    if (sentenceTimings.length > 0) {
+      const lastImageIndex = (sentenceTimings.length - 1) % images.length;
+      const lastImagePath = imagePaths[lastImageIndex];
+      inputContent += `file '${lastImagePath}'\n`;
+    }
+    
+    fs.writeFileSync(inputFile, inputContent);
+
+    if (onProgress) onProgress(40, 'Generating base video...');
+
+    // Create base video from image sequence
+    const tempVideoPath = path.join(tempDir, 'temp_video.mp4');
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(inputFile)
+        .inputOptions(['-f', 'concat', '-safe', '0'])
+        .outputOptions(['-r', '30', '-pix_fmt', 'yuv420p', '-y'])
+        .output(tempVideoPath)
+        .on('end', resolve)
+        .on('error', reject)
+        .run();
+    });
+
+    if (onProgress) onProgress(60, 'Adding audio...');
+
+    // Add audio to the video
+    const outputPath = path.join(tempDir, 'final_video.mp4');
+    
+    if (overlayTimings.length > 0) {
+      if (onProgress) onProgress(70, 'Rendering text overlays...');
+
+      // Build drawtext filters directly on the base video, one per subtitle segment
+      const drawFilters = [];
+      const makeSafeText = (t) => t
+        .replace(/\\/g, '/')
+        .replace(/'/g, "\\'")
+        .replace(/:/g, ' ')
+        .replace(/\n/g, ' ');
+
+      let lastLabel = '0:v';
+      for (let i = 0; i < overlayTimings.length; i++) {
+        const seg = overlayTimings[i];
+        const safe = makeSafeText(seg.text);
+        const outLabel = i === overlayTimings.length - 1 ? 'vout' : `v${i}`;
+        // Bottom-centered with slight margin, minimal padding via boxborderw
+        const filter = `[${lastLabel}]drawtext=text='${safe}':fontcolor=white:fontsize=42:box=1:boxcolor=black@0.55:boxborderw=12:x=(w-text_w)/2:y=h-(text_h+220):enable='between(t,${seg.start},${seg.end})'[${outLabel}]`;
+        drawFilters.push(filter);
+        lastLabel = outLabel;
+      }
+
+      const complex = drawFilters.join(';');
+
+      await new Promise((resolve, reject) => {
+        ffmpeg()
+          .input(tempVideoPath)
+          .input(audioPath)
+          .complexFilter(complex)
+          .outputOptions(['-map', '[vout]', '-map', '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-t', audioDuration.toString(), '-y'])
+          .output(outputPath)
+          .on('end', resolve)
+          .on('error', reject)
+          .run();
+      });
+    } else {
+      // No text overlays, just trim the base video to audio duration
+      await new Promise((resolve, reject) => {
+        ffmpeg()
+          .input(tempVideoPath)
+          .outputOptions(['-t', audioDuration.toString(), '-c', 'copy', '-y'])
+          .output(outputPath)
+          .on('end', resolve)
+          .on('error', reject)
+          .run();
+      });
+    }
+
+    if (onProgress) onProgress(90, 'Finalizing video...');
+
+    // Verify final video duration
+    const finalVideoDuration = await new Promise((resolve, reject) => {
+      ffmpeg.ffprobe(outputPath, (err, metadata) => {
+        if (err) return reject(err);
+        resolve(metadata.format.duration);
+      });
+    });
+    
+    console.log(`Final video duration: ${finalVideoDuration.toFixed(3)}s (target: ${audioDuration.toFixed(3)}s)`);
+
+    // Read the generated video
+    const videoBuffer = fs.readFileSync(outputPath);
+
+    // Clean up temporary processing files
+    const allTempFiles = [
+      ...imagePaths,
+      audioPath,
+      inputFile,
+      tempVideoPath,
+      outputPath,
+      ...(overlayTimings.length > 0 ? overlayTimings.map((_, i) => path.join(tempDir, `overlay_${i}.mp4`)) : [])
+    ];
+    
+    cleanupTempFiles(allTempFiles);
+
+    if (onProgress) onProgress(100, 'Video generation completed!');
+
+    // Return video data (without base64 for async processing)
+    return {
+      success: true,
+      video: videoBuffer, // Return as Buffer for S3 upload
+      duration: finalVideoDuration,
+      audioDuration: audioDuration,
+      imageCount: images.length,
+      sentenceCount: sentenceTimings.length,
+      durationMatch: Math.abs(finalVideoDuration - audioDuration) < 0.1
+    };
+
+  } catch (error) {
+    console.error('Async video generation error:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   generateFinalVideo,
+  generateFinalVideoAsync,
   cleanupTempFiles,
   cleanupTempDirectory
 };

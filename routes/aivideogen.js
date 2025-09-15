@@ -11,6 +11,16 @@ const {generateSRT}=require('../controllers/aivideogen/deepgramwordsrtcontroller
 // for final video
 const {generateFinalVideo}=require('../controllers/aivideogen/generatefinalvideocontroller');
 
+// for async video generation
+const {
+  createAsyncVideoJob,
+  getJobStatus,
+  getUserJobs,
+  cancelJob,
+  getSystemStatus,
+  cleanupOldJobs
+} = require('../controllers/aivideogen/asyncVideoController');
+
 // for image generation 
 const {generateImage}=require('../controllers/aivideogen/generateimagecontroller');
 
@@ -35,7 +45,13 @@ router.delete('/videocard/:id',deletevideocard);
 
 router.post('/sentenceSRT',getSrtFromAudio);   // for sentence srt 
 router.post('/wordSRT',generateSRT);  // for word srt 
-router.post('/generate-finalvideo',generateFinalVideo);  // for final video 
+router.post('/generate-finalvideo',generateFinalVideo);  // for final video (synchronous - legacy)
+router.post('/generate-finalvideo-async',createAsyncVideoJob);  // for async video generation
+router.get('/job-status/:jobId',getJobStatus);  // get job status
+router.get('/user-jobs',getUserJobs);  // get user's video jobs
+router.delete('/job/:jobId',cancelJob);  // cancel a job
+router.get('/system-status',getSystemStatus);  // get system status
+router.post('/cleanup-jobs',cleanupOldJobs);  // cleanup old jobs (admin)
 router.post('/generate-image',generateImage);  // for image generation 
 router.post('/generate-prompt',generatePrompt);  // for image prompt 
 router.post('/generate-video',generateVideo);  // for image to video using the prompt 
