@@ -923,6 +923,7 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
     });
 
     if (onProgress) onProgress(5, 'Initializing video generation...');
+    console.log('[async-video] 5% Initializing at', new Date().toISOString());
 
     // Create temporary directory for processing
     const tempDir = path.join(__dirname, '../temp');
@@ -931,6 +932,7 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
     }
 
     if (onProgress) onProgress(10, 'Processing audio...');
+    console.log('[async-video] 10% Processing audio at', new Date().toISOString());
 
     // Save audio file
     const audioBuffer = Buffer.from(audio, 'base64');
@@ -949,6 +951,7 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
     console.log('Audio duration:', audioDuration, 'seconds');
 
     if (onProgress) onProgress(15, 'Processing SRT files...');
+    console.log('[async-video] 15% Processing SRTs at', new Date().toISOString());
 
     // Parse SRT to extract timing and text
     const parseSRT = (srtContent) => {
@@ -988,6 +991,7 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
     console.log(`Parsed ${sentenceTimings.length} image timing segments and ${overlayTimings.length} overlay segments`);
 
     if (onProgress) onProgress(20, 'Processing images...');
+    console.log('[async-video] 20% Processing images count=', images.length);
 
     // Save images and create image sequence
     const imagePaths = [];
@@ -1005,6 +1009,7 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
     }
 
     if (onProgress) onProgress(30, 'Creating image sequence...');
+    console.log('[async-video] 30% Creating image sequence at', new Date().toISOString());
 
     // Create image sequence based on sentence timings
     const inputFile = path.join(tempDir, 'input.txt');
@@ -1030,6 +1035,7 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
     fs.writeFileSync(inputFile, inputContent);
 
     if (onProgress) onProgress(40, 'Generating base video...');
+    console.log('[async-video] 40% Base video (concat) start at', new Date().toISOString());
 
     // Create base video from image sequence
     const tempVideoPath = path.join(tempDir, 'temp_video.mp4');
@@ -1039,18 +1045,32 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
         .inputOptions(['-f', 'concat', '-safe', '0'])
         .outputOptions(['-r', '30', '-pix_fmt', 'yuv420p', '-y'])
         .output(tempVideoPath)
-        .on('end', resolve)
-        .on('error', reject)
+        .on('start', (cmd) => {
+          console.log('[ffmpeg-async] base video command:', cmd);
+        })
+        .on('progress', (p) => {
+          console.log('[ffmpeg-async] base video progress:', p?.percent);
+        })
+        .on('end', () => {
+          console.log('[ffmpeg-async] base video done at', new Date().toISOString());
+          resolve();
+        })
+        .on('error', (err) => {
+          console.error('[ffmpeg-async] base video error:', err?.message || err);
+          reject(err);
+        })
         .run();
     });
 
     if (onProgress) onProgress(60, 'Adding audio...');
+    console.log('[async-video] 60% Adding audio / overlays prep at', new Date().toISOString());
 
     // Add audio to the video
     const outputPath = path.join(tempDir, 'final_video.mp4');
     
     if (overlayTimings.length > 0) {
       if (onProgress) onProgress(70, 'Rendering text overlays...');
+      console.log('[async-video] 70% Rendering overlays segments=', overlayTimings.length);
 
       // Build drawtext filters directly on the base video, one per subtitle segment
       const drawFilters = [];
@@ -1092,11 +1112,21 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
           .outputOptions(['-map', '[vout]', '-map', '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-t', audioDuration.toString(), '-y'])
           .output(outputPath)
           .on('start', (cmd) => {
-            console.log('FFmpeg complex filter:', complex);
+            console.log('FFmpeg complex filter length:', complex.length);
+            console.log('FFmpeg complex filter head:', complex.slice(0, 400));
             console.log('FFmpeg overlay (async) command:', cmd);
           })
-          .on('end', resolve)
-          .on('error', reject)
+          .on('progress', (p) => {
+            console.log('[ffmpeg-async] overlays progress:', p?.percent);
+          })
+          .on('end', () => {
+            console.log('[ffmpeg-async] overlays done at', new Date().toISOString());
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error('[ffmpeg-async] overlays error:', err?.message || err);
+            reject(err);
+          })
           .run();
       });
     } else {
@@ -1106,13 +1136,26 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
           .input(tempVideoPath)
           .outputOptions(['-t', audioDuration.toString(), '-c', 'copy', '-y'])
           .output(outputPath)
-          .on('end', resolve)
-          .on('error', reject)
+          .on('start', (cmd) => {
+            console.log('[ffmpeg-async] trim-only command:', cmd);
+          })
+          .on('progress', (p) => {
+            console.log('[ffmpeg-async] trim-only progress:', p?.percent);
+          })
+          .on('end', () => {
+            console.log('[ffmpeg-async] trim-only done at', new Date().toISOString());
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error('[ffmpeg-async] trim-only error:', err?.message || err);
+            reject(err);
+          })
           .run();
       });
     }
 
     if (onProgress) onProgress(90, 'Finalizing video...');
+    console.log('[async-video] 90% Finalizing at', new Date().toISOString());
 
     // Verify final video duration
     const finalVideoDuration = await new Promise((resolve, reject) => {
@@ -1140,6 +1183,7 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
     cleanupTempFiles(allTempFiles);
 
     if (onProgress) onProgress(100, 'Video generation completed!');
+    console.log('[async-video] 100% Completed at', new Date().toISOString());
 
     // Return video data (without base64 for async processing)
     return {
