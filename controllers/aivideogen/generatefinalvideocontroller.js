@@ -14,20 +14,31 @@ const videoStorage = new VideoStorageService();
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 ffmpeg.setFfprobePath(ffprobeStatic.path);
 
-// Optional bundled font to avoid system font dependency
-const BUNDLED_FONT_PATH = path.join(__dirname, '../../assets/fonts/NotoSans-Regular.ttf');
-const hasBundledFont = fs.existsSync(BUNDLED_FONT_PATH);
+// Optional bundled fonts to avoid system font dependency
+const FONT_DIR = path.join(__dirname, '../../assets/fonts');
+const FONT_MAP = {
+  notosans: path.join(FONT_DIR, 'NotoSans-Regular.ttf'),
+  khand: path.join(FONT_DIR, 'Khand-Bold.ttf'),
+  poppins: path.join(FONT_DIR, 'Poppins-Bold.ttf'),
+};
 
-// Build drawtext filter using bundled font when available (avoids system fonts)
-const buildDrawtextFilter = (text) => {
-  const base = `text='${text}':fontcolor=0xFFFFFF:fontsize=45:box=1:boxcolor=black@0.8:boxborderw=8:x=(w-text_w)/2:y=(h-text_h-250):line_spacing=10`;
-  if (hasBundledFont) {
+const resolveFontPath = (fontKey) => {
+  const key = (fontKey || 'notosans').toLowerCase();
+  const candidate = FONT_MAP[key] || FONT_MAP.notosans;
+  return fs.existsSync(candidate) ? candidate : null;
+};
+
+// Build drawtext filter using selected bundled font when available (avoids system fonts)
+const buildDrawtextFilter = (text, fontKey) => {
+  const base = `text='${text}':fontcolor=0xFFFFFF:fontsize=45:borderw=2:box=1:boxcolor=black@0.8:boxborderw=8:x=(w-text_w)/2:y=(h-text_h-250):line_spacing=10`;
+  const fontPath = resolveFontPath(fontKey);
+  if (fontPath) {
     // Use fontfile to avoid fontconfig/system fonts
-    const fontPathUnix = BUNDLED_FONT_PATH.replace(/\\/g, '/');
+    const fontPathUnix = fontPath.replace(/\\/g, '/');
     return `drawtext=fontfile='${fontPathUnix}':${base}`;
   }
   // Fallback to system font discovery if bundled font missing
-  console.warn('[drawtext] Bundled font not found, falling back to system fonts');
+  console.warn('[drawtext] Bundled font not found for key', fontKey, 'falling back to system fonts');
   return `drawtext=${base}`;
 };
 
@@ -128,7 +139,7 @@ const generateFinalVideo = async (req, res) => {
     cleanupTempDirectory();
     
     // Accept a separate SRT for image timing (imageSrt), keeping srt for overlay text
-    const { images, audio, srt, imageSrt, deepSrt } = req.body;
+    const { images, audio, srt, imageSrt, deepSrt, overlayFont } = req.body;
     
     if (!images || !Array.isArray(images) || images.length === 0) {
       return res.status(400).json({ error: 'No images provided' });
@@ -475,7 +486,7 @@ const generateFinalVideo = async (req, res) => {
         }
 
         // Create drawtext filter (English-only path) using bundled font when available
-        let drawtextFilter = buildDrawtextFilter(cleanText);
+        let drawtextFilter = buildDrawtextFilter(cleanText, overlayFont);
         
         await new Promise((resolve, reject) => {
           const ffmpegCommand = ffmpeg()
@@ -664,7 +675,7 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
     cleanupTempDirectory();
     
     // Extract data from request
-    const { images, audio, srt, imageSrt, deepSrt } = requestData;
+    const { images, audio, srt, imageSrt, deepSrt, overlayFont } = requestData;
     
     if (!images || !Array.isArray(images) || images.length === 0) {
       throw new Error('No images provided');
@@ -845,12 +856,12 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
       // Build drawtext filters directly on the base video, one per subtitle segment
       const drawFilters = [];
       // Prefer bundled font to avoid fontconfig/missing-font issues in minimal runtimes
-      const fontPathUnix = BUNDLED_FONT_PATH.replace(/\\/g, '/');
-      const fontClause = hasBundledFont ? `:fontfile='${fontPathUnix}'` : '';
-      if (!hasBundledFont) {
-        console.warn('[drawtext] Bundled font not found in async path, relying on system fonts');
+      const selectedFontPath = resolveFontPath(overlayFont);
+      const fontClause = selectedFontPath ? `:fontfile='${selectedFontPath.replace(/\\/g, '/')}'` : '';
+      if (!selectedFontPath) {
+        console.warn('[drawtext] Selected bundled font not found in async path, relying on system fonts');
       } else {
-        console.log('[drawtext] Using bundled font for async overlays:', fontPathUnix);
+        console.log('[drawtext] Using bundled font for async overlays:', selectedFontPath);
       }
       // Use robust cleaner to avoid breaking filter_complex with special characters
       const makeSafeText = (t) => {
@@ -875,7 +886,7 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
         const safe = makeSafeText(seg.text);
         const outLabel = i === overlayTimings.length - 1 ? 'vout' : `v${i}`;
         // Bottom-centered with slight margin, minimal padding via boxborderw
-        const filter = `[${lastLabel}]drawtext=text='${safe}'${fontClause}:fontcolor=white:fontsize=42:box=1:boxcolor=black@0.55:boxborderw=12:x=(w-text_w)/2:y=h-(text_h+220):enable='between(t,${seg.start},${seg.end})'[${outLabel}]`;
+        const filter = `[${lastLabel}]drawtext=text='${safe}'${fontClause}:fontcolor=white:fontsize=42:borderw=2:box=1:boxcolor=black@0.55:boxborderw=12:x=(w-text_w)/2:y=h-(text_h+220):enable='between(t,${seg.start},${seg.end})'[${outLabel}]`;
         drawFilters.push(filter);
         lastLabel = outLabel;
       }
