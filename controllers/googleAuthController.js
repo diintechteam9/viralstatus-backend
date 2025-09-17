@@ -32,30 +32,44 @@ const verifyUserOrClient = async (req, res) => {
 
     const { email, name, picture, emailVerified, googleId } = googleUser;
 
-    let Model = User;
-    // if (role === "user") {
-    //   Model = User;
-    // } else if (role === "client") {
-    //   Model = Client;
-    // } else {
-    //   return res.status(400).json({ success: false, message: "Invalid role" });
-    // }
+    // Default to 'user'; if explicitly called from client login, expect role: 'client'
+    const role = (req.body && typeof req.body.role === 'string') ? req.body.role.toLowerCase() : 'user';
+
+    let Model;
+    if (role === 'client') {
+      Model = Client;
+    } else if (role === 'user') {
+      Model = User;
+    } else {
+      return res.status(400).json({ success: false, message: "Invalid role" });
+    }
     
 
 
     // Find or create user/client
     let entity = await Model.findOne({ email });
     if (!entity) {
-      entity = await Model.create({
+      const baseDoc = {
         name: name || email.split("@")[0],
         email,
         isGoogleUser: true,
         googleId: googleId,
         googlePicture: picture,
         emailVerified: emailVerified,
-        isClient:false,
+        isProfileCompleted: false,
         password: "", // No password for Google users
-      });
+      };
+      // Only User schema has isClient; default false for users
+      if (Model === User) {
+        baseDoc.isClient = false;
+      }
+      entity = await Model.create(baseDoc);
+    } else {
+      // Update login metadata
+      entity.googlePicture = picture || entity.googlePicture;
+      entity.emailVerified = emailVerified;
+      entity.lastLoginAt = new Date();
+      await entity.save();
     }
 
     const authToken = generateToken(entity._id);
@@ -66,11 +80,11 @@ const verifyUserOrClient = async (req, res) => {
       message: "Verified successfully",
       authToken,
       MongoId,
-      isClient: entity.isClient,
+      isClient: role === 'client',
       email: entity.email,
       name: entity.name,
       emailVerified: entity.emailVerified,
-      isProfileCompleted: true, // or your own logic
+      isProfileCompleted: entity.isProfileCompleted,
       googleId: entity.googleId,
     });
   } catch (error) {

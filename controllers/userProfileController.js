@@ -72,6 +72,16 @@ const createUserProfile = async (req, res) => {
         userMongoId = userDoc._id;
       }
     }
+    // Also fetch client MongoId if exists
+    let clientMongoId = undefined;
+    if (req.client?.id) {
+      clientMongoId = req.client.id;
+    } else if (userEmail) {
+      const clientDoc = await Client.findOne({ email: userEmail }).select('_id');
+      if (clientDoc) {
+        clientMongoId = clientDoc._id;
+      }
+    }
     // Create new user profile with request body prioritized, fallback to clientDetails if missing
     const userProfile = await UserProfile.create({
       name: name || clientDetails?.name || "",
@@ -91,8 +101,9 @@ const createUserProfile = async (req, res) => {
       otherSkills,
       socialMedia,
       isProfileCompleted,
-      isClient: false, // Always set to false when creating a new profile
-      userId: userMongoId // Save the user's MongoDB ObjectId
+      isClient: !!clientMongoId, // mark client if coming from client
+      userId: userMongoId, // Save the user's MongoDB ObjectId
+      clientId: clientMongoId // Save the client's MongoDB ObjectId when present
     });
 
     // Automatically add user to groups for each business interest
@@ -383,8 +394,10 @@ const getCurrentUserProfile = async (req, res) => {
  */
 const updateUserProfile = async (req, res) => {
   try {
-    // Get the user's MongoDB ObjectId from the decoded token
+    // Identify the authenticated principal (user or client)
     const userMongoId = req.user?.id;
+    const clientMongoId = req.client?.id;
+    const authenticatedEmail = req.user?.email || req.client?.email;
     const updateData = req.body;
 
     // Remove fields that shouldn't be updated
@@ -408,19 +421,67 @@ const updateUserProfile = async (req, res) => {
     updateData.isProfileCompleted = isProfileCompleted;
 
     let updatedProfile;
-    if (userMongoId && mongoose.Types.ObjectId.isValid(userMongoId)) {
+    // Prefer updating by email for clients or if email is known
+    const emailToUse = authenticatedEmail || updateData.email;
+    if (emailToUse) {
+      updatedProfile = await UserProfile.findOneAndUpdate(
+        { email: emailToUse },
+        updateData,
+        { new: true, runValidators: true }
+      );
+    }
+    // Fallback: update by userId for user accounts
+    if (!updatedProfile && userMongoId && mongoose.Types.ObjectId.isValid(userMongoId)) {
       updatedProfile = await UserProfile.findOneAndUpdate(
         { userId: userMongoId },
         updateData,
         { new: true, runValidators: true }
       );
     }
+    // Fallback: update by clientId for client accounts
+    if (!updatedProfile && clientMongoId && mongoose.Types.ObjectId.isValid(clientMongoId)) {
+      updatedProfile = await UserProfile.findOneAndUpdate(
+        { clientId: clientMongoId },
+        updateData,
+        { new: true, runValidators: true }
+      );
+    }
+    // Extra fallback: if only client id is present, try linking by client email (already handled above)
 
     if (!updatedProfile) {
       return res.status(404).json({
         success: false,
         message: "User profile not found"
       });
+    }
+
+    // Sync isProfileCompleted to User/Client models as well
+    try {
+      if (userMongoId && mongoose.Types.ObjectId.isValid(userMongoId)) {
+        await User.findByIdAndUpdate(userMongoId, { isProfileCompleted });
+      } else if (authenticatedEmail) {
+        // If no user id but email exists, try finding user by email
+        const userDoc = await User.findOne({ email: authenticatedEmail }).select('_id');
+        if (userDoc) {
+          await User.findByIdAndUpdate(userDoc._id, { isProfileCompleted });
+        }
+      }
+    } catch (e) {
+      console.error('Failed syncing isProfileCompleted to User:', e);
+    }
+
+    try {
+      if (clientMongoId && mongoose.Types.ObjectId.isValid(clientMongoId)) {
+        await Client.findByIdAndUpdate(clientMongoId, { isProfileCompleted });
+      } else if (authenticatedEmail) {
+        // If no client id but email exists, try finding client by email
+        const clientDoc = await Client.findOne({ email: authenticatedEmail }).select('_id');
+        if (clientDoc) {
+          await Client.findByIdAndUpdate(clientDoc._id, { isProfileCompleted });
+        }
+      }
+    } catch (e) {
+      console.error('Failed syncing isProfileCompleted to Client:', e);
     }
 
     // Automatically add user to groups for each business interest after update

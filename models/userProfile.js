@@ -198,6 +198,12 @@ const userProfileSchema = new mongoose.Schema({
     required: false,
     index: true
   },
+  clientId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Client',
+    required: false,
+    index: true
+  },
   createdAt: {
     type: Date,
     default: Date.now
