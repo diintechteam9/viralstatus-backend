@@ -72,6 +72,7 @@ const createUserProfile = async (req, res) => {
         userMongoId = userDoc._id;
       }
     }
+
     // Also fetch client MongoId if exists
     let clientMongoId = undefined;
     if (req.client?.id) {
@@ -135,12 +136,31 @@ const createUserProfile = async (req, res) => {
       }
     }
 
-    // After creating the user profile, sync isProfileCompleted to Client if true
-    if (isProfileCompleted && userEmail) {
-      await Client.findOneAndUpdate(
-        { email: userEmail },
-        { isProfileCompleted: true }
-      );
+    // After creating the user profile, sync isProfileCompleted to related User and Client
+    try {
+      if (userMongoId && mongoose.Types.ObjectId.isValid(userMongoId)) {
+        await User.findByIdAndUpdate(userMongoId, { isProfileCompleted });
+      } else if (userEmail) {
+        const userDoc = await User.findOne({ email: userEmail }).select('_id');
+        if (userDoc) {
+          await User.findByIdAndUpdate(userDoc._id, { isProfileCompleted });
+        }
+      }
+    } catch (e) {
+      console.error('Failed syncing isProfileCompleted to User (create):', e);
+    }
+
+    try {
+      if (clientMongoId && mongoose.Types.ObjectId.isValid(clientMongoId)) {
+        await Client.findByIdAndUpdate(clientMongoId, { isProfileCompleted });
+      } else if (userEmail) {
+        await Client.findOneAndUpdate(
+          { email: userEmail },
+          { isProfileCompleted }
+        );
+      }
+    } catch (e) {
+      console.error('Failed syncing isProfileCompleted to Client (create):', e);
     }
 
     res.status(201).json({

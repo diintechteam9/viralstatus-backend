@@ -22,7 +22,7 @@ const generateToken = (id) => {
 const verifyUserOrClient = async (req, res) => {
   try {
     // Log incoming googleUser and role for debugging
-    console.error('verifyUserOrClient: req.googleUser:', req.googleUser);
+    console.log('verifyUserOrClient: req.googleUser:', req.googleUser);
     const { googleUser } = req;
     // const { role } = req.body; // 'user' or 'client'
 
