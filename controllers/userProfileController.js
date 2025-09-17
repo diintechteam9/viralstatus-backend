@@ -29,6 +29,7 @@ const createUserProfile = async (req, res) => {
       isClient,
     } = req.body;
 
+    console.log(req.body);
 
     // Use authenticated user's email if available, otherwise use provided email
     const userEmail = req.user?.email || email;
