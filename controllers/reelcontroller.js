@@ -449,12 +449,15 @@ exports.getSharedReelsForUser = async (req, res) => {
         s3Key: r.s3Key,
         s3Url: r.s3Key ? await getobject(r.s3Key) : '',
         campaignId: r.campaignId,
+        campaignName: r.campaignName || '',
+        credits: r.credits || 0,
         title: r.title || '',
         campaignImageKey: r.campaignImageKey || '',
         campaignImageUrl: r.campaignImageKey ? await getobject(r.campaignImageKey) : '',
         TaskStatus: r.TaskStatus || 'assigned',   
         _id: r._id,
-        status: userRespEntry ? userRespEntry.status : 'pending'
+        status: userRespEntry ? userRespEntry.status : 'pending',
+        createdAt: r.createdAt,
       };
     }));
     res.status(200).json({ success: true, reels: reelsWithFreshUrls });
