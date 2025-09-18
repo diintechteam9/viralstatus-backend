@@ -347,6 +347,8 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
       // Fetch user's existing SharedReels document
       const shared = await SharedReels.findOne({ googleId: userId });
       const existingReelIds = shared ? shared.reels.map(r => r.reelId) : [];
+      const campaignName = campaign.campaignName;
+      const campaignCredits = campaign.credits;
 
       // Assign reelsPerUser reels to this user
       let assignedCount = 0;
@@ -362,11 +364,14 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
           s3Key: reel.s3Key,
           s3Url: reel.s3Url,
           campaignId: campaignId,
+          campaignName: campaignName,
+          credits: campaignCredits,
           title: reel.title || '',
           campaignImageKey: campaignImageKey,
           isTaskComplete: false,
           isTaskAccepted: false,
           TaskStatus: 'assigned',
+          createdAt: new Date()
         });
         assignedCount++;
       }
@@ -447,7 +452,7 @@ exports.getSharedReelsForUser = async (req, res) => {
         title: r.title || '',
         campaignImageKey: r.campaignImageKey || '',
         campaignImageUrl: r.campaignImageKey ? await getobject(r.campaignImageKey) : '',
-        TaskStatus: r.TaskStatus || 'assigned',
+        TaskStatus: r.TaskStatus || 'assigned',   
         _id: r._id,
         status: userRespEntry ? userRespEntry.status : 'pending'
       };

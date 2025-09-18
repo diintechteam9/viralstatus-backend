@@ -22,6 +22,14 @@ const sharedReelsSchema = new mongoose.Schema({
       campaignId:{
         type:String
       },
+      campaignName:{
+        type: String,
+        default: ''
+      },
+      credits:{
+        type: Number,
+        default: 0
+      },
       title: {
         type: String,
         default: ''
@@ -41,6 +49,10 @@ const sharedReelsSchema = new mongoose.Schema({
       TaskStatus : {
         type: String,
         default: 'assigned'
+      },
+      createdAt:{
+        type: Date,
+        default: Date.now
       }
     }
   ]

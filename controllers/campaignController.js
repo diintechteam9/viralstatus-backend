@@ -233,6 +233,28 @@ exports.updateCampaign = async (req, res) => {
       updateData.cutoff = Number(updateData.cutoff);
     }
     console.log('Update data received:', updateData);
+    // Fetch existing to compute next isActive from dates/status
+    const existing = await Campaign.findById(campaignId);
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+
+    // Determine effective dates/status
+    const effectiveStart = updateData.startDate ? new Date(updateData.startDate) : existing.startDate;
+    const effectiveEnd = updateData.endDate ? new Date(updateData.endDate) : existing.endDate;
+    const effectiveStatus = updateData.status !== undefined ? updateData.status : existing.status;
+
+    // Recalculate isActive: Active if now within [start, end] and status not 'Inactive'
+    const now = new Date();
+    const computedIsActive = (
+      effectiveStatus !== 'Inactive' &&
+      effectiveStart instanceof Date && !isNaN(effectiveStart) &&
+      effectiveEnd instanceof Date && !isNaN(effectiveEnd) &&
+      effectiveStart <= now && now <= effectiveEnd
+    );
+
+    updateData.isActive = computedIsActive;
+
     const updatedCampaign = await Campaign.findOneAndUpdate(
       { _id: campaignId },
       updateData,
@@ -297,29 +319,62 @@ exports.registeredCampaign = async (req, res) => {
   }
 };
 
-// Get a user's registered campaigns by userId or googleId
+// Get a user's registered campaigns by userId or googleId (always fetch fresh campaign data)
 exports.getUserRegisteredCampaigns = async (req, res) => {
   try {
     const { userId, googleId } = req.query;
     if (!userId && !googleId) {
       return res.status(400).json({ success: false, message: 'Missing userId or googleId' });
     }
-    let reg;
-    if (userId) {
-      reg = await RegisteredCampaign.findOne({ userId }).lean();
-    } else if (googleId) {
-      reg = await RegisteredCampaign.findOne({ googleId }).lean();
-    }
+
+    // In our RegisteredCampaign schema, the field is `userId` (typically googleId)
+    const lookupUserId = userId || googleId;
+    const reg = await RegisteredCampaign.findOne({ userId: lookupUserId }).lean();
     if (!reg) {
       return res.status(404).json({ success: false, message: 'No registered campaigns found for user' });
     }
+
+    // Extract campaign ids from stored entries (if present)
+    const campaignIds = (reg.registeredCampaigns || [])
+      .map(e => e?.campaign?._id)
+      .filter(Boolean);
+
+    // Fetch fresh campaign documents
+    const freshCampaigns = campaignIds.length > 0
+      ? await Campaign.find({ _id: { $in: campaignIds } }).lean()
+      : [];
+
+    // Map for quick lookup
+    const idToCampaign = new Map(freshCampaigns.map(c => [c._id.toString(), c]));
+
+    // Helper to compute active flag from dates/status
+    const computeIsActive = (c) => {
+      if (!c) return false;
+      const status = c.status;
+      const start = new Date(c.startDate);
+      const end = new Date(c.endDate);
+      const now = new Date();
+      if (status === 'Inactive') return false;
+      if (isNaN(start) || isNaN(end)) return false;
+      return start <= now && now <= end;
+    };
+
+    // Regenerate presigned URLs and split into active/expired, preserving registeredAt
+    const active = [];
+    const expired = [];
     for (const entry of reg.registeredCampaigns) {
-      if (entry.campaign && entry.campaign.image && entry.campaign.image.key) {
-        entry.campaign.image.url = await getobject(entry.campaign.image.key);
+      const storedId = entry?.campaign?._id?.toString?.();
+      const fresh = storedId ? idToCampaign.get(storedId) : null;
+      const campaignObj = fresh || entry.campaign || null;
+      if (campaignObj && campaignObj.image && campaignObj.image.key) {
+        campaignObj.image.url = await getobject(campaignObj.image.key);
       }
+      const isActive = computeIsActive(campaignObj);
+      const item = { campaign: campaignObj, registeredAt: entry.registeredAt };
+      if (isActive) active.push(item); else expired.push(item);
     }
-    res.json({ success: true, registeredCampaigns: reg.registeredCampaigns });
-    console.log(res)
+
+    res.json({ success: true, active, expired });
   } catch (err) {
     console.error('Get user registered campaigns error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
