@@ -118,7 +118,7 @@ const generateVideo = async (req, res) => {
     motion_mode = 'normal',
     negative_prompt = '',
     camera_movement,
-    quality = '360p',
+    quality = '720p',
     seed = 0,
     template_id,
     water_mark = false,
