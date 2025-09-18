@@ -6,7 +6,7 @@ const videoJobService = require('../../services/videoJobService');
  */
 const createAsyncVideoJob = async (req, res) => {
   try {
-    const { images, audio, srt, imageSrt, deepSrt, cardName, category } = req.body;
+    const { images, audio, srt, imageSrt, deepSrt, cardName, category, cardId, storyScript, sentenceSrt, wordSrt } = req.body;
     const userId = req.user?.id || req.user?._id || null; // Handle different user ID formats, allow null for unauthenticated users
 
     // Validate required fields
@@ -60,7 +60,11 @@ const createAsyncVideoJob = async (req, res) => {
       imageSrt: imageSrt || deepSrt,
       cardName,
       category,
-      userId
+      userId,
+      cardId,
+      storyScript,
+      sentenceSrt,
+      wordSrt
     });
 
     // Start processing the job
@@ -164,6 +168,33 @@ const getUserJobs = async (req, res) => {
 };
 
 /**
+ * Get card's video jobs (history)
+ * GET /api/videocard/card-jobs/:cardId
+ */
+const getCardJobs = async (req, res) => {
+  try {
+    const { cardId } = req.params;
+    const { limit = 20, skip = 0 } = req.query;
+
+    const VideoJob = require('../../models/VideoJob');
+    const jobs = await VideoJob.getCardJobs(cardId, parseInt(limit), parseInt(skip));
+
+    res.json({
+      success: true,
+      jobs
+    });
+
+  } catch (error) {
+    console.error('Error getting card jobs:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get card jobs',
+      details: error.message
+    });
+  }
+};
+
+/**
  * Cancel a job
  * DELETE /api/videocard/job/:jobId
  */
@@ -254,6 +285,7 @@ module.exports = {
   createAsyncVideoJob,
   getJobStatus,
   getUserJobs,
+  getCardJobs,
   cancelJob,
   getSystemStatus,
   cleanupOldJobs

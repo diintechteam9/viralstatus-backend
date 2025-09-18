@@ -55,6 +55,31 @@ const videoJobSchema = new mongoose.Schema({
         type: Number
     },
     
+    // Audio S3 storage details (for generated/uploaded narration)
+    audioS3Key: {
+        type: String,
+        trim: true
+    },
+    
+    audioS3Url: {
+        type: String,
+        trim: true
+    },
+    
+    audioFileName: {
+        type: String,
+        trim: true
+    },
+    
+    audioFileSize: {
+        type: Number
+    },
+    
+    audioContentType: {
+        type: String,
+        trim: true
+    },
+    
     // Video metadata
     duration: {
         type: Number
@@ -70,6 +95,26 @@ const videoJobSchema = new mongoose.Schema({
     
     sentenceCount: {
         type: Number
+    },
+    
+    // Link back to the card (project)
+    cardId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'video',
+        required: false
+    },
+    
+    // Creation artifacts (for history/repro)
+    storyScript: {
+        type: String
+    },
+    
+    sentenceSrt: {
+        type: String
+    },
+    
+    wordSrt: {
+        type: String
     },
     
     // User information
@@ -110,6 +155,7 @@ const videoJobSchema = new mongoose.Schema({
 videoJobSchema.index({ status: 1, createdAt: -1 });
 videoJobSchema.index({ userId: 1, createdAt: -1 });
 videoJobSchema.index({ cardName: 1, category: 1 });
+videoJobSchema.index({ cardId: 1, createdAt: -1 });
 
 // Virtual for formatted duration
 videoJobSchema.virtual('formattedDuration').get(function() {
@@ -169,8 +215,12 @@ videoJobSchema.statics.createJob = function(jobData) {
         jobId,
         cardName: jobData.cardName,
         category: jobData.category,
+        cardId: jobData.cardId,
         userId: jobData.userId,
-        requestData: jobData.requestData
+        requestData: jobData.requestData,
+        storyScript: jobData.storyScript,
+        sentenceSrt: jobData.sentenceSrt,
+        wordSrt: jobData.wordSrt
     });
 };
 
@@ -182,6 +232,15 @@ videoJobSchema.statics.getJobById = function(jobId) {
 // Static method to get user's jobs
 videoJobSchema.statics.getUserJobs = function(userId, limit = 10, skip = 0) {
     return this.find({ userId })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .skip(skip);
+};
+
+// Static method to get jobs by card
+videoJobSchema.statics.getCardJobs = function(cardId, limit = 20, skip = 0) {
+    const query = cardId ? { cardId } : {};
+    return this.find(query)
         .sort({ createdAt: -1 })
         .limit(limit)
         .skip(skip);

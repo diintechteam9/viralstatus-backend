@@ -16,6 +16,10 @@ class VideoJobService {
                 cardName: jobData.cardName,
                 category: jobData.category,
                 userId: jobData.userId,
+                cardId: jobData.cardId,
+                storyScript: jobData.storyScript,
+                sentenceSrt: jobData.sentenceSrt,
+                wordSrt: jobData.wordSrt,
                 requestData: {
                     imageCount: jobData.images?.length || 0,
                     hasAudio: !!jobData.audio,
@@ -82,6 +86,26 @@ class VideoJobService {
 
             // Update progress: Starting
             await job.updateProgress(10, 'processing');
+
+            // If audio base64 is provided, upload to S3 and persist audio metadata on the job
+            if (requestData.audio) {
+                try {
+                    const audioBuffer = Buffer.from(requestData.audio, 'base64');
+                    const audioS3 = await this.saveAudioToS3(
+                        audioBuffer,
+                        job.cardName,
+                        job.category
+                    );
+                    job.audioS3Key = audioS3.key;
+                    job.audioS3Url = audioS3.url;
+                    job.audioFileName = audioS3.fileName;
+                    job.audioFileSize = audioS3.fileSize;
+                    job.audioContentType = 'audio/mpeg';
+                    await job.save();
+                } catch (e) {
+                    console.warn(`Job ${jobId}: failed to upload audio to S3, continuing`, e.message);
+                }
+            }
 
             // Generate video using the existing controller
             const result = await generateFinalVideoAsync(requestData, {
@@ -173,6 +197,51 @@ class VideoJobService {
 
         } catch (error) {
             console.error('Error saving video to S3:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Save audio to S3 with organized structure
+     */
+    async saveAudioToS3(audioBuffer, cardName, category) {
+        try {
+            const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+            const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+            const { s3, BUCKET_NAME } = require('../config/s3');
+
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const sanitizedCardName = cardName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+            const sanitizedCategory = category.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+            const s3Key = `audios/${sanitizedCategory}/${sanitizedCardName}/${timestamp}/narration.mp3`;
+            const fileName = `${sanitizedCardName}_${timestamp}.mp3`;
+
+            const putCmd = new PutObjectCommand({
+                Bucket: BUCKET_NAME,
+                Key: s3Key,
+                Body: audioBuffer,
+                ContentType: 'audio/mpeg',
+                Metadata: {
+                    'card-name': cardName,
+                    'category': category,
+                    'generated-at': new Date().toISOString()
+                }
+            });
+
+            await s3.send(putCmd);
+
+            const getCmd = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: s3Key });
+            const presignedUrl = await getSignedUrl(s3, getCmd, { expiresIn: 60 * 60 });
+
+            return {
+                key: s3Key,
+                url: presignedUrl,
+                fileName,
+                fileSize: audioBuffer.length
+            };
+        } catch (error) {
+            console.error('Error saving audio to S3:', error);
             throw error;
         }
     }
