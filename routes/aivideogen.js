@@ -28,8 +28,11 @@ const {generateImage}=require('../controllers/aivideogen/generateimagecontroller
 // for image prompt 
 const {generatePrompt}=require('../controllers/aivideogen/generatepromptforimage');
 
-// for image to video using the prompt 
-const {generateVideo}=require('../controllers/aivideogen/imagetovideocontroller');
+// for image to video using the prompt pixverse 
+const {generateVideo}=require('../controllers/aivideogen/pixverseimagetovideocontroller');
+
+// for image to video using the prompt veo 
+const {veoImageToVideo}=require('../controllers/aivideogen/veoimagetovideocontroller');
 
 // for tts 
 const {textToSpeech1}=require('../controllers/aivideogen/ttselevenlabscontroller');
@@ -56,7 +59,8 @@ router.get('/system-status',getSystemStatus);  // get system status
 router.post('/cleanup-jobs',cleanupOldJobs);  // cleanup old jobs (admin)
 router.post('/generate-image',generateImage);  // for image generation 
 router.post('/generate-prompt',generatePrompt);  // for image prompt 
-router.post('/generate-video',generateVideo);  // for image to video using the prompt 
+router.post('/generate-video-pixverse',generateVideo);  // for image to video using the prompt pixverse
+router.post('/generate-video-veo',veoImageToVideo);  // for image to video using the prompt veo
 router.post('/elevenlabs',textToSpeech1);  // for tts using elevenlabs 
 router.post('/lmnt',textToSpeech2);  // for tts using lmnt 
 

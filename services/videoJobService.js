@@ -20,6 +20,7 @@ class VideoJobService {
                 storyScript: jobData.storyScript,
                 sentenceSrt: jobData.sentenceSrt,
                 wordSrt: jobData.wordSrt,
+                imagePrompts: jobData.imagePrompts,
                 requestData: {
                     imageCount: jobData.images?.length || 0,
                     hasAudio: !!jobData.audio,
@@ -107,6 +108,25 @@ class VideoJobService {
                 }
             }
 
+            // Save each input image to S3 in sequence (optional but requested)
+            if (Array.isArray(requestData.images) && requestData.images.length > 0) {
+                try {
+                    const savedAssets = [];
+                    for (let i = 0; i < requestData.images.length; i++) {
+                        const raw = requestData.images[i];
+                        const base64 = typeof raw === 'string' ? raw : raw.image;
+                        if (!base64 || typeof base64 !== 'string') continue;
+                        const buffer = Buffer.from(base64, 'base64');
+                        const asset = await this.saveImageToS3(buffer, job.cardName, job.category, i);
+                        savedAssets.push({ index: i, s3Key: asset.key, s3Url: asset.url, fileName: asset.fileName, fileSize: asset.fileSize });
+                    }
+                    job.imageAssets = savedAssets;
+                    await job.save();
+                } catch (e) {
+                    console.warn(`Job ${jobId}: failed to upload images to S3, continuing`, e.message);
+                }
+            }
+
             // Generate video using the existing controller
             const result = await generateFinalVideoAsync(requestData, {
                 onProgress: async (progress, message) => {
@@ -125,6 +145,38 @@ class VideoJobService {
 
             // Save video to S3 with organized structure
             const s3Data = await this.saveVideoToS3(result.video, job.cardName, job.category);
+
+            // If this job is linked to a card, delete previous S3 video for that card and update the card doc
+            if (job.cardId) {
+                try {
+                    const VideoCard = require('../models/aivideogen');
+                    const existing = await VideoCard.findById(job.cardId);
+                    if (existing) {
+                        // Delete old S3 object if present
+                        if (existing.latestVideoS3Key) {
+                            try {
+                                const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
+                                const { s3, BUCKET_NAME } = require('../config/s3');
+                                await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: existing.latestVideoS3Key }));
+                            } catch (delErr) {
+                                console.warn(`Job ${jobId}: failed to delete old S3 video`, delErr.message);
+                            }
+                        }
+
+                        // Update card with latest video info
+                        existing.latestVideoS3Key = s3Data.key;
+                        existing.latestVideoUrl = s3Data.url;
+                        existing.latestVideoFileName = s3Data.fileName;
+                        existing.latestVideoFileSize = s3Data.fileSize;
+                        existing.latestVideoDuration = result.duration;
+                        existing.latestVideoCreatedAt = new Date();
+                        existing.updatedAt = new Date();
+                        await existing.save();
+                    }
+                } catch (cardErr) {
+                    console.warn(`Job ${jobId}: failed to update video card metadata`, cardErr.message);
+                }
+            }
 
             // Complete the job
             await job.complete({
@@ -242,6 +294,46 @@ class VideoJobService {
             };
         } catch (error) {
             console.error('Error saving audio to S3:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Save image to S3 with deterministic sequence key
+     */
+    async saveImageToS3(imageBuffer, cardName, category, index) {
+        try {
+            const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+            const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+            const { s3, BUCKET_NAME } = require('../config/s3');
+
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const sanitizedCardName = cardName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+            const sanitizedCategory = category.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+            const s3Key = `images/${sanitizedCategory}/${sanitizedCardName}/${timestamp}/image_${String(index + 1).padStart(2, '0')}.jpg`;
+            const fileName = `${sanitizedCardName}_${String(index + 1).padStart(2, '0')}.jpg`;
+
+            const putCmd = new PutObjectCommand({
+                Bucket: BUCKET_NAME,
+                Key: s3Key,
+                Body: imageBuffer,
+                ContentType: 'image/jpeg',
+                Metadata: {
+                    'card-name': cardName,
+                    'category': category,
+                    'sequence-index': String(index)
+                }
+            });
+
+            await s3.send(putCmd);
+
+            const getCmd = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: s3Key });
+            const presignedUrl = await getSignedUrl(s3, getCmd, { expiresIn: 60 * 60 });
+
+            return { key: s3Key, url: presignedUrl, fileName, fileSize: imageBuffer.length };
+        } catch (error) {
+            console.error('Error saving image to S3:', error);
             throw error;
         }
     }

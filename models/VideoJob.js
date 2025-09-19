@@ -116,6 +116,23 @@ const videoJobSchema = new mongoose.Schema({
     wordSrt: {
         type: String
     },
+
+    // Image prompts used to generate images (same order as images)
+    imagePrompts: {
+        type: [String],
+        default: []
+    },
+
+    // Saved image assets in S3 (sequence preserved by index)
+    imageAssets: [
+        {
+            index: { type: Number },
+            s3Key: { type: String, trim: true },
+            s3Url: { type: String, trim: true },
+            fileName: { type: String, trim: true },
+            fileSize: { type: Number }
+        }
+    ],
     
     // User information
     userId: {
@@ -220,7 +237,8 @@ videoJobSchema.statics.createJob = function(jobData) {
         requestData: jobData.requestData,
         storyScript: jobData.storyScript,
         sentenceSrt: jobData.sentenceSrt,
-        wordSrt: jobData.wordSrt
+        wordSrt: jobData.wordSrt,
+        imagePrompts: Array.isArray(jobData.imagePrompts) ? jobData.imagePrompts : []
     });
 };
 

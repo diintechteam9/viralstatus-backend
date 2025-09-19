@@ -13,6 +13,31 @@ const videoSchema=new mongoose.Schema({
         type:String,
         required:true,
     },
+    // Latest generated video metadata (optional)
+    latestVideoS3Key: {
+        type: String,
+        default: null
+    },
+    latestVideoUrl: {
+        type: String,
+        default: null
+    },
+    latestVideoFileName: {
+        type: String,
+        default: null
+    },
+    latestVideoFileSize: {
+        type: Number,
+        default: null
+    },
+    latestVideoDuration: {
+        type: Number,
+        default: null
+    },
+    latestVideoCreatedAt: {
+        type: Date,
+        default: null
+    },
     createdAt:{
         type:Date,
         default:Date.now

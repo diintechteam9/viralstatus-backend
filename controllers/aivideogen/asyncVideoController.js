@@ -6,7 +6,7 @@ const videoJobService = require('../../services/videoJobService');
  */
 const createAsyncVideoJob = async (req, res) => {
   try {
-    const { images, audio, srt, imageSrt, deepSrt, cardName, category, cardId, storyScript, sentenceSrt, wordSrt } = req.body;
+    const { images, audio, srt, imageSrt, deepSrt, cardName, category, cardId, storyScript, sentenceSrt, wordSrt, imagePrompts } = req.body;
     const userId = req.user?.id || req.user?._id || null; // Handle different user ID formats, allow null for unauthenticated users
 
     // Validate required fields
@@ -64,7 +64,8 @@ const createAsyncVideoJob = async (req, res) => {
       cardId,
       storyScript,
       sentenceSrt,
-      wordSrt
+      wordSrt,
+      imagePrompts
     });
 
     // Start processing the job

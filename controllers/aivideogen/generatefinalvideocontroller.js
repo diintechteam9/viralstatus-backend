@@ -29,8 +29,10 @@ const resolveFontPath = (fontKey) => {
 };
 
 // Build drawtext filter using selected bundled font when available (avoids system fonts)
-const buildDrawtextFilter = (text, fontKey) => {
-  const base = `text='${text}':fontcolor=0xFFFFFF:fontsize=45:borderw=2:box=1:boxcolor=black@0.8:boxborderw=8:x=(w-text_w)/2:y=(h-text_h-250):line_spacing=10`;
+// position can be 'top' or 'bottom' (default: 'bottom')
+const buildDrawtextFilter = (text, fontKey, position = 'bottom') => {
+  const yExpr = position === 'top' ? `120` : `h-(text_h+200)`;
+  const base = `text='${text}':fontcolor=0xFFFFFF:fontsize=72:borderw=3:x=(w-text_w)/2:y=${yExpr}:line_spacing=10`;
   const fontPath = resolveFontPath(fontKey);
   if (fontPath) {
     // Use fontfile to avoid fontconfig/system fonts
@@ -485,8 +487,9 @@ const generateFinalVideo = async (req, res) => {
           continue;
         }
 
-        // Create drawtext filter (English-only path) using bundled font when available
-        let drawtextFilter = buildDrawtextFilter(cleanText, overlayFont);
+        // Create drawtext filter alternating position per segment (top for even indices, bottom for odd)
+        const position = (i % 2 === 0) ? 'top' : 'bottom';
+        let drawtextFilter = buildDrawtextFilter(cleanText, overlayFont, position);
         
         await new Promise((resolve, reject) => {
           const ffmpegCommand = ffmpeg()
@@ -885,10 +888,11 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
         const seg = overlayTimings[i];
         const safe = makeSafeText(seg.text);
         const outLabel = i === overlayTimings.length - 1 ? 'vout' : `v${i}`;
-        // Bottom-centered with slight margin, minimal padding via boxborderw
-        const filter = `[${lastLabel}]drawtext=text='${safe}'${fontClause}:fontcolor=white:fontsize=42:borderw=2:box=1:boxcolor=black@0.55:boxborderw=12:x=(w-text_w)/2:y=h-(text_h+220):enable='between(t,${seg.start},${seg.end})'[${outLabel}]`;
+        // Alternate position: top for even indices, bottom for odd
+        const yExpr = (i % 2 === 0) ? '120' : 'h-(text_h+200)';
+        const filter = `[${lastLabel}]drawtext=text='${safe}'${fontClause}:fontcolor=white:fontsize=72:borderw=3:x=(w-text_w)/2:y=${yExpr}:enable='between(t,${seg.start},${seg.end})'[${outLabel}]`;
         drawFilters.push(filter);
-        lastLabel = outLabel;
+        lastLabel = outLabel; 
       }
 
       const complex = drawFilters.join(';');
