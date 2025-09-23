@@ -32,6 +32,9 @@ const videomergeta1000seriesRoutes = require('./routes/videomergeta1000series');
 const creditWalletRoutes = require("./routes/creditWalletRoute");
 
 const videocardRoute=require('./routes/aivideogen');  // generate videocard
+const videoCompressionRoutes = require('./routes/videoCompressionRoutes');  // video compression
+const telegramRoute=require('./routes/telegramroutes');
+const videoToReelsRoutes = require('./routes/videoToReels');
 
 dotenv.config();
 
@@ -168,6 +171,15 @@ app.use('/api/reelta1000series', videomergeta1000seriesRoutes);
 
 
 app.use('/api/videocard',videocardRoute);
+
+// Video Compression Routes
+app.use('/api/compression', videoCompressionRoutes);
+
+// Telegram Routes
+app.use('/api/telegram', telegramRoute);
+
+// Video to Reels (VTR) Routes
+app.use('/api/vtr', videoToReelsRoutes);
 
 // Error handling middleware
 app.use((error, req, res, next) => {

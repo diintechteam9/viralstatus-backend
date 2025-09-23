@@ -17,6 +17,7 @@ const {
   getJobStatus,
   getUserJobs,
   getCardJobs,
+  refreshCardUrls,
   cancelJob,
   getSystemStatus,
   cleanupOldJobs
@@ -54,6 +55,7 @@ router.post('/generate-finalvideo-async',createAsyncVideoJob);  // for async vid
 router.get('/job-status/:jobId',getJobStatus);  // get job status
 router.get('/user-jobs',getUserJobs);  // get user's video jobs
 router.get('/card-jobs/:cardId',getCardJobs);  // get card's video jobs (history)
+router.post('/refresh-urls/:cardId',refreshCardUrls);  // refresh S3 URLs for card jobs
 router.delete('/job/:jobId',cancelJob);  // cancel a job
 router.get('/system-status',getSystemStatus);  // get system status
 router.post('/cleanup-jobs',cleanupOldJobs);  // cleanup old jobs (admin)

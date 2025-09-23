@@ -238,7 +238,7 @@ class VideoJobService {
 
             // Optionally generate a short-lived presigned URL for immediate playback
             const getCmd = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: s3Key });
-            const presignedUrl = await getSignedUrl(s3, getCmd, { expiresIn: 60 * 60 }); // 1 hour
+            const presignedUrl = await getSignedUrl(s3, getCmd, { expiresIn: 604800 }); //604800 1 week
 
             return {
                 key: s3Key,

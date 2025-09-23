@@ -196,6 +196,133 @@ const getCardJobs = async (req, res) => {
 };
 
 /**
+ * Refresh S3 URLs for card jobs
+ * POST /api/videocard/refresh-urls/:cardId
+ */
+const refreshCardUrls = async (req, res) => {
+  try {
+    const { cardId } = req.params;
+    
+    if (!cardId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Card ID is required'
+      });
+    }
+
+    const VideoJob = require('../../models/VideoJob');
+    const { GetObjectCommand } = require('@aws-sdk/client-s3');
+    const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+    const { s3, BUCKET_NAME } = require('../../config/s3');
+
+    // Get all jobs for this card
+    const jobs = await VideoJob.getCardJobs(cardId, 50, 0);
+    const updatedJobs = [];
+    let latestVideoUrl = null;
+
+    for (const job of jobs) {
+      let updated = false;
+      const updateData = {};
+
+      // Refresh video URL if we have a key
+      if (job.s3Key && job.status === 'completed') {
+        try {
+          const getCmd = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: job.s3Key });
+          const freshVideoUrl = await getSignedUrl(s3, getCmd, { expiresIn: 604800 }); // 1 week
+          updateData.s3Url = freshVideoUrl;
+          updated = true;
+          
+          // Track the latest video URL for updating the card
+          if (!latestVideoUrl || new Date(job.createdAt) > new Date(latestVideoUrl.createdAt)) {
+            latestVideoUrl = {
+              url: freshVideoUrl,
+              key: job.s3Key,
+              createdAt: job.createdAt
+            };
+          }
+        } catch (error) {
+          console.warn(`Failed to refresh video URL for job ${job.jobId}:`, error.message);
+        }
+      }
+
+      // Refresh audio URL if we have a key
+      if (job.audioS3Key) {
+        try {
+          const getCmd = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: job.audioS3Key });
+          const freshAudioUrl = await getSignedUrl(s3, getCmd, { expiresIn: 604800 }); // 1 week
+          updateData.audioS3Url = freshAudioUrl;
+          updated = true;
+        } catch (error) {
+          console.warn(`Failed to refresh audio URL for job ${job.jobId}:`, error.message);
+        }
+      }
+
+      // Refresh image URLs if we have image assets
+      if (job.imageAssets && Array.isArray(job.imageAssets) && job.imageAssets.length > 0) {
+        const updatedImageAssets = [];
+        for (const asset of job.imageAssets) {
+          if (asset.s3Key) {
+            try {
+              const getCmd = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: asset.s3Key });
+              const freshImageUrl = await getSignedUrl(s3, getCmd, { expiresIn: 604800 }); // 1 week
+              updatedImageAssets.push({
+                ...asset,
+                s3Url: freshImageUrl
+              });
+              updated = true;
+            } catch (error) {
+              console.warn(`Failed to refresh image URL for job ${job.jobId}, asset ${asset.index}:`, error.message);
+              updatedImageAssets.push(asset); // Keep original if refresh fails
+            }
+          } else {
+            updatedImageAssets.push(asset);
+          }
+        }
+        updateData.imageAssets = updatedImageAssets;
+      }
+
+      // Update the job if we have any changes
+      if (updated) {
+        await VideoJob.findByIdAndUpdate(job._id, updateData, { new: true });
+        updatedJobs.push({
+          jobId: job.jobId,
+          ...updateData
+        });
+      }
+    }
+
+    // Update the VideoCard with the latest video URL if we have one
+    if (latestVideoUrl) {
+      try {
+        const VideoCard = require('../../models/aivideogen');
+        await VideoCard.findByIdAndUpdate(cardId, {
+          latestVideoUrl: latestVideoUrl.url,
+          latestVideoS3Key: latestVideoUrl.key,
+          updatedAt: new Date()
+        });
+        console.log(`Updated VideoCard ${cardId} with fresh video URL`);
+      } catch (error) {
+        console.warn(`Failed to update VideoCard ${cardId} with latest video URL:`, error.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Refreshed URLs for ${updatedJobs.length} jobs`,
+      updatedJobs
+    });
+
+  } catch (error) {
+    console.error('Error refreshing card URLs:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to refresh URLs',
+      details: error.message
+    });
+  }
+};
+
+/**
  * Cancel a job
  * DELETE /api/videocard/job/:jobId
  */
@@ -287,6 +414,7 @@ module.exports = {
   getJobStatus,
   getUserJobs,
   getCardJobs,
+  refreshCardUrls,
   cancelJob,
   getSystemStatus,
   cleanupOldJobs
