@@ -199,9 +199,37 @@ app.use((req, res) => {
 });
 
 connectDB().then(() => {
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
         console.log("Server is running on port 4000");
     });
+
+    // Graceful shutdown handling
+    const gracefulShutdown = (signal) => {
+        console.log(`Received ${signal}. Starting graceful shutdown...`);
+        
+        // Clean up video-to-reels job service timers
+        try {
+            const videoToReelsJobService = require('./services/videoToReelsJobService');
+            videoToReelsJobService.cleanupTimers();
+        } catch (error) {
+            console.warn('Error cleaning up video-to-reels timers:', error.message);
+        }
+        
+        server.close(() => {
+            console.log('Server closed successfully');
+            process.exit(0);
+        });
+        
+        // Force close after 10 seconds
+        setTimeout(() => {
+            console.error('Forced shutdown after timeout');
+            process.exit(1);
+        }, 10000);
+    };
+
+    // Handle shutdown signals
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 });
 
 

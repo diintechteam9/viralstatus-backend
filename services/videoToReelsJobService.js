@@ -1,0 +1,349 @@
+const VideoToReelsJob = require('../models/VideoToReelsJob');
+const { generateReel } = require('../controllers/videoToReelsController');
+const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const { s3, BUCKET_NAME } = require('../config/s3');
+const fs = require('fs');
+const path = require('path');
+
+class VideoToReelsJobService {
+    constructor() {
+        this.activeJobs = new Map(); // Track active jobs in memory
+        this.maxConcurrentJobs = 2; // Limit concurrent video-to-reels generations
+        this.progressUpdateTimers = new Map(); // Track progress update timers
+    }
+
+    /**
+     * Debounced progress update to prevent parallel save conflicts
+     */
+    debouncedProgressUpdate(jobId, progress, status) {
+        // Clear existing timer if any
+        if (this.progressUpdateTimers.has(jobId)) {
+            clearTimeout(this.progressUpdateTimers.get(jobId));
+        }
+
+        // Set new timer
+        const timer = setTimeout(async () => {
+            try {
+                const job = await VideoToReelsJob.getJobById(jobId);
+                if (job) {
+                    await job.updateProgress(progress, status);
+                }
+            } catch (error) {
+                console.warn(`Failed to update progress for job ${jobId}:`, error.message);
+            } finally {
+                this.progressUpdateTimers.delete(jobId);
+            }
+        }, 1000); // Update every 1 second max
+
+        this.progressUpdateTimers.set(jobId, timer);
+    }
+
+    /**
+     * Create a new video-to-reels generation job
+     */
+    async createJob(jobData) {
+        try {
+            const job = await VideoToReelsJob.createJob(jobData);
+            console.log(`Created video-to-reels job: ${job.jobId}`);
+            return job;
+        } catch (error) {
+            console.error('Error creating video-to-reels job:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Start processing a video-to-reels job
+     */
+    async startJob(jobId, requestData) {
+        try {
+            const job = await VideoToReelsJob.getJobById(jobId);
+            if (!job) {
+                throw new Error(`Job ${jobId} not found`);
+            }
+
+            if (job.status !== 'pending') {
+                throw new Error(`Job ${jobId} is not in pending status`);
+            }
+
+            // Check if we can start more jobs
+            if (this.activeJobs.size >= this.maxConcurrentJobs) {
+                throw new Error('Maximum concurrent jobs reached. Please try again later.');
+            }
+
+            // Mark job as processing
+            await job.updateProgress(0, 'processing');
+            this.activeJobs.set(jobId, job);
+
+            console.log(`Starting video-to-reels job: ${jobId}`);
+
+            // Start video generation in background
+            this.processVideoToReelsAsync(jobId, requestData);
+
+            return job;
+        } catch (error) {
+            console.error(`Error starting job ${jobId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Process video-to-reels generation asynchronously
+     */
+    async processVideoToReelsAsync(jobId, requestData) {
+        try {
+            const job = await VideoToReelsJob.getJobById(jobId);
+            if (!job) {
+                console.error(`Job ${jobId} not found during processing`);
+                return;
+            }
+
+            console.log(`Processing video-to-reels job: ${jobId}`);
+
+            // Update progress: Starting
+            await job.updateProgress(10, 'processing');
+
+            // Generate the reel using the existing controller
+            const videoBuffer = await this.generateReelBuffer(job, requestData);
+
+            // Update progress: Saving to S3
+            await job.updateProgress(90, 'processing');
+
+            // Save video to S3
+            const s3Data = await this.saveVideoToS3(videoBuffer, job.jobId);
+
+            // Complete the job
+            await job.complete({
+                url: s3Data.url,
+                key: s3Data.key,
+                fileName: s3Data.fileName,
+                fileSize: s3Data.fileSize,
+                duration: 0 // Could be calculated from video metadata
+            });
+
+            console.log(`Video-to-reels job completed: ${jobId}, S3 URL: ${s3Data.url}`);
+
+            // Cleanup job working directory after successful completion
+            try {
+                this.cleanupJobDirectory(job);
+            } catch (cleanupErr) {
+                console.warn(`[VTR][Job] ${jobId} cleanup warning:`, cleanupErr?.message || cleanupErr);
+            }
+
+        } catch (error) {
+            console.error(`Error processing video-to-reels job ${jobId}:`, error);
+            const job = await VideoToReelsJob.getJobById(jobId);
+            if (job) {
+                await job.setError(error);
+            }
+        } finally {
+            // Remove from active jobs and clear progress timer
+            this.activeJobs.delete(jobId);
+            if (this.progressUpdateTimers.has(jobId)) {
+                clearTimeout(this.progressUpdateTimers.get(jobId));
+                this.progressUpdateTimers.delete(jobId);
+            }
+        }
+    }
+
+    /**
+     * Generate reel buffer using the existing generateReel function
+     */
+    async generateReelBuffer(job, requestData) {
+        return new Promise((resolve, reject) => {
+            const chunks = [];
+            let chunkCount = 0;
+            
+            // Create a mock request object for the generateReel function
+            const inputPath = job.originalVideoFile?.path;
+            if (!inputPath || !fs.existsSync(inputPath)) {
+                return reject(new Error(`Input video not found at ${inputPath || '(empty path)'}`));
+            }
+            console.log('[VTR][Job]', job.jobId, 'generateReelBuffer input:', inputPath);
+
+            const mockReq = {
+                file: {
+                    path: inputPath,
+                    originalname: job.originalVideoFile.originalName,
+                    size: job.originalVideoFile.size,
+                    mimetype: job.originalVideoFile.mimetype
+                },
+                body: {
+                    srt: job.srt,
+                    wordSrt: job.wordSrt,
+                    sentences: JSON.stringify(job.importantSentences),
+                    paddingSeconds: job.paddingSeconds,
+                    maxTotalSeconds: job.maxTotalSeconds,
+                    portrait: job.portrait
+                }
+            };
+            
+            // Create a mock response object to capture the video stream
+            const mockRes = {
+                setHeader: () => {},
+                on: () => {},
+                once: () => {},
+                emit: () => {},
+                removeListener: () => {},
+                write: (chunk) => {
+                    chunks.push(chunk);
+                    chunkCount++;
+                    
+                    // Update progress during generation (10-80%) with debouncing
+                    const progress = Math.min(80, 10 + (chunkCount * 0.7)); // Rough progress estimation
+                    this.debouncedProgressUpdate(job.jobId, progress, 'processing');
+                    return true;
+                },
+                end: () => {
+                    const videoBuffer = Buffer.concat(chunks);
+                    console.log('[VTR][Job]', job.jobId, 'generateReelBuffer complete, bytes:', videoBuffer.length);
+                    resolve(videoBuffer);
+                },
+                status: (code) => {
+                    // Bubble up errors from controller with more context
+                    return {
+                        json: (data) => {
+                            const message = data?.error || `Video generation failed (status ${code})`;
+                            const details = data?.details ? `: ${data.details}` : '';
+                            reject(new Error(`${message}${details}`));
+                        }
+                    };
+                },
+                json: (data) => {
+                    const message = data?.error || 'Video generation failed';
+                    const details = data?.details ? `: ${data.details}` : '';
+                    reject(new Error(`${message}${details}`));
+                }
+            };
+            
+            generateReel(mockReq, mockRes).catch(reject);
+        });
+    }
+
+    /**
+     * Save video to S3 with organized structure
+     */
+    async saveVideoToS3(videoBuffer, jobId) {
+        try {
+            // Create organized S3 key structure for video-to-reels
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const s3Key = `video-to-reels/${jobId}/${timestamp}/reel.mp4`;
+            const fileName = `reel_${timestamp}.mp4`;
+
+            // Upload to S3
+            const putCmd = new PutObjectCommand({
+                Bucket: BUCKET_NAME,
+                Key: s3Key,
+                Body: videoBuffer,
+                ContentType: 'video/mp4',
+                Metadata: {
+                    'job-id': jobId,
+                    'generated-at': new Date().toISOString(),
+                    'type': 'video-to-reels'
+                }
+            });
+
+            await s3.send(putCmd);
+
+            // Generate a presigned URL for immediate playback
+            const getCmd = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: s3Key });
+            const presignedUrl = await getSignedUrl(s3, getCmd, { expiresIn: 604800 }); // 1 week
+
+            return {
+                key: s3Key,
+                url: presignedUrl,
+                fileName: fileName,
+                fileSize: videoBuffer.length
+            };
+
+        } catch (error) {
+            console.error('Error saving video-to-reels to S3:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get job status
+     */
+    async getJobStatus(jobId) {
+        try {
+            return await VideoToReelsJob.getJobById(jobId);
+        } catch (error) {
+            console.error(`Error getting job status for ${jobId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get jobs by user ID
+     */
+    async getJobsByUserId(userId, limit = 50) {
+        try {
+            return await VideoToReelsJob.getJobsByUserId(userId, limit);
+        } catch (error) {
+            console.error(`Error getting jobs for user ${userId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Clean up old jobs (optional maintenance method)
+     */
+    async cleanupOldJobs(daysOld = 30) {
+        try {
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+            
+            const result = await VideoToReelsJob.deleteMany({
+                createdAt: { $lt: cutoffDate },
+                status: { $in: ['completed', 'failed'] }
+            });
+            
+            console.log(`Cleaned up ${result.deletedCount} old video-to-reels jobs`);
+            return result.deletedCount;
+        } catch (error) {
+            console.error('Error cleaning up old jobs:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Clean up all progress update timers (for graceful shutdown)
+     */
+    cleanupTimers() {
+        for (const [jobId, timer] of this.progressUpdateTimers) {
+            clearTimeout(timer);
+        }
+        this.progressUpdateTimers.clear();
+        console.log('Cleaned up all progress update timers');
+    }
+
+    /**
+     * Remove the temporary working directory for a completed job
+     */
+    cleanupJobDirectory(job) {
+        try {
+            const inputPath = job?.originalVideoFile?.path;
+            if (!inputPath) return;
+            const jobDir = path.dirname(inputPath);
+            // Extra safety: ensure this is inside temp/jobs/<jobId>
+            const expectedSegment = path.join('temp', 'jobs', job.jobId);
+            const normalizedJobDir = path.normalize(jobDir);
+            const normalizedExpected = path.normalize(expectedSegment);
+            if (!normalizedJobDir.endsWith(path.sep + job.jobId) && !normalizedJobDir.includes(normalizedExpected)) {
+                // Do not delete unexpected paths
+                console.warn(`[VTR][Job] ${job.jobId} cleanup skipped, unexpected dir:`, jobDir);
+                return;
+            }
+            if (fs.existsSync(jobDir)) {
+                fs.rmSync(jobDir, { recursive: true, force: true });
+                console.log(`[VTR][Job] ${job.jobId} cleaned job dir:`, jobDir);
+            }
+        } catch (err) {
+            console.warn(`[VTR][Job] ${job?.jobId} cleanup failed:`, err?.message || err);
+        }
+    }
+}
+
+module.exports = new VideoToReelsJobService();

@@ -1,11 +1,26 @@
 const fs = require("fs");
 const path = require("path");
 const ffmpeg = require("fluent-ffmpeg");
-const ffmpegPath = require("ffmpeg-static");
+const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
+const ffprobeStatic = require("ffprobe-static");
 const { createClient } = require("@deepgram/sdk");
 const fetch = require("node-fetch");
 
-ffmpeg.setFfmpegPath(ffmpegPath);
+// Bundled font support (use NotoSans-Regular.ttf from assets/fonts)
+const FONT_DIR = path.join(__dirname, "../assets/fonts");
+const resolveFontPath = () => {
+  const candidate = path.join(FONT_DIR, 'NotoSans-Regular.ttf');
+  return fs.existsSync(candidate) ? candidate : null;
+};
+
+try {
+  if (ffmpegInstaller && ffmpegInstaller.path) {
+    ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+  }
+  if (ffprobeStatic && ffprobeStatic.path) {
+    ffmpeg.setFfprobePath(ffprobeStatic.path);
+  }
+} catch (_) {}
 
 // Extract audio from an uploaded video and stream back as MP3
 async function extractAudio(req, res) {
@@ -206,6 +221,101 @@ function formatTime(seconds) {
 
 module.exports.generateSentenceSrt = generateSentenceSrt;
 
+// Generate word-level SRT (fixed-size word chunks) from base64 audio using Deepgram
+async function generateWordSrt(req, res) {
+  try {
+    const audioBase64 = req.body && req.body.audio;
+    if (!audioBase64) {
+      return res.status(400).json({ error: "Audio (base64) is required" });
+    }
+
+    if (!process.env.DEEPGRAM_API_KEY) {
+      return res.status(500).json({ error: "Deepgram API key not configured" });
+    }
+
+    const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+
+    const base64Data = String(audioBase64).replace(/^data:audio\/[^;]+;base64,/, "");
+    const audioBuffer = Buffer.from(base64Data, "base64");
+
+    const transcriptionOptions = {
+      model: "nova-2",
+      // Optionally set language like 'hi' if needed
+      smart_format: true,
+      utterances: true,
+      punctuate: true,
+      diarize: false,
+      timestamps: true,
+    };
+
+    const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
+      audioBuffer,
+      { mimetype: "audio/mp3", ...transcriptionOptions }
+    );
+
+    if (error) {
+      return res.status(500).json({ error: "Transcription failed", details: error.message || error });
+    }
+    if (!result) {
+      return res.status(500).json({ error: "No transcription result received" });
+    }
+
+    const srtContent = convertToWordSRT(result);
+    if (!srtContent || srtContent.trim().length === 0) {
+      return res.status(500).json({ error: "Failed to generate SRT captions" });
+    }
+
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Content-Disposition", 'inline; filename="captions_words.srt"');
+    res.send(srtContent);
+  } catch (err) {
+    return res.status(500).json({ error: "Internal server error", details: err.message });
+  }
+}
+
+function convertToWordSRT(result) {
+  try {
+    let allWords = [];
+    if (
+      result.results &&
+      result.results.channels &&
+      result.results.channels[0] &&
+      result.results.channels[0].alternatives
+    ) {
+      const alternative = result.results.channels[0].alternatives[0];
+      if (alternative && alternative.words && alternative.words.length > 0) {
+        allWords = alternative.words;
+      }
+    }
+    if (allWords.length === 0) return "";
+
+    let srtContent = "";
+    let captionIndex = 1;
+    const wordsPerCaption = 3; // chunk size
+
+    for (let i = 0; i < allWords.length; i += wordsPerCaption) {
+      const wordGroup = allWords.slice(i, i + wordsPerCaption);
+      if (wordGroup.length === 0) continue;
+
+      const startTime = wordGroup[0].start;
+      const endTime = wordGroup[wordGroup.length - 1].end;
+      const captionText = wordGroup.map(w => w.punctuated_word || w.word).join(' ');
+
+      if (String(captionText).trim()) {
+        srtContent += `${captionIndex}\n`;
+        srtContent += `${formatTime(startTime)} --> ${formatTime(endTime)}\n`;
+        srtContent += `${captionText.trim()}\n\n`;
+        captionIndex++;
+      }
+    }
+    return srtContent;
+  } catch (_) {
+    return "";
+  }
+}
+
+module.exports.generateWordSrt = generateWordSrt;
+
 // Generate important sentences (ordered) from SRT via OpenRouter
 async function generateImportantSentences(req, res) {
   try {
@@ -334,10 +444,16 @@ module.exports.generateImportantSentences = generateImportantSentences;
 async function generateReel(req, res) {
   const uploadedFile = req.file;
   try {
-    if (!uploadedFile) {
+    if (!uploadedFile || !uploadedFile.path) {
       return res.status(400).json({ error: 'Video file is required' });
     }
+    // Validate input path exists (helps when invoked via async service mock)
+    const fs = require('fs');
+    if (!fs.existsSync(uploadedFile.path)) {
+      return res.status(400).json({ error: `Input video not found at ${uploadedFile.path}` });
+    }
     const srt = req.body?.srt;
+    const wordSrt = req.body?.wordSrt; // optional word-level SRT
     const sentencesRaw = req.body?.sentences;
     if (!srt || !sentencesRaw) {
       return res.status(400).json({ error: 'Both srt and sentences are required' });
@@ -348,14 +464,18 @@ async function generateReel(req, res) {
 
     const paddingSeconds = Number(req.body?.paddingSeconds ?? 0.3);
     const maxTotalSeconds = Number(req.body?.maxTotalSeconds ?? 60);
-    const portrait = String(req.body?.portrait ?? 'true') === 'true';
+    const portrait = String(req.body?.portrait ?? 'false') === 'true';
 
     // Build segments from SRT by matching sentences
     const entries = parseSRT(srt);
     const grouped = groupSRTIntoSentencesFromEntries(entries);
-    const segments = matchSentencesToSegments(sentences, grouped, paddingSeconds);
+    const wordEntries = wordSrt ? parseSRT(wordSrt) : [];
+    let segments = matchSentencesToSegments(sentences, grouped, paddingSeconds);
+    console.log('[VTR] Matched segments before clamp:', segments);
     if (segments.length === 0) {
-      return res.status(400).json({ error: 'No matching segments found for important sentences', details: { sentencesCount: sentences.length, groupedCount: grouped.length } });
+      // Fallback: use the first maxTotalSeconds from start to ensure a reel is produced
+      console.warn('VTR: No matching segments found. Falling back to first seconds of the video.');
+      segments = [{ start: 0, end: Math.max(1, Math.min(maxTotalSeconds, 60)) }];
     }
 
     // Clip to max total duration
@@ -376,6 +496,7 @@ async function generateReel(req, res) {
         total += dur;
       }
     }
+    console.log('[VTR] Clipped segments:', clipped);
     if (clipped.length === 0) {
       return res.status(400).json({ error: 'Resulting segments empty after constraints' });
     }
@@ -385,7 +506,38 @@ async function generateReel(req, res) {
     fs.mkdirSync(workDir, { recursive: true });
     const segmentPaths = [];
 
-    // Export each segment
+    // Helper: clean text for ffmpeg drawtext
+    const cleanTextForDrawtext = (text) => {
+      return String(text || '')
+        .replace(/\r\n/g, ' ')
+        .replace(/[\r\n]/g, ' ')
+        .replace(/["']/g, '')
+        .replace(/:/g, ' ')
+        .replace(/;/g, ',')
+        .replace(/\\/g, '/')
+        .replace(/\[/g, '(')
+        .replace(/\]/g, ')')
+        .replace(/\{/g, '(')
+        .replace(/\}/g, ')')
+        .replace(/%/g, ' percent ')
+        .replace(/=/g, ' equals ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
+
+    const buildDrawtextFilter = (text, position = 'bottom', enableExpr = null, fontSize = 36) => {
+      const yExpr = position === 'top' ? `120` : `h-(line_h+40)`;
+      const safeText = cleanTextForDrawtext(text);
+      if (!safeText) return null;
+      const base = `text='${safeText}':fontcolor=white:fontsize=${fontSize}:borderw=2:x=(w-text_w)/2:y=${yExpr}`;
+      const fontPath = resolveFontPath();
+      const prefix = fontPath
+        ? `drawtext=fontfile='${fontPath.replace(/\\/g, '/') }':${base}`
+        : `drawtext=${base}`;
+      return enableExpr ? `${prefix}:enable='${enableExpr}'` : prefix;
+    };
+
+    // Export each segment (with optional overlay text from word-level SRT)
     for (let i = 0; i < clipped.length; i++) {
       const seg = clipped[i];
       const outPath = path.join(workDir, `seg_${Date.now()}_${i}.mp4`);
@@ -397,50 +549,122 @@ async function generateReel(req, res) {
           .audioCodec('aac')
           .outputOptions(['-movflags +faststart', '-preset veryfast', '-crf 23']);
 
+        // Collect filters to avoid overriding in multiple videoFilters calls
+        const filterList = [];
         if (portrait) {
           // Auto center crop to 9:16 from original height
           // scale to height 1920 keeping aspect, then center crop width 1080
-          command = command.videoFilters([
-            'scale=-2:1920',
-            'crop=1080:1920:(iw-1080)/2:0'
-          ]);
+          filterList.push('scale=-2:1920');
+          filterList.push('crop=1080:1920:(iw-1080)/2:0');
+        }
+
+        // Build timed overlay from word-level SRT within this segment (3 words per caption)
+        const position = 'bottom';
+        if (Array.isArray(wordEntries) && wordEntries.length > 0) {
+          for (const we of wordEntries) {
+            const st = Number(we.startTime);
+            const en = Number(we.endTime);
+            if (!isFinite(st) || !isFinite(en)) continue;
+            if (st >= seg.end || en <= seg.start) continue; // no overlap
+            const relStart = Math.max(0, st - seg.start);
+            const relEnd = Math.max(relStart + 0.05, Math.min(en - seg.start, seg.end - seg.start));
+            const t = String(we.text || '').trim();
+            if (!t) continue;
+            const enable = `between(t,${relStart.toFixed(2)},${relEnd.toFixed(2)})`;
+            const dt = buildDrawtextFilter(t, position, enable, 32);
+            if (dt) filterList.push(dt);
+          }
+        } else {
+          // Fallback to a single sentence overlay (smaller font)
+          const dt = buildDrawtextFilter(sentences[i] || '', 'bottom', null, 32);
+          if (dt) filterList.push(dt);
+        }
+        if (filterList.length > 0) {
+          command = command.videoFilters(filterList);
         }
 
         command
-          .on('error', reject)
-          .on('end', resolve)
+          .on('start', (cmd) => console.log(`[VTR] ffmpeg segment ${i} start:`, cmd))
+          .on('stderr', (line) => console.log(`[VTR] ffmpeg segment ${i} stderr:`, line))
+          .on('error', (e) => {
+            console.error(`[VTR] ffmpeg segment ${i} error:`, e?.message || e);
+            reject(e);
+          })
+          .on('end', () => {
+            console.log(`[VTR] ffmpeg segment ${i} done ->`, outPath);
+            resolve();
+          })
           .save(outPath);
       });
       segmentPaths.push(outPath);
     }
 
-    // Concat segments with re-encode to ensure compatibility
-    const concatListPath = path.join(workDir, `list_${Date.now()}.txt`);
-    fs.writeFileSync(concatListPath, segmentPaths.map(p => `file '${path.resolve(p).replace(/'/g, "'\\''")}'`).join('\n'));
-    const finalPath = path.join(workDir, `reel_${Date.now()}.mp4`);
+    // If only one segment, return it directly to avoid concat issues
+    let finalPath;
+    if (segmentPaths.length === 1 && fs.existsSync(segmentPaths[0])) {
+      finalPath = segmentPaths[0];
+      console.log('[VTR] Single segment optimization, returning', finalPath);
+    } else {
+      // Concat segments with re-encode to ensure compatibility
+      const concatListPath = path.join(workDir, `list_${Date.now()}.txt`);
+      const concatFileContent = segmentPaths
+        .filter(p => fs.existsSync(p))
+        .map(p => {
+          // Normalize Windows paths for ffmpeg concat demuxer
+          const abs = path.resolve(p).replace(/\\/g, '/');
+          return `file '${abs.replace(/'/g, "'\\''")}'`;
+        })
+        .join('\n');
+      if (!concatFileContent.trim()) {
+        throw new Error('No valid segments to concatenate');
+      }
+      fs.writeFileSync(concatListPath, concatFileContent);
+      finalPath = path.join(workDir, `reel_${Date.now()}.mp4`);
 
-    await new Promise((resolve, reject) => {
-      ffmpeg()
-        .input(concatListPath)
-        .inputOptions(['-f concat', '-safe 0'])
-        .videoCodec('libx264')
-        .audioCodec('aac')
-        .outputOptions(['-movflags +faststart', '-preset veryfast', '-crf 23'])
-        .on('error', reject)
-        .on('end', resolve)
-        .save(finalPath);
-    });
+      await new Promise((resolve, reject) => {
+        ffmpeg()
+          .input(concatListPath)
+          .inputOptions(['-f concat', '-safe 0'])
+          .videoCodec('libx264')
+          .audioCodec('aac')
+          .outputOptions(['-movflags +faststart', '-preset veryfast', '-crf 23'])
+          .on('start', (cmd) => console.log('[VTR] ffmpeg concat start:', cmd))
+          .on('stderr', (line) => console.log('[VTR] ffmpeg concat stderr:', line))
+          .on('error', (e) => {
+            console.error('VTR concat error:', e?.message || e);
+            reject(e);
+          })
+          .on('end', () => {
+            console.log('[VTR] ffmpeg concat done ->', finalPath);
+            resolve();
+          })
+          .save(finalPath);
+      });
+    }
 
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Content-Disposition', 'inline; filename="reel.mp4"');
     const stream = fs.createReadStream(finalPath);
-    stream.on('close', () => safeCleanup([uploadedFile.path, finalPath, concatListPath, ...segmentPaths]));
+    stream.on('close', () => {
+      try { safeCleanup([uploadedFile.path]); } catch(_) {}
+      // If we created a new final file via concat, clean it, else keep the single segment
+      if (finalPath && (!segmentPaths.includes(finalPath))) {
+        try { safeCleanup([finalPath]); } catch(_) {}
+      }
+      try { safeCleanup(segmentPaths.filter(p => p !== finalPath)); } catch(_) {}
+      // Best-effort: remove any concat list files created in workDir
+      try {
+        const files = fs.readdirSync(workDir).filter(f => f.startsWith('list_') && f.endsWith('.txt'));
+        safeCleanup(files.map(f => path.join(workDir, f)));
+      } catch(_) {}
+    });
     stream.pipe(res);
   } catch (err) {
     // Cleanup temp files
     const maybePaths = [req?.file?.path];
     try { safeCleanup(maybePaths); } catch (_) {}
-    return res.status(500).json({ error: 'Failed to generate reel', details: err.message });
+    console.error('[VTR] generateReel failed:', err?.message || err, err?.stack);
+    return res.status(500).json({ error: 'Failed to generate reel', details: err?.message || String(err) });
   }
 }
 
