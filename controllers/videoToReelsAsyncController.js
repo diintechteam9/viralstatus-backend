@@ -9,11 +9,11 @@ const path = require('path');
 const createAsyncReelJob = async (req, res) => {
   try {
     const uploadedFile = req.file;
-    const { srt, wordSrt, sentences, paddingSeconds, maxTotalSeconds, portrait } = req.body;
+    const { srt, wordSrt, sentences, paddingSeconds, maxTotalSeconds, portrait, images } = req.body;
     const userId = req.user?.id || req.user?._id || null;
 
     // Validate required fields
-    if (!uploadedFile) {
+    if (!uploadedFile) {  
       return res.status(400).json({ 
         success: false,
         error: 'Video file is required' 
@@ -93,7 +93,16 @@ const createAsyncReelJob = async (req, res) => {
     }
 
     // Start processing the job
-    await videoToReelsJobService.startJob(job.jobId, jobData);
+    // Pass images separately via requestData (not stored in Mongo)
+    let runtimeImages = [];
+    try {
+      if (images) {
+        const im = Array.isArray(images) ? images : JSON.parse(images);
+        if (Array.isArray(im)) runtimeImages = im.filter(Boolean);
+      }
+    } catch (_) {}
+
+    await videoToReelsJobService.startJob(job.jobId, { ...jobData, images: runtimeImages });
 
     // Return immediate response with job ID
     res.json({
@@ -138,6 +147,7 @@ const getJobStatus = async (req, res) => {
         status: job.status,
         progress: job.progress,
         videoUrl: job.videoUrl,
+        videos: Array.isArray(job.videos) ? job.videos : (job.videoUrl ? [{ url: job.videoUrl, index: 1 }] : []),
         error: job.error,
         createdAt: job.createdAt,
         updatedAt: job.updatedAt

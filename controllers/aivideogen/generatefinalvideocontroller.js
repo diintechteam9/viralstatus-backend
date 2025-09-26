@@ -124,15 +124,8 @@ const cleanTextForDrawtext = (text) => {
     .trim();
 };
 
-// Removed Hindi language detection and font selection
 
-// Removed downloadFile helper
 
-// Removed Hindi font path resolution logic
-
-// Removed Hindi-specific drawtext builder
-
-// Removed alternative text overlay image approach
 
 const generateFinalVideo = async (req, res) => {
   try {

@@ -79,6 +79,14 @@ const videoToReelsJobSchema = new mongoose.Schema({
         type: Number,
         default: null
     },
+    // Multiple generated videos
+    videos: [{
+        url: String,
+        key: String,
+        fileName: String,
+        fileSize: Number,
+        index: Number
+    }],
     
     // Error handling
     error: {
@@ -169,6 +177,9 @@ videoToReelsJobSchema.methods.complete = async function(videoData) {
         this.fileName = videoData.fileName;
         this.fileSize = videoData.fileSize;
         this.duration = videoData.duration;
+        if (Array.isArray(videoData.videos)) {
+            this.videos = videoData.videos;
+        }
     }
     
     await this.save();

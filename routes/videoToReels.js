@@ -2,7 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-const { extractAudio, generateSentenceSrt, generateWordSrt, generateImportantSentences, generateReel } = require("../controllers/videoToReelsController");
+const { extractAudio, generateSentenceSrt, generateWordSrt, generateImportantSentences, generateReel, generateImagePromptsForParagraph, overlayImagesOnVideo } = require("../controllers/videoToReelsController");
 const { createAsyncReelJob, getJobStatus } = require("../controllers/videoToReelsAsyncController");
 
 const router = express.Router();
@@ -22,7 +22,12 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: {
+    fieldSize: 50 * 1024 * 1024, // allow large JSON/text fields (e.g., images data URLs)
+  }
+});
 
 // POST /api/vtr/extract-audio
 router.post("/extract-audio", upload.single("video"), extractAudio);
@@ -44,6 +49,12 @@ router.post("/generate-reel-async", upload.single("video"), createAsyncReelJob);
 
 // GET /api/vtr/job-status/:jobId
 router.get("/job-status/:jobId", getJobStatus);
+
+// POST /api/vtr/generate-image-prompts (expects { paragraph: string, max?: 1-5 })
+router.post("/generate-image-prompts", express.json({ limit: '2mb' }), generateImagePromptsForParagraph);
+
+// POST /api/vtr/overlay-images (expects JSON: { videoUrl: string, images: string[] })
+router.post("/overlay-images", express.json({ limit: '50mb' }), overlayImagesOnVideo);
 
 module.exports = router;
 

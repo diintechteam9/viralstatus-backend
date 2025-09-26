@@ -1,5 +1,5 @@
 const VideoToReelsJob = require('../models/VideoToReelsJob');
-const { generateReel } = require('../controllers/videoToReelsController');
+const { generateReel, generateReelSegments } = require('../controllers/videoToReelsController');
 const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { s3, BUCKET_NAME } = require('../config/s3');
@@ -104,25 +104,26 @@ class VideoToReelsJobService {
             // Update progress: Starting
             await job.updateProgress(10, 'processing');
 
-            // Generate the reel using the existing controller
-            const videoBuffer = await this.generateReelBuffer(job, requestData);
+            // Generate single final reel buffer with overlays and outro via controller path
+            const finalBuffer = await this.generateReelBuffer(job, requestData);
 
             // Update progress: Saving to S3
             await job.updateProgress(90, 'processing');
 
-            // Save video to S3
-            const s3Data = await this.saveVideoToS3(videoBuffer, job.jobId);
+            // Save to S3 (single file)
+            const uploaded = await this.saveVideoToS3(finalBuffer, job.jobId);
 
-            // Complete the job
+            // Complete the job with primary video (videos array optional)
             await job.complete({
-                url: s3Data.url,
-                key: s3Data.key,
-                fileName: s3Data.fileName,
-                fileSize: s3Data.fileSize,
-                duration: 0 // Could be calculated from video metadata
+                url: uploaded?.url || null,
+                key: uploaded?.key || null,
+                fileName: uploaded?.fileName || null,
+                fileSize: uploaded?.fileSize || null,
+                duration: 0,
+                videos: uploaded ? [{ ...uploaded, index: 1 }] : []
             });
 
-            console.log(`Video-to-reels job completed: ${jobId}, S3 URL: ${s3Data.url}`);
+            console.log(`Video-to-reels job completed: ${jobId}, uploaded videos: ${uploaded.length}`);
 
             // Cleanup job working directory after successful completion
             try {
@@ -175,7 +176,8 @@ class VideoToReelsJobService {
                     sentences: JSON.stringify(job.importantSentences),
                     paddingSeconds: job.paddingSeconds,
                     maxTotalSeconds: job.maxTotalSeconds,
-                    portrait: job.portrait
+                    portrait: job.portrait,
+                    images: JSON.stringify(Array.isArray(requestData?.images) ? requestData.images : [])
                 }
             };
             
@@ -222,6 +224,34 @@ class VideoToReelsJobService {
     }
 
     /**
+     * Generate up to 3 segment files and return their buffers
+     */
+    async generateSegmentFiles(job, requestData) {
+        const inputPath = job.originalVideoFile?.path;
+        if (!inputPath || !fs.existsSync(inputPath)) {
+            throw new Error(`Input video not found at ${inputPath || '(empty path)'}`);
+        }
+        const segments = await generateReelSegments({
+            inputPath,
+            srt: job.srt,
+            wordSrt: job.wordSrt,
+            sentences: job.importantSentences,
+            paddingSeconds: job.paddingSeconds,
+            portrait: job.portrait,
+            maxCount: 3
+        });
+        if (!segments || segments.length === 0) {
+            // Fallback to single buffer using concat path
+            const buf = await this.generateReelBuffer(job, requestData);
+            return { buffers: [buf] };
+        }
+        const buffers = segments.map(p => fs.readFileSync(p));
+        // Cleanup local files after reading
+        try { segments.forEach(p => fs.existsSync(p) && fs.unlinkSync(p)); } catch(_) {}
+        return { buffers };
+    }
+
+    /**
      * Save video to S3 with organized structure
      */
     async saveVideoToS3(videoBuffer, jobId) {
@@ -261,6 +291,36 @@ class VideoToReelsJobService {
             console.error('Error saving video-to-reels to S3:', error);
             throw error;
         }
+    }
+
+    /**
+     * Save multiple videos to S3 under the same jobId
+     */
+    async saveMultipleVideosToS3(videoBuffers, jobId) {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const results = [];
+        for (let i = 0; i < videoBuffers.length; i++) {
+            const idx = i + 1;
+            const s3Key = `video-to-reels/${jobId}/${timestamp}/reel_${idx}.mp4`;
+            const fileName = `reel_${idx}_${timestamp}.mp4`;
+            const putCmd = new PutObjectCommand({
+                Bucket: BUCKET_NAME,
+                Key: s3Key,
+                Body: videoBuffers[i],
+                ContentType: 'video/mp4',
+                Metadata: {
+                    'job-id': jobId,
+                    'generated-at': new Date().toISOString(),
+                    'type': 'video-to-reels',
+                    'index': String(idx)
+                }
+            });
+            await s3.send(putCmd);
+            const getCmd = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: s3Key });
+            const presignedUrl = await getSignedUrl(s3, getCmd, { expiresIn: 604800 });
+            results.push({ key: s3Key, url: presignedUrl, fileName, fileSize: videoBuffers[i].length, index: idx });
+        }
+        return results;
     }
 
     /**
