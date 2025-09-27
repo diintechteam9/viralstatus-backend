@@ -123,7 +123,7 @@ class VideoToReelsJobService {
                 videos: uploaded ? [{ ...uploaded, index: 1 }] : []
             });
 
-            console.log(`Video-to-reels job completed: ${jobId}, uploaded videos: ${uploaded.length}`);
+            console.log(`Video-to-reels job completed: ${jobId}, uploaded video: ${uploaded ? 'yes' : 'no'}, url: ${uploaded?.url || 'none'}`);
 
             // Cleanup job working directory after successful completion
             try {

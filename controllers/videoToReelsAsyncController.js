@@ -140,14 +140,23 @@ const getJobStatus = async (req, res) => {
       });
     }
 
+    // Debug logging
+    console.log(`[VTR][Job Status] ${jobId}:`, {
+      status: job.status,
+      videoUrl: job.videoUrl,
+      s3Url: job.s3Url,
+      videos: job.videos,
+      fileName: job.fileName
+    });
+
     res.json({
       success: true,
       job: {
         jobId: job.jobId,
         status: job.status,
         progress: job.progress,
-        videoUrl: job.videoUrl,
-        videos: Array.isArray(job.videos) ? job.videos : (job.videoUrl ? [{ url: job.videoUrl, index: 1 }] : []),
+        videoUrl: job.videoUrl || job.s3Url, // Try both fields
+        videos: Array.isArray(job.videos) ? job.videos : (job.videoUrl || job.s3Url ? [{ url: job.videoUrl || job.s3Url, index: 1 }] : []),
         error: job.error,
         createdAt: job.createdAt,
         updatedAt: job.updatedAt

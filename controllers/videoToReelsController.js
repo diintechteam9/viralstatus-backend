@@ -1567,3 +1567,4 @@ async function overlayImagesOnVideo(req, res) {
 }
 
 module.exports.overlayImagesOnVideo = overlayImagesOnVideo;
+
