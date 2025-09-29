@@ -3,7 +3,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const { extractAudio, generateSentenceSrt, generateWordSrt, generateImportantSentences, generateReel, generateImagePromptsForParagraph, overlayImagesOnVideo } = require("../controllers/videoToReelsController");
-const { createAsyncReelJob, getJobStatus } = require("../controllers/videoToReelsAsyncController");
+const { createAsyncReelJob, getJobStatus, cleanupJob } = require("../controllers/videoToReelsAsyncController");
 
 const router = express.Router();
 
@@ -49,6 +49,9 @@ router.post("/generate-reel-async", upload.single("video"), createAsyncReelJob);
 
 // GET /api/vtr/job-status/:jobId
 router.get("/job-status/:jobId", getJobStatus);
+
+// POST /api/vtr/cleanup-job/:jobId
+router.post("/cleanup-job/:jobId", cleanupJob);
 
 // POST /api/vtr/generate-image-prompts (expects { paragraph: string, max?: 1-5 })
 router.post("/generate-image-prompts", express.json({ limit: '2mb' }), generateImagePromptsForParagraph);

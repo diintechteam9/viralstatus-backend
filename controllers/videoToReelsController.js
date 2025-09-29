@@ -3,6 +3,7 @@ const path = require("path");
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
 const ffprobeStatic = require("ffprobe-static");
+const ffmpegStatic = require('ffmpeg-static');
 const { createClient } = require("@deepgram/sdk");
 const fetch = require("node-fetch");
 
@@ -177,6 +178,123 @@ function transliterateToEnglish(text) {
   return out;
 }
 
+
+// Transition types for image-to-video conversion
+const validXfades = [
+  'fade', 'wipeleft', 'wiperight', 'wipeup', 'wipedown',
+  'slideleft', 'slideright', 'slideup', 'slidedown',
+  'circlecrop', 'circleopen', 'circleclose', 'rectcrop', 'distance', 'fadeblack', 'fadewhite', 'radial', 'zoom'
+];
+const DEFAULT_TRANSITION = 'fade';
+const DEFAULT_TRANSITION_DURATION = 0.5; // seconds for image transitions
+const IMAGE_VIDEO_DURATION = 2; // seconds for each image video
+
+// Helper function to convert images to 2-second videos with transitions
+async function createImageVideosWithTransitions(images, workDir, transitionType = DEFAULT_TRANSITION) {
+  if (!Array.isArray(images) || images.length === 0) return [];
+  
+  const imageVideoPaths = [];
+  const transitionDuration = DEFAULT_TRANSITION_DURATION;
+  
+  // Materialize images as temp files
+  const imgPaths = [];
+  for (let i = 0; i < images.length; i++) {
+    const dataUrl = String(images[i]);
+    const m = dataUrl.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/i);
+    if (!m) continue;
+    const ext = m[1].toLowerCase() === 'jpeg' ? 'jpg' : m[1].toLowerCase();
+    const b64 = m[2];
+    const p = path.join(workDir, `img_${Date.now()}_${i}.${ext}`);
+    fs.writeFileSync(p, Buffer.from(b64, 'base64'));
+    imgPaths.push(p);
+  }
+  
+  if (imgPaths.length === 0) return [];
+  
+  // If only one image, create a simple 2-second video
+  if (imgPaths.length === 1) {
+    const outputPath = path.join(workDir, `img_video_${Date.now()}.mp4`);
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(imgPaths[0])
+        .inputOptions(['-loop', '1', '-t', IMAGE_VIDEO_DURATION.toString()])
+        .videoFilters([
+          'scale=1080:1920:force_original_aspect_ratio=increase',
+          'crop=1080:1920:(iw-1080)/2:(ih-1920)/2',
+          'fps=30'
+        ])
+        .videoCodec('libx264')
+        .outputOptions(['-pix_fmt yuv420p', '-preset veryfast', '-crf 23'])
+        .on('error', reject)
+        .on('end', resolve)
+        .save(outputPath);
+    });
+    imageVideoPaths.push(outputPath);
+  } else {
+    // Multiple images: create videos with xfade transitions
+    const n = imgPaths.length;
+    const perImageDuration = IMAGE_VIDEO_DURATION; // Each image gets 2 seconds
+    
+    // Build ffmpeg args for xfade transitions
+    const args = ['-y'];
+    // Add image inputs
+    imgPaths.forEach(img => {
+      args.push('-loop', '1', '-t', perImageDuration.toString(), '-i', img);
+    });
+    
+    // Build filter_complex for xfade transitions
+    let filter = '';
+    // Scale and crop all images to 1080x1920
+    for (let i = 0; i < n; i++) {
+      filter += `[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)/2:(ih-1920)/2,fps=30[v${i}];`;
+    }
+    
+    // Chain xfade transitions
+    if (n === 1) {
+      filter += `[v0]format=yuv420p[video]`;
+    } else {
+      filter += `[v0][v1]xfade=transition=${transitionType}:duration=${transitionDuration}:offset=${perImageDuration - transitionDuration}[vx1];`;
+      for (let i = 2; i < n; i++) {
+        filter += `[vx${i-1}][v${i}]xfade=transition=${transitionType}:duration=${transitionDuration}:offset=${(perImageDuration-transitionDuration)+(i-1)*(perImageDuration-transitionDuration)}[vx${i}];`;
+      }
+      filter += `[vx${n-1}]format=yuv420p[video]`;
+    }
+    
+    const outputPath = path.join(workDir, `img_video_${Date.now()}.mp4`);
+    args.push('-filter_complex', filter);
+    args.push('-map', '[video]');
+    args.push('-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast', '-crf', '23', outputPath);
+    
+    await new Promise((resolve, reject) => {
+      const { spawn } = require('child_process');
+      // Prefer ffmpeg-static (bundled build with xfade); fallback to @ffmpeg-installer
+      let ffmpegPath = ffmpegStatic;
+      try {
+        if (!ffmpegPath) {
+          const installer = require('@ffmpeg-installer/ffmpeg');
+          ffmpegPath = installer && installer.path ? installer.path : null;
+        }
+      } catch (_) {}
+      if (!ffmpegPath) return reject(new Error('ffmpeg binary not found'));
+      
+      const ff = spawn(ffmpegPath, args);
+      
+      ff.stderr.on('data', data => console.log('[VTR] Image video ffmpeg:', data.toString()));
+      ff.on('close', code => {
+        console.log('[VTR] Image video ffmpeg completed with code:', code);
+        code === 0 ? resolve() : reject(new Error('ffmpeg failed'));
+      });
+      ff.on('error', reject);
+    });
+    
+    imageVideoPaths.push(outputPath);
+  }
+  
+  // Clean up image files
+  try { safeCleanup(imgPaths); } catch(_) {}
+  
+  return imageVideoPaths;
+}
 
 // Overlay functionality removed: no drawtext helpers or font handling
 
@@ -872,12 +990,10 @@ async function generateReel(req, res) {
       offset += d;
     }
 
-    // 3) First pass: overlay images on the entire concatenated base video
+    // 3) First pass: overlay images directly with fade transitions at 5s intervals
     let imageOverlayPath = baseVideoPath;
     let imgTempPaths = [];
     if (Array.isArray(images) && images.length > 0) {
-      const imgFilters = [];
-      let prevLabel = '[0:v]';
       // Materialize images and add as inputs
       const imgInputPaths = [];
       for (let i = 0; i < images.length; i++) {
@@ -893,17 +1009,36 @@ async function generateReel(req, res) {
       }
 
       if (imgInputPaths.length > 0) {
+        // Probe duration
+        const getDuration = () => new Promise((resolve) => {
+          ffmpeg.ffprobe(baseVideoPath, (err, data) => {
+            if (err) return resolve(0);
+            const dur = Number(data?.format?.duration || 0);
+            resolve(isFinite(dur) ? dur : 0);
+          });
+        });
+        const baseDuration = await getDuration();
+
+        const overlayFilters = [];
+        let prevLabel = '[0:v]';
+        const fadeDur = 0.3;
         for (let i = 0; i < imgInputPaths.length; i++) {
           const start = 5 + i * 5;
-          const end = start + 2;
-          const scaledLabel = `[sov${i + 1}]`;
-          imgFilters.push(`[${i + 1}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)/2:(ih-1920)/2${scaledLabel}`);
+          if (start >= baseDuration) break;
+          const end = Math.min(start + IMAGE_VIDEO_DURATION, baseDuration);
+          const preLabel = `[sov_pre_${i + 1}]`;
+          const fadedLabel = `[sovf_${i + 1}]`;
+          const shiftedLabel = `[sov${i + 1}]`;
           const outLabel = i === imgInputPaths.length - 1 ? '[ivout]' : `[iv${i + 1}]`;
-          imgFilters.push(`${prevLabel}${scaledLabel}overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'${outLabel}`);
+          // Build a timed overlay stream from a single image: scale -> loop to duration -> fade in/out -> shift to start time
+          overlayFilters.push(`[${i + 1}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)/2:(ih-1920)/2,format=rgba,loop=loop=${Math.max(1, Math.floor(30*IMAGE_VIDEO_DURATION))}:size=1:start=0,setpts=N/30/TB${preLabel}`);
+          overlayFilters.push(`${preLabel}fade=t=in:st=0:d=${fadeDur}:alpha=1,fade=t=out:st=${(IMAGE_VIDEO_DURATION - fadeDur).toFixed(3)}:d=${fadeDur}:alpha=1${fadedLabel}`);
+          overlayFilters.push(`${fadedLabel}setpts=PTS+${start.toFixed(3)}/TB${shiftedLabel}`);
+          overlayFilters.push(`${prevLabel}${shiftedLabel}overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'${outLabel}`);
           prevLabel = outLabel;
         }
 
-        const imgVf = imgFilters.join(';');
+        const imgVf = overlayFilters.join(';');
         const imgOut = path.join(workDir, `base_with_images_${Date.now()}.mp4`);
         await new Promise((resolve, reject) => {
           let cmd = ffmpeg().input(baseVideoPath);
@@ -1317,43 +1452,31 @@ async function generateMiniReelWithImages(req, res) {
         .save(segPath);
     });
 
-    // 3) Materialize images as temp files
-    const imgPaths = [];
-    for (let i = 0; i < images.length; i++) {
-      const dataUrl = String(images[i]);
-      const m = dataUrl.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/i);
-      if (!m) continue;
-      const ext = m[1].toLowerCase() === 'jpeg' ? 'jpg' : m[1].toLowerCase();
-      const b64 = m[2];
-      const buf = Buffer.from(b64, 'base64');
-      const p = path.join(workDir, `overlay_${Date.now()}_${i}.${ext}`);
-      fs.writeFileSync(p, buf);
-      imgPaths.push(p);
-    }
-    if (imgPaths.length === 0) {
+    // 3) Create image videos with transitions
+    const imageVideoPaths = await createImageVideosWithTransitions(images, workDir);
+    if (imageVideoPaths.length === 0) {
       try { safeCleanup([segPath, uploadedFile.path]); } catch(_) {}
       return res.status(400).json({ error: 'No valid image data provided' });
     }
 
-    // 4) Build overlay filter at 5s intervals for 1s each, centered
-    // Enable windows: [5,6], [10,11], ... within the trimmed segment
-    // Chain overlays: [v0][i0]overlay=...=enable=between(t,5,6)[v1]; [v1][i1]overlay=...=enable=between(t,10,11)[v2]; ...
-    const inputs = ['-i', segPath];
-    for (const p of imgPaths) {
-      inputs.push('-i', p);
-    }
+    // 4) Build overlay filter at 5s intervals, centered
+    // Enable windows: [5,7], [10,12], ... within the trimmed segment (2-second image videos)
     const overlayFilters = [];
     // base: start from input0 video, already 1080x1920 due to trim filter above
     let prevLabel = '[0:v]';
-    for (let i = 0; i < imgPaths.length; i++) {
+    for (let i = 0; i < images.length; i++) {
       const start = 5 + i * 5;
-      const end = start + 2;
+      const end = start + IMAGE_VIDEO_DURATION;
       if (start >= duration) break;
       const clampedEnd = Math.min(end, duration);
-      const scaledLabel = `[si${i + 1}]`;
-      overlayFilters.push(`[${i + 1}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)/2:(ih-1920)/2${scaledLabel}`);
+      const preLabel = `[si_pre_${i + 1}]`;
+      const fadedLabel = `[sif_${i + 1}]`;
+      const shiftedLabel = `[si${i + 1}]`;
       const outLabel = `[v${i + 1}]`;
-      overlayFilters.push(`${prevLabel}${scaledLabel}overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2:enable='between(t,${start.toFixed(3)},${clampedEnd.toFixed(3)})'${outLabel}`);
+      overlayFilters.push(`[${i + 1}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)/2:(ih-1920)/2,format=rgba,loop=loop=${Math.max(1, Math.floor(30*IMAGE_VIDEO_DURATION))}:size=1:start=0,setpts=N/30/TB${preLabel}`);
+      overlayFilters.push(`${preLabel}fade=t=in:st=0:d=0.3:alpha=1,fade=t=out:st=${(IMAGE_VIDEO_DURATION - 0.3).toFixed(3)}:d=0.3:alpha=1${fadedLabel}`);
+      overlayFilters.push(`${fadedLabel}setpts=PTS+${start.toFixed(3)}/TB${shiftedLabel}`);
+      overlayFilters.push(`${prevLabel}${shiftedLabel}overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2:enable='between(t,${start.toFixed(3)},${clampedEnd.toFixed(3)})'${outLabel}`);
       prevLabel = outLabel;
     }
     const lastLabel = prevLabel;
@@ -1363,7 +1486,7 @@ async function generateMiniReelWithImages(req, res) {
     await new Promise((resolve, reject) => {
       let cmd = ffmpeg();
       cmd = cmd.input(segPath);
-      for (const p of imgPaths) cmd = cmd.input(p);
+      for (let i = 0; i < images.length; i++) cmd = cmd.input(imgPaths ? imgPaths[i] : imageVideoPaths[i]);
       const videoLabel = lastLabel; // like [vN] or [0:v]
       if (vf) cmd = cmd.complexFilter(vf);
       cmd
@@ -1383,7 +1506,7 @@ async function generateMiniReelWithImages(req, res) {
     res.setHeader('Content-Disposition', 'inline; filename="mini_reel.mp4"');
     const stream = fs.createReadStream(outPath);
     stream.on('close', () => {
-      try { safeCleanup([segPath, outPath, uploadedFile.path, ...imgPaths]); } catch(_) {}
+      try { safeCleanup([segPath, outPath, uploadedFile.path, ...imageVideoPaths]); } catch(_) {}
     });
     stream.pipe(res);
   } catch (err) {
@@ -1424,36 +1547,30 @@ async function overlayImagesOnVideo(req, res) {
     });
     const duration = await getDuration();
 
-    // 3) Materialize images
-    const imgPaths = [];
-    for (let i = 0; i < images.length; i++) {
-      const dataUrl = String(images[i]);
-      const m = dataUrl.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/i);
-      if (!m) continue;
-      const ext = m[1].toLowerCase() === 'jpeg' ? 'jpg' : m[1].toLowerCase();
-      const b64 = m[2];
-      const p = path.join(workDir, `ov_${Date.now()}_${i}.${ext}`);
-      fs.writeFileSync(p, Buffer.from(b64, 'base64'));
-      imgPaths.push(p);
-    }
-    if (imgPaths.length === 0) {
+    // 3) Create image videos with transitions
+    const imageVideoPaths = await createImageVideosWithTransitions(images, workDir);
+    if (imageVideoPaths.length === 0) {
       try { safeCleanup([srcPath]); } catch(_) {}
       return res.status(400).json({ error: 'No valid image data provided' });
     }
 
-    // 4) Build overlay filter chain at 5s intervals for 1s each; ensure base video portrait
+    // 4) Build overlay filter chain at 5s intervals; ensure base video portrait
     const overlayFilters = [];
     // Add a base scale/crop to 1080x1920 to be safe if source isn't portrait
     overlayFilters.push('[0:v]scale=-2:1920,crop=1080:1920:(iw-1080)/2:(ih-1920)/2[base]');
     let prevLabel = '[base]';
-    for (let i = 0; i < imgPaths.length; i++) {
+    for (let i = 0; i < images.length; i++) {
       const start = 5 + i * 5;
       if (duration && start >= duration) break;
-      const end = Math.min(start + 2, duration || (start + 2));
-      const scaledLabel = `[sov${i + 1}]`;
-      overlayFilters.push(`[${i + 1}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)/2:(ih-1920)/2${scaledLabel}`);
+      const end = Math.min(start + IMAGE_VIDEO_DURATION, duration || (start + IMAGE_VIDEO_DURATION));
+      const preLabel = `[sov_pre_${i + 1}]`;
+      const fadedLabel = `[sovf_${i + 1}]`;
+      const shiftedLabel = `[sov${i + 1}]`;
       const outLabel = `[ov${i + 1}]`;
-      overlayFilters.push(`${prevLabel}${scaledLabel}overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'${outLabel}`);
+      overlayFilters.push(`[${i + 1}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)/2:(ih-1920)/2,format=rgba,loop=loop=${Math.max(1, Math.floor(30*IMAGE_VIDEO_DURATION))}:size=1:start=0,setpts=N/30/TB${preLabel}`);
+      overlayFilters.push(`${preLabel}fade=t=in:st=0:d=0.3:alpha=1,fade=t=out:st=${(IMAGE_VIDEO_DURATION - 0.3).toFixed(3)}:d=0.3:alpha=1${fadedLabel}`);
+      overlayFilters.push(`${fadedLabel}setpts=PTS+${start.toFixed(3)}/TB${shiftedLabel}`);
+      overlayFilters.push(`${prevLabel}${shiftedLabel}overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'${outLabel}`);
       prevLabel = outLabel;
     }
     const vf = overlayFilters.join(';');
@@ -1462,7 +1579,7 @@ async function overlayImagesOnVideo(req, res) {
     await new Promise((resolve, reject) => {
       let cmd = ffmpeg();
       cmd = cmd.input(srcPath);
-      for (const p of imgPaths) cmd = cmd.input(p);
+      for (let i = 0; i < images.length; i++) cmd = cmd.input(imageVideoPaths ? imageVideoPaths[i] : imgPaths[i]);
       if (vf) cmd = cmd.complexFilter(vf);
       cmd
         .videoCodec('libx264')
@@ -1554,7 +1671,7 @@ async function overlayImagesOnVideo(req, res) {
     const stream = fs.createReadStream(finalVideoPath);
     stream.on('close', () => {
       try {
-        const cleanupList = [srcPath, outPath, ...imgPaths];
+        const cleanupList = [srcPath, outPath, ...imageVideoPaths];
         if (finalVideoPath && finalVideoPath !== outPath) cleanupList.push(finalVideoPath);
         safeCleanup(cleanupList);
       } catch(_) {}
@@ -1567,4 +1684,5 @@ async function overlayImagesOnVideo(req, res) {
 }
 
 module.exports.overlayImagesOnVideo = overlayImagesOnVideo;
+
 

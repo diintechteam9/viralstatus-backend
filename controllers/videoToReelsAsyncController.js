@@ -172,7 +172,56 @@ const getJobStatus = async (req, res) => {
   }
 };
 
+/**
+ * Clean up job files and directory
+ * POST /api/vtr/cleanup-job/:jobId
+ */
+const cleanupJob = async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    
+    const job = await videoToReelsJobService.getJobStatus(jobId);
+    
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        error: 'Job not found'
+      });
+    }
+
+    // Only allow cleanup for completed or failed jobs
+    if (job.status !== 'completed' && job.status !== 'failed') {
+      return res.status(400).json({
+        success: false,
+        error: 'Job must be completed or failed before cleanup'
+      });
+    }
+
+    // Clean up the job directory
+    try {
+      videoToReelsJobService.cleanupJobDirectory(job);
+      console.log(`[VTR][Cleanup] Manually cleaned job directory for ${jobId}`);
+    } catch (cleanupErr) {
+      console.warn(`[VTR][Cleanup] ${jobId} cleanup warning:`, cleanupErr?.message || cleanupErr);
+    }
+
+    res.json({
+      success: true,
+      message: 'Job cleanup completed',
+      jobId: jobId
+    });
+
+  } catch (error) {
+    console.error('Error cleaning up job:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to cleanup job'
+    });
+  }
+};
+
 module.exports = {
   createAsyncReelJob,
-  getJobStatus
+  getJobStatus,
+  cleanupJob
 };
