@@ -9,7 +9,7 @@ const path = require('path');
 const createAsyncReelJob = async (req, res) => {
   try {
     const uploadedFile = req.file;
-    const { srt, wordSrt, sentences, paddingSeconds, maxTotalSeconds, portrait, images } = req.body;
+    const { srt, wordSrt, sentences, paddingSeconds, maxTotalSeconds, portrait, images, fontKey } = req.body;
     const userId = req.user?.id || req.user?._id || null;
 
     // Validate required fields
@@ -54,6 +54,7 @@ const createAsyncReelJob = async (req, res) => {
       paddingSeconds: Number(paddingSeconds || 0.3),
       maxTotalSeconds: Number(maxTotalSeconds || 60),
       portrait: String(portrait || 'false') === 'true',
+      fontKey: fontKey || 'notosans',
       userId,
       type: 'video-to-reels'
     };

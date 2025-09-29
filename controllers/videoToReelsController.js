@@ -3,7 +3,6 @@ const path = require("path");
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
 const ffprobeStatic = require("ffprobe-static");
-const ffmpegStatic = require('ffmpeg-static');
 const { createClient } = require("@deepgram/sdk");
 const fetch = require("node-fetch");
 
@@ -179,122 +178,7 @@ function transliterateToEnglish(text) {
 }
 
 
-// Transition types for image-to-video conversion
-const validXfades = [
-  'fade', 'wipeleft', 'wiperight', 'wipeup', 'wipedown',
-  'slideleft', 'slideright', 'slideup', 'slidedown',
-  'circlecrop', 'circleopen', 'circleclose', 'rectcrop', 'distance', 'fadeblack', 'fadewhite', 'radial', 'zoom'
-];
-const DEFAULT_TRANSITION = 'fade';
-const DEFAULT_TRANSITION_DURATION = 0.5; // seconds for image transitions
-const IMAGE_VIDEO_DURATION = 2; // seconds for each image video
-
-// Helper function to convert images to 2-second videos with transitions
-async function createImageVideosWithTransitions(images, workDir, transitionType = DEFAULT_TRANSITION) {
-  if (!Array.isArray(images) || images.length === 0) return [];
-  
-  const imageVideoPaths = [];
-  const transitionDuration = DEFAULT_TRANSITION_DURATION;
-  
-  // Materialize images as temp files
-  const imgPaths = [];
-  for (let i = 0; i < images.length; i++) {
-    const dataUrl = String(images[i]);
-    const m = dataUrl.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/i);
-    if (!m) continue;
-    const ext = m[1].toLowerCase() === 'jpeg' ? 'jpg' : m[1].toLowerCase();
-    const b64 = m[2];
-    const p = path.join(workDir, `img_${Date.now()}_${i}.${ext}`);
-    fs.writeFileSync(p, Buffer.from(b64, 'base64'));
-    imgPaths.push(p);
-  }
-  
-  if (imgPaths.length === 0) return [];
-  
-  // If only one image, create a simple 2-second video
-  if (imgPaths.length === 1) {
-    const outputPath = path.join(workDir, `img_video_${Date.now()}.mp4`);
-    await new Promise((resolve, reject) => {
-      ffmpeg()
-        .input(imgPaths[0])
-        .inputOptions(['-loop', '1', '-t', IMAGE_VIDEO_DURATION.toString()])
-        .videoFilters([
-          'scale=1080:1920:force_original_aspect_ratio=increase',
-          'crop=1080:1920:(iw-1080)/2:(ih-1920)/2',
-          'fps=30'
-        ])
-        .videoCodec('libx264')
-        .outputOptions(['-pix_fmt yuv420p', '-preset veryfast', '-crf 23'])
-        .on('error', reject)
-        .on('end', resolve)
-        .save(outputPath);
-    });
-    imageVideoPaths.push(outputPath);
-  } else {
-    // Multiple images: create videos with xfade transitions
-    const n = imgPaths.length;
-    const perImageDuration = IMAGE_VIDEO_DURATION; // Each image gets 2 seconds
-    
-    // Build ffmpeg args for xfade transitions
-    const args = ['-y'];
-    // Add image inputs
-    imgPaths.forEach(img => {
-      args.push('-loop', '1', '-t', perImageDuration.toString(), '-i', img);
-    });
-    
-    // Build filter_complex for xfade transitions
-    let filter = '';
-    // Scale and crop all images to 1080x1920
-    for (let i = 0; i < n; i++) {
-      filter += `[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)/2:(ih-1920)/2,fps=30[v${i}];`;
-    }
-    
-    // Chain xfade transitions
-    if (n === 1) {
-      filter += `[v0]format=yuv420p[video]`;
-    } else {
-      filter += `[v0][v1]xfade=transition=${transitionType}:duration=${transitionDuration}:offset=${perImageDuration - transitionDuration}[vx1];`;
-      for (let i = 2; i < n; i++) {
-        filter += `[vx${i-1}][v${i}]xfade=transition=${transitionType}:duration=${transitionDuration}:offset=${(perImageDuration-transitionDuration)+(i-1)*(perImageDuration-transitionDuration)}[vx${i}];`;
-      }
-      filter += `[vx${n-1}]format=yuv420p[video]`;
-    }
-    
-    const outputPath = path.join(workDir, `img_video_${Date.now()}.mp4`);
-    args.push('-filter_complex', filter);
-    args.push('-map', '[video]');
-    args.push('-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast', '-crf', '23', outputPath);
-    
-    await new Promise((resolve, reject) => {
-      const { spawn } = require('child_process');
-      // Prefer ffmpeg-static (bundled build with xfade); fallback to @ffmpeg-installer
-      let ffmpegPath = ffmpegStatic;
-      try {
-        if (!ffmpegPath) {
-          const installer = require('@ffmpeg-installer/ffmpeg');
-          ffmpegPath = installer && installer.path ? installer.path : null;
-        }
-      } catch (_) {}
-      if (!ffmpegPath) return reject(new Error('ffmpeg binary not found'));
-      
-      const ff = spawn(ffmpegPath, args);
-      
-      ff.stderr.on('data', data => console.log('[VTR] Image video ffmpeg:', data.toString()));
-      ff.on('close', code => {
-        console.log('[VTR] Image video ffmpeg completed with code:', code);
-        code === 0 ? resolve() : reject(new Error('ffmpeg failed'));
-      });
-      ff.on('error', reject);
-    });
-    
-    imageVideoPaths.push(outputPath);
-  }
-  
-  // Clean up image files
-  try { safeCleanup(imgPaths); } catch(_) {}
-  
-  return imageVideoPaths;
-}
+const IMAGE_VIDEO_DURATION = 2; // seconds for each image overlay window
 
 // Overlay functionality removed: no drawtext helpers or font handling
 
@@ -804,8 +688,8 @@ Paragraph:
 ${paragraph}`
           }
         ],
-        max_tokens: 800,
-        temperature: 0.4
+        max_tokens: 900,
+        temperature: 0.3
       };
 
       try {
@@ -880,6 +764,8 @@ async function generateReel(req, res) {
     }
     const srt = req.body?.srt;
     const wordSrt = req.body?.wordSrt; // optional word-level SRT (for text overlay)
+    const fontKeyFromReq = (req.body?.fontKey || '').toString().toLowerCase();
+    const selectedFontKey = ['khand','notosans','poppins'].includes(fontKeyFromReq) ? fontKeyFromReq : 'notosans';
     const sentencesRaw = req.body?.sentences;
     // Optional image overlays
     let images = [];
@@ -1072,7 +958,7 @@ async function generateReel(req, res) {
         const cleanText = cleanTextForDrawtext(o.text);
         if (!cleanText.trim()) continue;
         const position = (j % 2 === 0) ? 'top' : 'bottom';
-        const drawtextFilter = buildDrawtextFilter(cleanText, 'notosans', position);
+        const drawtextFilter = buildDrawtextFilter(cleanText, selectedFontKey, position);
         const outLabel = (i === segments.length - 1 && j === overlays.length - 1) ? 'vout' : `v_${i}_${j}`;
         const startT = Math.max(0, baseOffset.start + o.startTime);
         const endT = Math.max(0, baseOffset.start + o.endTime);
@@ -1452,19 +1338,28 @@ async function generateMiniReelWithImages(req, res) {
         .save(segPath);
     });
 
-    // 3) Create image videos with transitions
-    const imageVideoPaths = await createImageVideosWithTransitions(images, workDir);
-    if (imageVideoPaths.length === 0) {
-      try { safeCleanup([segPath, uploadedFile.path]); } catch(_) {}
-      return res.status(400).json({ error: 'No valid image data provided' });
-    }
-
-    // 4) Build overlay filter at 5s intervals, centered
+    // 3) Build overlay filter at 5s intervals, centered
     // Enable windows: [5,7], [10,12], ... within the trimmed segment (2-second image videos)
     const overlayFilters = [];
     // base: start from input0 video, already 1080x1920 due to trim filter above
     let prevLabel = '[0:v]';
+    // Materialize images as inputs
+    const imgPaths = [];
     for (let i = 0; i < images.length; i++) {
+      const dataUrl = String(images[i]);
+      const m = dataUrl.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/i);
+      if (!m) continue;
+      const ext = m[1].toLowerCase() === 'jpeg' ? 'jpg' : m[1].toLowerCase();
+      const b64 = m[2];
+      const p = path.join(workDir, `overlay_${Date.now()}_${i}.${ext}`);
+      fs.writeFileSync(p, Buffer.from(b64, 'base64'));
+      imgPaths.push(p);
+    }
+    if (imgPaths.length === 0) {
+      try { safeCleanup([segPath, uploadedFile.path]); } catch(_) {}
+      return res.status(400).json({ error: 'No valid image data provided' });
+    }
+    for (let i = 0; i < imgPaths.length; i++) {
       const start = 5 + i * 5;
       const end = start + IMAGE_VIDEO_DURATION;
       if (start >= duration) break;
@@ -1486,7 +1381,7 @@ async function generateMiniReelWithImages(req, res) {
     await new Promise((resolve, reject) => {
       let cmd = ffmpeg();
       cmd = cmd.input(segPath);
-      for (let i = 0; i < images.length; i++) cmd = cmd.input(imgPaths ? imgPaths[i] : imageVideoPaths[i]);
+      for (let i = 0; i < imgPaths.length; i++) cmd = cmd.input(imgPaths[i]);
       const videoLabel = lastLabel; // like [vN] or [0:v]
       if (vf) cmd = cmd.complexFilter(vf);
       cmd
@@ -1506,7 +1401,7 @@ async function generateMiniReelWithImages(req, res) {
     res.setHeader('Content-Disposition', 'inline; filename="mini_reel.mp4"');
     const stream = fs.createReadStream(outPath);
     stream.on('close', () => {
-      try { safeCleanup([segPath, outPath, uploadedFile.path, ...imageVideoPaths]); } catch(_) {}
+      try { safeCleanup([segPath, outPath, uploadedFile.path, ...imgPaths]); } catch(_) {}
     });
     stream.pipe(res);
   } catch (err) {
@@ -1547,19 +1442,28 @@ async function overlayImagesOnVideo(req, res) {
     });
     const duration = await getDuration();
 
-    // 3) Create image videos with transitions
-    const imageVideoPaths = await createImageVideosWithTransitions(images, workDir);
-    if (imageVideoPaths.length === 0) {
-      try { safeCleanup([srcPath]); } catch(_) {}
-      return res.status(400).json({ error: 'No valid image data provided' });
-    }
-
-    // 4) Build overlay filter chain at 5s intervals; ensure base video portrait
+    // 3) Build overlay filter chain at 5s intervals; ensure base video portrait
     const overlayFilters = [];
     // Add a base scale/crop to 1080x1920 to be safe if source isn't portrait
     overlayFilters.push('[0:v]scale=-2:1920,crop=1080:1920:(iw-1080)/2:(ih-1920)/2[base]');
     let prevLabel = '[base]';
+    // Materialize images
+    const imgPaths = [];
     for (let i = 0; i < images.length; i++) {
+      const dataUrl = String(images[i]);
+      const m = dataUrl.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/i);
+      if (!m) continue;
+      const ext = m[1].toLowerCase() === 'jpeg' ? 'jpg' : m[1].toLowerCase();
+      const b64 = m[2];
+      const p = path.join(workDir, `ov_${Date.now()}_${i}.${ext}`);
+      fs.writeFileSync(p, Buffer.from(b64, 'base64'));
+      imgPaths.push(p);
+    }
+    if (imgPaths.length === 0) {
+      try { safeCleanup([srcPath]); } catch(_) {}
+      return res.status(400).json({ error: 'No valid image data provided' });
+    }
+    for (let i = 0; i < imgPaths.length; i++) {
       const start = 5 + i * 5;
       if (duration && start >= duration) break;
       const end = Math.min(start + IMAGE_VIDEO_DURATION, duration || (start + IMAGE_VIDEO_DURATION));
@@ -1579,7 +1483,7 @@ async function overlayImagesOnVideo(req, res) {
     await new Promise((resolve, reject) => {
       let cmd = ffmpeg();
       cmd = cmd.input(srcPath);
-      for (let i = 0; i < images.length; i++) cmd = cmd.input(imageVideoPaths ? imageVideoPaths[i] : imgPaths[i]);
+      for (let i = 0; i < imgPaths.length; i++) cmd = cmd.input(imgPaths[i]);
       if (vf) cmd = cmd.complexFilter(vf);
       cmd
         .videoCodec('libx264')
@@ -1671,7 +1575,7 @@ async function overlayImagesOnVideo(req, res) {
     const stream = fs.createReadStream(finalVideoPath);
     stream.on('close', () => {
       try {
-        const cleanupList = [srcPath, outPath, ...imageVideoPaths];
+        const cleanupList = [srcPath, outPath, ...imgPaths];
         if (finalVideoPath && finalVideoPath !== outPath) cleanupList.push(finalVideoPath);
         safeCleanup(cleanupList);
       } catch(_) {}
