@@ -2,7 +2,13 @@ const video=require('../../models/aivideogen');
 
 const videocard=async(req,res)=>{
     try {
-        const videocard=new video(req.body);
+        // require client auth
+        const clientId = req.client?.id || req.user?.id; // fallback if using user as client
+        if(!clientId){
+            return res.status(401).json({ error: 'Not authorized' });
+        }
+        const payload = { ...req.body, clientId };
+        const videocard=new video(payload);
         await videocard.save();
         res.status(201).json(videocard);
     } catch (err) {
@@ -13,7 +19,11 @@ const videocard=async(req,res)=>{
 
 const getallvideocard=async(req,res)=>{
 try {
-    const all=await video.find();
+    const clientId = req.client?.id || req.user?.id;
+    if(!clientId){
+        return res.status(401).json({ error: 'Not authorized' });
+    }
+    const all=await video.find({ clientId });
     res.json(all);
 } catch (err) {
     res.status(500).json({error:err.message});
@@ -22,7 +32,11 @@ try {
 
 const getallvideocardById=async(req,res)=>{
     try {
-        const id=await video.findById(req.params.id);
+        const clientId = req.client?.id || req.user?.id;
+        if(!clientId){
+            return res.status(401).json({ error: 'Not authorized' });
+        }
+        const id=await video.findOne({ _id: req.params.id, clientId });
         if(!id) return res.status(404).json({error:'Video not found'});
         res.json(id);
     } catch (err) {
@@ -33,7 +47,14 @@ const getallvideocardById=async(req,res)=>{
 
 const updatevideocard=async(req,res)=>{
     try {
-        const videocard=await video.findByIdAndUpdate(req.params.id,req.body,{new:true});
+        const clientId = req.client?.id || req.user?.id;
+        if(!clientId){
+            return res.status(401).json({ error: 'Not authorized' });
+        }
+        const update = { ...req.body };
+        // prevent clientId change
+        delete update.clientId;
+        const videocard=await video.findOneAndUpdate({ _id: req.params.id, clientId }, update, { new:true });
         if(!videocard) return res.status(404).json({error:'Video not found'});
         res.json(videocard);
     } catch (err) {
@@ -44,7 +65,11 @@ const updatevideocard=async(req,res)=>{
 
 const deletevideocard=async(req,res)=>{
     try {
-        const videocard=await video.findByIdAndDelete(req.params.id);
+        const clientId = req.client?.id || req.user?.id;
+        if(!clientId){
+            return res.status(401).json({ error: 'Not authorized' });
+        }
+        const videocard=await video.findOneAndDelete({ _id: req.params.id, clientId });
         if(!videocard) return res.status(404).json({error:'Video not found'});
         res.json({message:"deleted successfully"});
         

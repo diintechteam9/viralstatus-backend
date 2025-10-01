@@ -1,6 +1,13 @@
 const mongoose=require('mongoose');
 
 const videoSchema=new mongoose.Schema({
+    // Owner client for scoping cards per client
+    clientId:{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Client',
+        required: true,
+        index: true
+    },
     name:{
         type:String,
         required:true,

@@ -33,8 +33,9 @@ const creditWalletRoutes = require("./routes/creditWalletRoute");
 
 const videocardRoute=require('./routes/aivideogen');  // generate videocard
 const videoCompressionRoutes = require('./routes/videoCompressionRoutes');  // video compression
-const telegramRoute=require('./routes/telegramroutes');
-const videoToReelsRoutes = require('./routes/videoToReels');
+const telegramRoute=require('./routes/telegramroutes');// telegram
+const videoToReelsRoutes = require('./routes/videoToReels');  // video to reel tool 
+
 
 dotenv.config();
 
@@ -180,6 +181,7 @@ app.use('/api/telegram', telegramRoute);
 
 // Video to Reels (VTR) Routes
 app.use('/api/vtr', videoToReelsRoutes);
+
 
 // Error handling middleware
 app.use((error, req, res, next) => {

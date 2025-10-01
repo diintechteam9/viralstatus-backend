@@ -47,8 +47,28 @@ const cleanTextForDrawtext = (text) => {
 
 // Build drawtext filter using selected bundled font when available
 const buildDrawtextFilter = (text, fontKey, position = 'bottom') => {
-  const yExpr = position === 'top' ? `120` : `h-(text_h+200)`;
-  const base = `text='${text}':fontcolor=0xFFFFFF:fontsize=72:borderw=3:x=(w-text_w)/2:y=${yExpr}:line_spacing=10`;
+  const yExpr = position === 'top' ? `120` : `h-(text_h+220)`;
+  // Modern, high-contrast styling: soft white text, subtle black outline, shadow, and translucent backdrop box
+  const base = [
+    `text='${text}'`,
+    `fontcolor=0xFDFDFD`,
+    `fontsize=72`,
+    // Outline for readability
+    `borderw=2`,
+    `bordercolor=0x000000`,
+    // Soft shadow for depth
+    `shadowcolor=0x000000AA`,
+    `shadowx=2`,
+    `shadowy=2`,
+    // Subtle translucent background box to improve contrast on busy footage
+    `box=1`,
+    `boxcolor=black@0.35`,
+    `boxborderw=16`,
+    // Placement and spacing
+    `x=(w-text_w)/2`,
+    `y=${yExpr}`,
+    `line_spacing=12`
+  ].join(':');
   const fontPath = resolveFontPath(fontKey);
   if (fontPath) {
     // Use fontfile to avoid fontconfig/system fonts
@@ -532,7 +552,7 @@ async function generateImportantSentences(req, res) {
             `CRITICAL RULES:\n` +
             `- Preserve the original order of appearance (keep sequence).\n` +
             `- Sentences MUST be short and concise (roughly 8–15 words each).\n` +
-            `- Aim for a combined speaking time around ~60 seconds in total.\n` +
+            `- Aim for a combined speaking time around 20–40 seconds in total.\n` +
             `- Prefer hooks, key insights, turning points, or self-contained bits.\n` +
             `- Avoid near-duplicates, filler, intros/outros, and overly short fragments.\n` +
             `Return STRICT JSON: { "sentences": ["...", "...", "..."] } with exactly ${targetCount} items.\n\n` +
@@ -668,6 +688,7 @@ async function generateImagePromptsForParagraph(req, res) {
     }
 
     let prompts = [];
+    const wrapPrompt = (description) => `Generate a high-quality, visually striking image of ${description}, with [STYLE/ATMOSPHERE], realistic details, vivid colors, cinematic lighting, modern and attractive aesthetic, professional composition.`;
 
     if (process.env.OPENROUTER_API_KEY) {
       const body = {
@@ -717,7 +738,10 @@ ${paragraph}`
           try {
             const parsed = JSON.parse(raw);
             if (parsed && Array.isArray(parsed.prompts)) {
-              prompts = parsed.prompts.map(s => String(s).trim()).filter(Boolean).slice(0, maxVariants);
+              prompts = parsed.prompts
+                .map(s => String(s).trim())
+                .filter(Boolean)
+                .slice(0, maxVariants);
             }
           } catch (_) {
             console.warn("[VTR] Failed to parse Claude output as JSON:", raw);
@@ -734,10 +758,11 @@ ${paragraph}`
     // fallback if Claude call fails
     if (!Array.isArray(prompts) || prompts.length === 0) {
       const base = String(paragraph).trim();
-      prompts = [
-        `A single, clean image concept depicting: "${base}". Vertical composition, clear subject, appropriate environment, soft lighting, coherent style.`
-      ];
+      prompts = [base];
     }
+
+    // Apply high-quality template to each prompt
+    prompts = prompts.map(p => wrapPrompt(p));
 
     return res.json({ prompts });
   } catch (err) {
@@ -996,7 +1021,7 @@ async function generateReel(req, res) {
         await new Promise((resolve, reject) => {
           ffmpeg(finalPath)
             .videoFilters([
-              'scale=-2:1920',
+              'scale=1080:1920:force_original_aspect_ratio=increase',
               'crop=1080:1920:(iw-1080)/2:(ih-1920)/2',
               'fps=30'
             ])
@@ -1014,7 +1039,7 @@ async function generateReel(req, res) {
         await new Promise((resolve, reject) => {
           ffmpeg(outroPath)
             .videoFilters([
-              'scale=-2:1920',
+              'scale=1080:1920:force_original_aspect_ratio=increase',
               'crop=1080:1920:(iw-1080)/2:(ih-1920)/2',
               'fps=30'
             ])
@@ -1510,7 +1535,7 @@ async function overlayImagesOnVideo(req, res) {
         await new Promise((resolve, reject) => {
           ffmpeg(outPath)
             .videoFilters([
-              'scale=-2:1920',
+              'scale=1080:1920:force_original_aspect_ratio=increase',
               'crop=1080:1920:(iw-1080)/2:(ih-1920)/2',
               'fps=30'
             ])
@@ -1529,7 +1554,7 @@ async function overlayImagesOnVideo(req, res) {
         await new Promise((resolve, reject) => {
           ffmpeg(outroPath)
             .videoFilters([
-              'scale=-2:1920',
+              'scale=1080:1920:force_original_aspect_ratio=increase',
               'crop=1080:1920:(iw-1080)/2:(ih-1920)/2',
               'fps=30'
             ])

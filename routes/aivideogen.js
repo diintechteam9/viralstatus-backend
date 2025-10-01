@@ -1,5 +1,6 @@
 const express=require('express');
 const router=express.Router();
+const { protect } = require('../middleware/auth');
 
 // crud for the video cards 
 const {videocard,getallvideocard,getallvideocardById,updatevideocard,deletevideocard}=require('../controllers/aivideogen/videocardcontroller');
@@ -42,11 +43,11 @@ const {textToSpeech3}=require('../controllers/aivideogen/ttssarvamcontroller');
 
 
 
-router.post('/videocard',videocard);
-router.get('/videocard',getallvideocard);
-router.get('/videocard/:id',getallvideocardById);
-router.put('/videocard/:id',updatevideocard);
-router.delete('/videocard/:id',deletevideocard);
+router.post('/videocard', protect, videocard);
+router.get('/videocard', protect, getallvideocard);
+router.get('/videocard/:id', protect, getallvideocardById);
+router.put('/videocard/:id', protect, updatevideocard);
+router.delete('/videocard/:id', protect, deletevideocard);
 
 
 router.post('/sentenceSRT',getSrtFromAudio);   // for sentence srt 
