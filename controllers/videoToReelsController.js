@@ -10,9 +10,15 @@ const fetch = require("node-fetch");
 const FONT_DIR = path.join(__dirname, '../assets/fonts');
 const FONT_MAP = {
   notosans: path.join(FONT_DIR, 'NotoSans-Regular.ttf'),
-  notosansdevanagari: path.join(FONT_DIR, 'NotoSansDevanagari-Regular.ttf'),
   khand: path.join(FONT_DIR, 'Khand-Bold.ttf'),
   poppins: path.join(FONT_DIR, 'Poppins-Bold.ttf'),
+  amaticsc: path.join(FONT_DIR, 'AmaticSC-Regular.ttf'),
+  bebasneue: path.join(FONT_DIR, 'BebasNeue-Regular.ttf'),
+  comfortaa: path.join(FONT_DIR, 'Comfortaa-VariableFont_wght.ttf'),
+  exo2italic: path.join(FONT_DIR, 'Exo2-Italic-VariableFont_wght.ttf'),
+  orbitron: path.join(FONT_DIR, 'Orbitron-Regular.ttf'),
+  pacifico: path.join(FONT_DIR, 'Pacifico-Regular.ttf'),
+  shadowsintolight: path.join(FONT_DIR, 'ShadowsIntoLight-Regular.ttf'),
 };
 
 const resolveFontPath = (fontKey) => {
@@ -46,23 +52,32 @@ const cleanTextForDrawtext = (text) => {
 };
 
 // Build drawtext filter using selected bundled font when available
-const buildDrawtextFilter = (text, fontKey, position = 'bottom') => {
+const buildDrawtextFilter = (text, fontKey, position = 'bottom', textColor = 'white') => {
   const yExpr = position === 'top' ? `120` : `h-(text_h+220)`;
-  // Modern, high-contrast styling: soft white text, subtle black outline, shadow, and translucent backdrop box
+  
+                             
+  // Determine text color and background based on textColor parameter
+  const isWhiteText = textColor === 'white';
+  const fontColor = isWhiteText ? '0xFDFDFD' : '0x000000';
+  const borderColor = isWhiteText ? '0x000000' : '0xFFFFFF';
+  const shadowColor = isWhiteText ? '0x000000AA' : '0xFFFFFFAA';
+  const boxColor = isWhiteText ? 'black@0.35' : 'white@0.35';
+  
+  // Modern, high-contrast styling with configurable colors
   const base = [
     `text='${text}'`,
-    `fontcolor=0xFDFDFD`,
+    `fontcolor=${fontColor}`,
     `fontsize=72`,
     // Outline for readability
     `borderw=2`,
-    `bordercolor=0x000000`,
+    `bordercolor=${borderColor}`,
     // Soft shadow for depth
-    `shadowcolor=0x000000AA`,
+    `shadowcolor=${shadowColor}`,
     `shadowx=2`,
     `shadowy=2`,
     // Subtle translucent background box to improve contrast on busy footage
     `box=1`,
-    `boxcolor=black@0.35`,
+    `boxcolor=${boxColor}`,
     `boxborderw=16`,
     // Placement and spacing
     `x=(w-text_w)/2`,
@@ -184,7 +199,7 @@ function transliterateToEnglish(text) {
       continue;
     }
 
-    // Vowel signs alone (shouldn’t occur normally) or other marks
+    // Vowel signs alone (shouldn't occur normally) or other marks
     if (vowelSigns[ch]) { out += vowelSigns[ch]; continue; }
     if (anusvaraLike[ch]) { out += anusvaraLike[ch]; continue; }
     if (visarga[ch]) { out += visarga[ch]; continue; }
@@ -790,7 +805,11 @@ async function generateReel(req, res) {
     const srt = req.body?.srt;
     const wordSrt = req.body?.wordSrt; // optional word-level SRT (for text overlay)
     const fontKeyFromReq = (req.body?.fontKey || '').toString().toLowerCase();
-    const selectedFontKey = ['khand','notosans','poppins'].includes(fontKeyFromReq) ? fontKeyFromReq : 'notosans';
+    const allowedFonts = ['khand','notosans','poppins','amaticsc','bebasneue','comfortaa','exo2italic','orbitron','pacifico','shadowsintolight'];
+    const selectedFontKey = allowedFonts.includes(fontKeyFromReq) ? fontKeyFromReq : 'notosans';
+    const textColorFromReq = (req.body?.textColor || 'white').toString().toLowerCase();
+    const selectedTextColor = ['white','black'].includes(textColorFromReq) ? textColorFromReq : 'white';
+    
     const sentencesRaw = req.body?.sentences;
     // Optional image overlays
     let images = [];
@@ -983,7 +1002,7 @@ async function generateReel(req, res) {
         const cleanText = cleanTextForDrawtext(o.text);
         if (!cleanText.trim()) continue;
         const position = (j % 2 === 0) ? 'top' : 'bottom';
-        const drawtextFilter = buildDrawtextFilter(cleanText, selectedFontKey, position);
+        const drawtextFilter = buildDrawtextFilter(cleanText, selectedFontKey, position, selectedTextColor);
         const outLabel = (i === segments.length - 1 && j === overlays.length - 1) ? 'vout' : `v_${i}_${j}`;
         const startT = Math.max(0, baseOffset.start + o.startTime);
         const endT = Math.max(0, baseOffset.start + o.endTime);
@@ -1121,7 +1140,7 @@ async function generateReel(req, res) {
 }
 
 // Helper: generate individual reel segment files (no concat). Returns up to maxCount paths.
-async function generateReelSegments({ inputPath, srt, wordSrt, sentences, paddingSeconds = 0.3, portrait = false, maxCount = 3 }) {
+async function generateReelSegments({ inputPath, srt, wordSrt, sentences, paddingSeconds = 0.3, portrait = false, maxCount = 3, textColor = 'white', fontKey = 'notosans' }) {
   const entries = parseSRT(srt);
   const grouped = groupSRTIntoSentencesFromEntries(entries);
   const wordEntries = wordSrt ? parseSRT(wordSrt) : [];
@@ -1179,7 +1198,7 @@ async function generateReelSegments({ inputPath, srt, wordSrt, sentences, paddin
         
         // Alternate position: top for even indices, bottom for odd
         const position = (j % 2 === 0) ? 'top' : 'bottom';
-        const drawtextFilter = buildDrawtextFilter(cleanText, 'notosans', position);
+        const drawtextFilter = buildDrawtextFilter(cleanText, fontKey, position, textColor);
         
         const outLabel = j === overlays.length - 1 ? 'vout' : `v${j}`;
         const filter = `[${lastLabel}]${drawtextFilter}:enable='between(t,${overlay.startTime.toFixed(3)},${overlay.endTime.toFixed(3)})'[${outLabel}]`;
@@ -1240,7 +1259,7 @@ function matchSentencesToSegments(importantSentences, sentenceEntries, paddingSe
       // score by token overlap
       const score = contains ? 1 : jaccardSimilarity(normImp, normText);
       if (score > bestScore) {
-        bestScore = score;
+        bestScore = score; 
         bestIdx = i;
       }
     }

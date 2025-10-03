@@ -177,6 +177,8 @@ class VideoToReelsJobService {
                     paddingSeconds: job.paddingSeconds,
                     maxTotalSeconds: job.maxTotalSeconds,
                     portrait: job.portrait,
+                    fontKey: job.fontKey,
+                    textColor: job.textColor,
                     images: JSON.stringify(Array.isArray(requestData?.images) ? requestData.images : [])
                 }
             };
@@ -238,7 +240,9 @@ class VideoToReelsJobService {
             sentences: job.importantSentences,
             paddingSeconds: job.paddingSeconds,
             portrait: job.portrait,
-            maxCount: 3
+            maxCount: 3,
+            textColor: job.textColor,
+            fontKey: job.fontKey
         });
         if (!segments || segments.length === 0) {
             // Fallback to single buffer using concat path

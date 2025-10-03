@@ -53,6 +53,14 @@ const videoToReelsJobSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    fontKey: {
+        type: String,
+        default: 'notosans'
+    },
+    textColor: {
+        type: String,
+        default: 'white'
+    },
     
     // Generated video data
     videoUrl: {
@@ -138,7 +146,9 @@ videoToReelsJobSchema.statics.createJob = async function(jobData) {
         importantSentences: jobData.sentences,
         paddingSeconds: jobData.paddingSeconds,
         maxTotalSeconds: jobData.maxTotalSeconds,
-        portrait: jobData.portrait
+        portrait: jobData.portrait,
+        fontKey: jobData.fontKey,
+        textColor: jobData.textColor
     });
     
     await job.save();
