@@ -35,6 +35,7 @@ const videocardRoute=require('./routes/aivideogen');  // generate videocard
 const videoCompressionRoutes = require('./routes/videoCompressionRoutes');  // video compression
 const telegramRoute=require('./routes/telegramroutes');// telegram
 const videoToReelsRoutes = require('./routes/videoToReels');  // video to reel tool 
+const audioExtractionRoutes = require('./routes/audioExtraction');  // async audio extraction
 
 
 dotenv.config();
@@ -182,6 +183,9 @@ app.use('/api/telegram', telegramRoute);
 // Video to Reels (VTR) Routes
 app.use('/api/vtr', videoToReelsRoutes);
 
+// Audio Extraction Routes
+app.use('/api/audio', audioExtractionRoutes);
+
 
 // Error handling middleware
 app.use((error, req, res, next) => {
@@ -215,6 +219,14 @@ connectDB().then(() => {
             videoToReelsJobService.cleanupTimers();
         } catch (error) {
             console.warn('Error cleaning up video-to-reels timers:', error.message);
+        }
+        
+        // Clean up audio extraction job service timers
+        try {
+            const audioExtractionJobService = require('./services/audioExtractionJobService');
+            audioExtractionJobService.cleanupTimers();
+        } catch (error) {
+            console.warn('Error cleaning up audio extraction timers:', error.message);
         }
         
         server.close(() => {
