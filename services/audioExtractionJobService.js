@@ -5,15 +5,27 @@ const { s3, BUCKET_NAME } = require('../config/s3');
 const fs = require('fs');
 const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
-const ffmpegStatic = require('ffmpeg-static');
+const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const ffprobeStatic = require('ffprobe-static');
 
 // Set FFmpeg and FFprobe paths
-if (ffmpegStatic) {
-    ffmpeg.setFfmpegPath(ffmpegStatic.path);
-}
-if (ffprobeStatic) {
-    ffmpeg.setFfprobePath(ffprobeStatic.path);
+try {
+    if (ffmpegInstaller && ffmpegInstaller.path) {
+        ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+        console.log('[Audio][FFmpeg] Using installer path:', ffmpegInstaller.path);
+    } else {
+        // Fallback to system FFmpeg
+        console.log('[Audio][FFmpeg] Installer path not found, using system FFmpeg');
+    }
+    if (ffprobeStatic && ffprobeStatic.path) {
+        ffmpeg.setFfprobePath(ffprobeStatic.path);
+        console.log('[Audio][FFmpeg] Using ffprobe path:', ffprobeStatic.path);
+    } else {
+        // Fallback to system ffprobe
+        console.log('[Audio][FFmpeg] FFprobe path not found, using system ffprobe');
+    }
+} catch (err) {
+    console.error('[Audio][FFmpeg] Setup error:', err.message);
 }
 
 class AudioExtractionJobService {
@@ -169,6 +181,8 @@ class AudioExtractionJobService {
             }
 
             console.log('[Audio][Job]', job.jobId, 'extracting audio from:', inputPath);
+            console.log('[Audio][Job]', job.jobId, 'FFmpeg path:', ffmpegInstaller?.path);
+            console.log('[Audio][Job]', job.jobId, 'FFprobe path:', ffprobeStatic?.path);
 
             // Create output path for temporary audio file
             const outputFileName = `audio_${job.jobId}_${Date.now()}.mp3`;
@@ -196,7 +210,12 @@ class AudioExtractionJobService {
                     }
                 })
                 .on('error', (err) => {
-                    console.error('[Audio][Job]', job.jobId, 'FFmpeg error:', err);
+                    console.error('[Audio][Job]', job.jobId, 'FFmpeg error details:', {
+                        message: err.message,
+                        stack: err.stack,
+                        code: err.code,
+                        signal: err.signal
+                    });
                     this.safeCleanup([inputPath, outputPath]);
                     reject(new Error(`Audio extraction failed: ${err.message}`));
                 })
