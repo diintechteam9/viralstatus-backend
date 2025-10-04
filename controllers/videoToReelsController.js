@@ -242,47 +242,140 @@ const IMAGE_VIDEO_DURATION = 2; // seconds for each image overlay window
 try {
   if (ffmpegInstaller && ffmpegInstaller.path) {
     ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+    console.log('[FFmpeg] Using installer path:', ffmpegInstaller.path);
+  } else {
+    // Fallback to system FFmpeg
+    console.log('[FFmpeg] Installer path not found, using system FFmpeg');
   }
   if (ffprobeStatic && ffprobeStatic.path) {
     ffmpeg.setFfprobePath(ffprobeStatic.path);
+    console.log('[FFmpeg] Using ffprobe path:', ffprobeStatic.path);
+  } else {
+    // Fallback to system ffprobe
+    console.log('[FFmpeg] FFprobe path not found, using system ffprobe');
   }
-} catch (_) {}
+} catch (err) {
+  console.error('[FFmpeg] Setup error:', err.message);
+}
 
 // Extract audio from an uploaded video and stream back as MP3
 async function extractAudio(req, res) {
-  const uploadedFile = req.file;
-  if (!uploadedFile) {
-    return res.status(400).json({ message: "No video file uploaded" });
-  }
-
-  const inputPath = uploadedFile.path; // temp upload path from multer
-  const sanitizedOriginalName = sanitizeFilename(uploadedFile.originalname, 30);
-  const outputFileName = `${path.parse(sanitizedOriginalName).name}-${Date.now()}.mp3`;
-  const outputPath = path.join("temp", outputFileName);
-
-  // Ensure temp directory exists
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-
+  console.log('[extractAudio] Starting audio extraction...');
+  
   try {
+    const uploadedFile = req.file;
+    if (!uploadedFile) {
+      console.error('[extractAudio] No file uploaded');
+      return res.status(400).json({ message: "No video file uploaded" });
+    }
+
+    console.log('[extractAudio] File received:', {
+      originalname: uploadedFile.originalname,
+      mimetype: uploadedFile.mimetype,
+      size: uploadedFile.size,
+      path: uploadedFile.path
+    });
+
+    const inputPath = uploadedFile.path; // temp upload path from multer
+    
+    // Validate input file exists
+    if (!fs.existsSync(inputPath)) {
+      console.error('[extractAudio] Input file does not exist:', inputPath);
+      return res.status(400).json({ message: "Uploaded file not found" });
+    }
+
+    // Check file size and permissions
+    const stats = fs.statSync(inputPath);
+    console.log('[extractAudio] File stats:', {
+      size: stats.size,
+      isFile: stats.isFile(),
+      isDirectory: stats.isDirectory(),
+      mode: stats.mode
+    });
+
+    const sanitizedOriginalName = sanitizeFilename(uploadedFile.originalname, 30);
+    const outputFileName = `${path.parse(sanitizedOriginalName).name}-${Date.now()}.mp3`;
+    const outputPath = path.join("temp", outputFileName);
+
+    // Ensure temp directory exists
+    try {
+      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+      console.log('[extractAudio] Temp directory created/verified:', path.dirname(outputPath));
+    } catch (dirErr) {
+      console.error('[extractAudio] Failed to create temp directory:', dirErr.message);
+      return res.status(500).json({ message: "Failed to create temp directory", error: dirErr.message });
+    }
+
+    console.log('[extractAudio] Processing:', {
+      inputPath,
+      outputPath,
+      originalName: uploadedFile.originalname,
+      sanitizedName: sanitizedOriginalName,
+      outputFileName
+    });
+
+    // Check FFmpeg availability
+    console.log('[extractAudio] FFmpeg path:', ffmpegInstaller?.path);
+    console.log('[extractAudio] FFprobe path:', ffprobeStatic?.path);
+
     ffmpeg(inputPath)
       .noVideo()
       .audioCodec("libmp3lame")
       .audioBitrate("192k")
+      .on("start", (commandLine) => {
+        console.log('[extractAudio] FFmpeg started:', commandLine);
+      })
+      .on("progress", (progress) => {
+        console.log('[extractAudio] FFmpeg progress:', progress.percent + '% done');
+      })
       .on("error", (err) => {
+        console.error('[extractAudio] FFmpeg error details:', {
+          message: err.message,
+          stack: err.stack,
+          code: err.code,
+          signal: err.signal
+        });
         safeCleanup([inputPath, outputPath]);
         return res.status(500).json({ message: "Audio extraction failed", error: err.message });
       })
       .on("end", () => {
+        console.log('[extractAudio] FFmpeg completed successfully');
+        
+        // Verify output file exists
+        if (!fs.existsSync(outputPath)) {
+          console.error('[extractAudio] Output file was not created:', outputPath);
+          safeCleanup([inputPath]);
+          return res.status(500).json({ message: "Audio extraction failed - output file not created" });
+        }
+
+        const outputStats = fs.statSync(outputPath);
+        console.log('[extractAudio] Output file created:', {
+          path: outputPath,
+          size: outputStats.size
+        });
+
         res.setHeader("Content-Type", "audio/mpeg");
         res.setHeader("Content-Disposition", `inline; filename="${outputFileName}"`);
 
         const stream = fs.createReadStream(outputPath);
-        stream.on("close", () => safeCleanup([inputPath, outputPath]));
+        stream.on("close", () => {
+          console.log('[extractAudio] Stream closed, cleaning up files');
+          safeCleanup([inputPath, outputPath]);
+        });
+        stream.on("error", (streamErr) => {
+          console.error('[extractAudio] Stream error:', streamErr.message);
+          safeCleanup([inputPath, outputPath]);
+        });
         stream.pipe(res);
       })
       .save(outputPath);
   } catch (error) {
-    safeCleanup([inputPath, outputPath]);
+    console.error('[extractAudio] Unexpected error:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    safeCleanup([req?.file?.path]);
     return res.status(500).json({ message: "Unexpected error", error: error.message });
   }
 }

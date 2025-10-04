@@ -83,6 +83,54 @@ router.post("/generate-image-prompts", express.json({ limit: '2mb' }), generateI
 // POST /api/vtr/overlay-images (expects JSON: { videoUrl: string, images: string[] })
 router.post("/overlay-images", express.json({ limit: '50mb' }), overlayImagesOnVideo);
 
+// GET /api/vtr/test-ffmpeg - Test endpoint to verify FFmpeg setup
+router.get("/test-ffmpeg", (req, res) => {
+  try {
+    const ffmpeg = require("fluent-ffmpeg");
+    const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
+    const ffprobeStatic = require("ffprobe-static");
+    
+    console.log('[test-ffmpeg] FFmpeg paths:', {
+      ffmpeg: ffmpegInstaller?.path,
+      ffprobe: ffprobeStatic?.path
+    });
+    
+    // Test FFmpeg version
+    ffmpeg.getAvailableFormats((err, formats) => {
+      if (err) {
+        console.error('[test-ffmpeg] FFmpeg error:', err.message);
+        return res.status(500).json({ 
+          success: false, 
+          error: 'FFmpeg not working', 
+          details: err.message,
+          paths: {
+            ffmpeg: ffmpegInstaller?.path,
+            ffprobe: ffprobeStatic?.path
+          }
+        });
+      }
+      
+      console.log('[test-ffmpeg] FFmpeg working, available formats:', Object.keys(formats).length);
+      res.json({ 
+        success: true, 
+        message: 'FFmpeg is working',
+        availableFormats: Object.keys(formats).length,
+        paths: {
+          ffmpeg: ffmpegInstaller?.path,
+          ffprobe: ffprobeStatic?.path
+        }
+      });
+    });
+  } catch (error) {
+    console.error('[test-ffmpeg] Setup error:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: 'FFmpeg setup error', 
+      details: error.message 
+    });
+  }
+});
+
 module.exports = router;
 
 
