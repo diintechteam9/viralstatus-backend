@@ -85,23 +85,28 @@ router.post("/overlay-images", express.json({ limit: '50mb' }), overlayImagesOnV
 
 // GET /api/vtr/test-ffmpeg - Test endpoint to verify FFmpeg setup
 router.get("/test-ffmpeg", (req, res) => {
+  // Set CORS headers
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  
   try {
     const ffmpeg = require("fluent-ffmpeg");
     const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
     const ffprobeStatic = require("ffprobe-static");
-    
+
     console.log('[test-ffmpeg] FFmpeg paths:', {
       ffmpeg: ffmpegInstaller?.path,
       ffprobe: ffprobeStatic?.path
     });
-    
+
     // Test FFmpeg version
     ffmpeg.getAvailableFormats((err, formats) => {
       if (err) {
         console.error('[test-ffmpeg] FFmpeg error:', err.message);
-        return res.status(500).json({ 
-          success: false, 
-          error: 'FFmpeg not working', 
+        return res.status(500).json({
+          success: false,
+          error: 'FFmpeg not working',
           details: err.message,
           paths: {
             ffmpeg: ffmpegInstaller?.path,
@@ -109,10 +114,10 @@ router.get("/test-ffmpeg", (req, res) => {
           }
         });
       }
-      
+
       console.log('[test-ffmpeg] FFmpeg working, available formats:', Object.keys(formats).length);
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: 'FFmpeg is working',
         availableFormats: Object.keys(formats).length,
         paths: {
@@ -123,10 +128,10 @@ router.get("/test-ffmpeg", (req, res) => {
     });
   } catch (error) {
     console.error('[test-ffmpeg] Setup error:', error.message);
-    res.status(500).json({ 
-      success: false, 
-      error: 'FFmpeg setup error', 
-      details: error.message 
+    res.status(500).json({
+      success: false,
+      error: 'FFmpeg setup error',
+      details: error.message
     });
   }
 });

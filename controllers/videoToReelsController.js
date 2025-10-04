@@ -266,6 +266,9 @@ async function extractAudio(req, res) {
     const uploadedFile = req.file;
     if (!uploadedFile) {
       console.error('[extractAudio] No file uploaded');
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
       return res.status(400).json({ message: "No video file uploaded" });
     }
 
@@ -281,6 +284,9 @@ async function extractAudio(req, res) {
     // Validate input file exists
     if (!fs.existsSync(inputPath)) {
       console.error('[extractAudio] Input file does not exist:', inputPath);
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
       return res.status(400).json({ message: "Uploaded file not found" });
     }
 
@@ -303,6 +309,9 @@ async function extractAudio(req, res) {
       console.log('[extractAudio] Temp directory created/verified:', path.dirname(outputPath));
     } catch (dirErr) {
       console.error('[extractAudio] Failed to create temp directory:', dirErr.message);
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
       return res.status(500).json({ message: "Failed to create temp directory", error: dirErr.message });
     }
 
@@ -336,7 +345,12 @@ async function extractAudio(req, res) {
           signal: err.signal
         });
         safeCleanup([inputPath, outputPath]);
-        return res.status(500).json({ message: "Audio extraction failed", error: err.message });
+        if (!res.headersSent) {
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+          res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+          return res.status(500).json({ message: "Audio extraction failed", error: err.message });
+        }
       })
       .on("end", () => {
         console.log('[extractAudio] FFmpeg completed successfully');
@@ -345,7 +359,13 @@ async function extractAudio(req, res) {
         if (!fs.existsSync(outputPath)) {
           console.error('[extractAudio] Output file was not created:', outputPath);
           safeCleanup([inputPath]);
-          return res.status(500).json({ message: "Audio extraction failed - output file not created" });
+          if (!res.headersSent) {
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+            return res.status(500).json({ message: "Audio extraction failed - output file not created" });
+          }
+          return;
         }
 
         const outputStats = fs.statSync(outputPath);
@@ -354,19 +374,46 @@ async function extractAudio(req, res) {
           size: outputStats.size
         });
 
-        res.setHeader("Content-Type", "audio/mpeg");
-        res.setHeader("Content-Disposition", `inline; filename="${outputFileName}"`);
+        // Check if response has already been sent
+        if (res.headersSent) {
+          console.log('[extractAudio] Response already sent, skipping stream');
+          safeCleanup([inputPath, outputPath]);
+          return;
+        }
 
-        const stream = fs.createReadStream(outputPath);
-        stream.on("close", () => {
-          console.log('[extractAudio] Stream closed, cleaning up files');
+        try {
+          res.setHeader("Content-Type", "audio/mpeg");
+          res.setHeader("Content-Disposition", `inline; filename="${outputFileName}"`);
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+          res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+          const stream = fs.createReadStream(outputPath);
+          stream.on("close", () => {
+            console.log('[extractAudio] Stream closed, cleaning up files');
+            safeCleanup([inputPath, outputPath]);
+          });
+          stream.on("error", (streamErr) => {
+            console.error('[extractAudio] Stream error:', streamErr.message);
+            safeCleanup([inputPath, outputPath]);
+            if (!res.headersSent) {
+              res.setHeader("Access-Control-Allow-Origin", "*");
+              res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+              res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+              res.status(500).json({ message: "Stream error", error: streamErr.message });
+            }
+          });
+          stream.pipe(res);
+        } catch (streamError) {
+          console.error('[extractAudio] Error setting up stream:', streamError.message);
           safeCleanup([inputPath, outputPath]);
-        });
-        stream.on("error", (streamErr) => {
-          console.error('[extractAudio] Stream error:', streamErr.message);
-          safeCleanup([inputPath, outputPath]);
-        });
-        stream.pipe(res);
+          if (!res.headersSent) {
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+            res.status(500).json({ message: "Stream setup error", error: streamError.message });
+          }
+        }
       })
       .save(outputPath);
   } catch (error) {
@@ -376,7 +423,12 @@ async function extractAudio(req, res) {
       name: error.name
     });
     safeCleanup([req?.file?.path]);
-    return res.status(500).json({ message: "Unexpected error", error: error.message });
+    if (!res.headersSent) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      return res.status(500).json({ message: "Unexpected error", error: error.message });
+    }
   }
 }
 
