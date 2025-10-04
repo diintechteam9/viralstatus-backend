@@ -5,6 +5,28 @@ const fs = require("fs");
 const { extractAudio, generateSentenceSrt, generateWordSrt, generateImportantSentences, generateReel, generateImagePromptsForParagraph, overlayImagesOnVideo } = require("../controllers/videoToReelsController");
 const { createAsyncReelJob, getJobStatus, cleanupJob } = require("../controllers/videoToReelsAsyncController");
 
+// Utility function to sanitize and truncate filenames
+const sanitizeFilename = (filename, maxLength = 50) => {
+  if (!filename || typeof filename !== 'string') {
+    return `video_${Date.now()}`;
+  }
+  
+  // Remove extension first
+  const ext = path.extname(filename);
+  const nameWithoutExt = path.basename(filename, ext);
+  
+  // Sanitize: remove special characters, keep only alphanumeric, spaces, hyphens, underscores
+  const sanitized = nameWithoutExt
+    .replace(/[^\w\s\-_]/g, '') // Remove special characters except word chars, spaces, hyphens, underscores
+    .replace(/\s+/g, '_') // Replace spaces with underscores
+    .substring(0, maxLength - ext.length) // Truncate to fit within maxLength including extension
+    .replace(/_+$/, ''); // Remove trailing underscores
+  
+  // Ensure we have a valid name
+  const finalName = sanitized || `video_${Date.now()}`;
+  return finalName + ext;
+};
+
 const router = express.Router();
 
 // Configure multer to store uploads temporarily
@@ -16,8 +38,10 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
-    const ext = path.extname(file.originalname);
-    const base = path.basename(file.originalname, ext);
+    // Sanitize the filename to prevent ENAMETOOLONG errors
+    const sanitized = sanitizeFilename(file.originalname, 30);
+    const ext = path.extname(sanitized);
+    const base = path.basename(sanitized, ext);
     cb(null, `${base}-${Date.now()}${ext}`);
   },
 });

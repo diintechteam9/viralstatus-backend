@@ -6,6 +6,28 @@ const ffprobeStatic = require("ffprobe-static");
 const { createClient } = require("@deepgram/sdk");
 const fetch = require("node-fetch");
 
+// Utility function to sanitize and truncate filenames
+const sanitizeFilename = (filename, maxLength = 50) => {
+  if (!filename || typeof filename !== 'string') {
+    return `video_${Date.now()}`;
+  }
+  
+  // Remove extension first
+  const ext = path.extname(filename);
+  const nameWithoutExt = path.basename(filename, ext);
+  
+  // Sanitize: remove special characters, keep only alphanumeric, spaces, hyphens, underscores
+  const sanitized = nameWithoutExt
+    .replace(/[^\w\s\-_]/g, '') // Remove special characters except word chars, spaces, hyphens, underscores
+    .replace(/\s+/g, '_') // Replace spaces with underscores
+    .substring(0, maxLength - ext.length) // Truncate to fit within maxLength including extension
+    .replace(/_+$/, ''); // Remove trailing underscores
+  
+  // Ensure we have a valid name
+  const finalName = sanitized || `video_${Date.now()}`;
+  return finalName + ext;
+};
+
 // Font configuration for text overlay
 const FONT_DIR = path.join(__dirname, '../assets/fonts');
 const FONT_MAP = {
@@ -234,7 +256,8 @@ async function extractAudio(req, res) {
   }
 
   const inputPath = uploadedFile.path; // temp upload path from multer
-  const outputFileName = `${path.parse(uploadedFile.originalname).name}-${Date.now()}.mp3`;
+  const sanitizedOriginalName = sanitizeFilename(uploadedFile.originalname, 30);
+  const outputFileName = `${path.parse(sanitizedOriginalName).name}-${Date.now()}.mp3`;
   const outputPath = path.join("temp", outputFileName);
 
   // Ensure temp directory exists
