@@ -735,7 +735,7 @@ async function generateImportantSentences(req, res) {
             `CRITICAL RULES:\n` +
             `- Preserve the original order of appearance (keep sequence).\n` +
             `- Sentences MUST be short and concise (roughly 8–15 words each).\n` +
-            `- Aim for a combined speaking time around 20–40 seconds in total.\n` +
+            `- Aim for a combined speaking time of exact 30 to 35 seconds in total.\n` +
             `- Prefer hooks, key insights, turning points, or self-contained bits.\n` +
             `- Avoid near-duplicates, filler, intros/outros, and overly short fragments.\n` +
             `Return STRICT JSON: { "sentences": ["...", "...", "..."] } with exactly ${targetCount} items.\n\n` +
@@ -1088,7 +1088,7 @@ async function generateReel(req, res) {
       offset += d;
     }
 
-    // 3) First pass: overlay images directly with fade transitions at 5s intervals
+    // 3) First pass: overlay images directly with fade transitions at 3s intervals
     let imageOverlayPath = baseVideoPath;
     let imgTempPaths = [];
     if (Array.isArray(images) && images.length > 0) {
@@ -1121,7 +1121,7 @@ async function generateReel(req, res) {
         let prevLabel = '[0:v]';
         const fadeDur = 0.3;
         for (let i = 0; i < imgInputPaths.length; i++) {
-          const start = 5 + i * 5;
+          const start = 3 + i * 3;
           if (start >= baseDuration) break;
           const end = Math.min(start + IMAGE_VIDEO_DURATION, baseDuration);
           const preLabel = `[sov_pre_${i + 1}]`;
@@ -1550,8 +1550,8 @@ async function generateMiniReelWithImages(req, res) {
         .save(segPath);
     });
 
-    // 3) Build overlay filter at 5s intervals, centered
-    // Enable windows: [5,7], [10,12], ... within the trimmed segment (2-second image videos)
+    // 3) Build overlay filter at 3s intervals, centered
+    // Enable windows: [3,5], [6,8], ... within the trimmed segment (2-second image videos)
     const overlayFilters = [];
     // base: start from input0 video, already 1080x1920 due to trim filter above
     let prevLabel = '[0:v]';
@@ -1572,7 +1572,7 @@ async function generateMiniReelWithImages(req, res) {
       return res.status(400).json({ error: 'No valid image data provided' });
     }
     for (let i = 0; i < imgPaths.length; i++) {
-      const start = 5 + i * 5;
+      const start = 3 + i * 3;
       const end = start + IMAGE_VIDEO_DURATION;
       if (start >= duration) break;
       const clampedEnd = Math.min(end, duration);
@@ -1654,7 +1654,7 @@ async function overlayImagesOnVideo(req, res) {
     });
     const duration = await getDuration();
 
-    // 3) Build overlay filter chain at 5s intervals; ensure base video portrait
+    // 3) Build overlay filter chain at 3s intervals; ensure base video portrait
     const overlayFilters = [];
     // Add a base scale/crop to 1080x1920 to be safe if source isn't portrait
     overlayFilters.push('[0:v]scale=-2:1920,crop=1080:1920:(iw-1080)/2:(ih-1920)/2[base]');
@@ -1676,7 +1676,7 @@ async function overlayImagesOnVideo(req, res) {
       return res.status(400).json({ error: 'No valid image data provided' });
     }
     for (let i = 0; i < imgPaths.length; i++) {
-      const start = 5 + i * 5;
+      const start = 3 + i * 3;
       if (duration && start >= duration) break;
       const end = Math.min(start + IMAGE_VIDEO_DURATION, duration || (start + IMAGE_VIDEO_DURATION));
       const preLabel = `[sov_pre_${i + 1}]`;
