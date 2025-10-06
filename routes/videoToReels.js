@@ -3,7 +3,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const { extractAudio, generateSentenceSrt, generateWordSrt, generateImportantSentences, generateReel, generateImagePromptsForParagraph, overlayImagesOnVideo } = require("../controllers/videoToReelsController");
-const { createAsyncReelJob, getJobStatus, cleanupJob } = require("../controllers/videoToReelsAsyncController");
+const { createAsyncReelJob, getJobStatus, cleanupJob, createAsyncSegmentsJob } = require("../controllers/videoToReelsAsyncController");
 
 // Utility function to sanitize and truncate filenames
 const sanitizeFilename = (filename, maxLength = 50) => {
@@ -70,6 +70,9 @@ router.post("/generate-reel", upload.single("video"), generateReel);
 
 // POST /api/vtr/generate-reel-async with fields: video (file), srt (text), sentences (json array)
 router.post("/generate-reel-async", upload.single("video"), createAsyncReelJob);
+
+// POST /api/vtr/generate-segments-async with fields: video (file), srt (text), sentences (json array)
+router.post("/generate-segments-async", upload.single("video"), createAsyncSegmentsJob);
 
 // GET /api/vtr/job-status/:jobId
 router.get("/job-status/:jobId", getJobStatus);

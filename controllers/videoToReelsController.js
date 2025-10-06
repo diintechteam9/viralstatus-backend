@@ -705,6 +705,12 @@ module.exports.generateWordSrt = generateWordSrt;
 async function generateImportantSentences(req, res) {
   try {
     const { srt, count } = req.body || {};
+    // Optional time range target in seconds for combined speaking time
+    let minSeconds = Number.parseInt(req.body?.minSeconds, 10);
+    let maxSeconds = Number.parseInt(req.body?.maxSeconds, 10);
+    if (!Number.isFinite(minSeconds) || minSeconds <= 0) minSeconds = 30;
+    if (!Number.isFinite(maxSeconds) || maxSeconds <= 0) maxSeconds = 35;
+    if (minSeconds > maxSeconds) { const t = minSeconds; minSeconds = maxSeconds; maxSeconds = t; }
     if (!srt || typeof srt !== 'string' || srt.trim().length === 0) {
       return res.status(400).json({ error: "SRT content is required" });
     }
@@ -735,7 +741,7 @@ async function generateImportantSentences(req, res) {
             `CRITICAL RULES:\n` +
             `- Preserve the original order of appearance (keep sequence).\n` +
             `- Sentences MUST be short and concise (roughly 8–15 words each).\n` +
-            `- Aim for a combined speaking time of exact 30 to 35 seconds in total.\n` +
+            `- Aim for a combined speaking time between ${minSeconds} and ${maxSeconds} seconds in total.\n` +
             `- Prefer hooks, key insights, turning points, or self-contained bits.\n` +
             `- Avoid near-duplicates, filler, intros/outros, and overly short fragments.\n` +
             `Return STRICT JSON: { "sentences": ["...", "...", "..."] } with exactly ${targetCount} items.\n\n` +
@@ -768,11 +774,34 @@ async function generateImportantSentences(req, res) {
       }
     }
 
-    // Fallback: simple heuristic pick by length/containment, keep order
+    // Fallback: heuristic pick by cumulative duration target, keep order
     if (!Array.isArray(important) || important.length === 0) {
-      const scored = sentences.map((text, idx) => ({ idx, text, score: text.split(/\s+/).length }));
-      scored.sort((a, b) => b.score - a.score);
-      important = scored.slice(0, targetCount).sort((a, b) => a.idx - b.idx).map(s => s.text);
+      // Try to estimate sentence durations from SRT entries and accumulate within target window
+      const entries = parseSRT(srt);
+      const grouped = groupSRTIntoSentencesFromEntries(entries);
+      const byOrder = grouped.map((g, i) => ({ idx: i, text: (g.text || '').trim(), dur: Math.max(0, (g.endTime || 0) - (g.startTime || 0)) }));
+      // Filter to only sentences present in the transcript list (conservative match by inclusion)
+      const normalizedSet = new Set(sentences.map(s => normalizeText(s)));
+      const filtered = byOrder.filter(x => normalizedSet.has(normalizeText(x.text)));
+      let total = 0;
+      const picked = [];
+      for (const item of filtered) {
+        if (picked.length >= targetCount) break;
+        // Prefer to keep total within [minSeconds, maxSeconds]; allow slight overshoot to reach targetCount
+        if (total < maxSeconds || picked.length === 0) {
+          picked.push(item);
+          total += item.dur || 0;
+        }
+        if (total >= minSeconds && picked.length >= targetCount) break;
+      }
+      if (picked.length === 0) {
+        // Fallback to top-N by length as last resort
+        const scored = sentences.map((text, idx) => ({ idx, text, score: text.split(/\s+/).length }));
+        scored.sort((a, b) => b.score - a.score);
+        important = scored.slice(0, targetCount).sort((a, b) => a.idx - b.idx).map(s => s.text);
+      } else {
+        important = picked.sort((a, b) => a.idx - b.idx).map(p => p.text);
+      }
     }
 
     return res.json({ sentences: important });

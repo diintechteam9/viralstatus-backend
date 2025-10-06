@@ -149,6 +149,80 @@ class VideoToReelsJobService {
     }
 
     /**
+     * Start processing a video-to-reels segments job
+     */
+    async startSegmentsJob(jobId, requestData) {
+        try {
+            const job = await VideoToReelsJob.getJobById(jobId);
+            if (!job) {
+                throw new Error(`Job ${jobId} not found`);
+            }
+            if (job.status !== 'pending') {
+                throw new Error(`Job ${jobId} is not in pending status`);
+            }
+            if (this.activeJobs.size >= this.maxConcurrentJobs) {
+                throw new Error('Maximum concurrent jobs reached. Please try again later.');
+            }
+            await job.updateProgress(0, 'processing');
+            this.activeJobs.set(jobId, job);
+            console.log(`Starting video-to-reels segments job: ${jobId}`);
+            this.processSegmentsAsync(jobId, requestData);
+            return job;
+        } catch (error) {
+            console.error(`Error starting segments job ${jobId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Process segments generation asynchronously
+     */
+    async processSegmentsAsync(jobId, requestData) {
+        try {
+            const job = await VideoToReelsJob.getJobById(jobId);
+            if (!job) {
+                console.error(`Job ${jobId} not found during segments processing`);
+                return;
+            }
+            console.log(`Processing segments job: ${jobId}`);
+            await job.updateProgress(10, 'processing');
+
+            // Generate up to 3 segments using controller helper
+            const { buffers } = await this.generateSegmentFiles(job, requestData);
+            await job.updateProgress(70, 'processing');
+
+            // Upload each buffer to S3
+            const uploadedList = await this.saveMultipleVideosToS3(buffers, job.jobId);
+            await job.updateProgress(95, 'processing');
+
+            // Complete job with list of videos
+            await job.complete({
+                url: uploadedList?.[0]?.url || null,
+                key: uploadedList?.[0]?.key || null,
+                fileName: uploadedList?.[0]?.fileName || null,
+                fileSize: uploadedList?.[0]?.fileSize || null,
+                duration: 0,
+                videos: uploadedList
+            });
+
+            console.log(`Segments job completed: ${jobId}, uploaded ${uploadedList.length} videos`);
+            try { this.cleanupJobDirectory(job); } catch (_) {}
+        } catch (error) {
+            console.error(`Error processing segments job ${jobId}:`, error);
+            const job = await VideoToReelsJob.getJobById(jobId);
+            if (job) {
+                await job.setError(error);
+            }
+        } finally {
+            this.activeJobs.delete(jobId);
+            if (this.progressUpdateTimers.has(jobId)) {
+                clearTimeout(this.progressUpdateTimers.get(jobId));
+                this.progressUpdateTimers.delete(jobId);
+            }
+        }
+    }
+
+    /**
      * Generate reel buffer using the existing generateReel function
      */
     async generateReelBuffer(job, requestData) {

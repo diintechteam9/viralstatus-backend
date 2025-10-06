@@ -250,5 +250,104 @@ const cleanupJob = async (req, res) => {
 module.exports = {
   createAsyncReelJob,
   getJobStatus,
-  cleanupJob
+  cleanupJob,
+  createAsyncSegmentsJob
 };
+
+/**
+ * Create a new async segments generation job
+ * POST /api/vtr/generate-segments-async
+ */
+async function createAsyncSegmentsJob(req, res) {
+  try {
+    const uploadedFile = req.file;
+    const { srt, wordSrt, sentences, paddingSeconds, portrait, images, fontKey, textColor } = req.body;
+    const userId = req.user?.id || req.user?._id || null;
+
+    if (!uploadedFile) {
+      return res.status(400).json({ success: false, error: 'Video file is required' });
+    }
+    if (!srt) {
+      return res.status(400).json({ success: false, error: 'SRT content is required' });
+    }
+    if (!sentences) {
+      return res.status(400).json({ success: false, error: 'Important sentences are required' });
+    }
+
+    let parsedSentences;
+    try {
+      parsedSentences = Array.isArray(sentences) ? sentences : JSON.parse(sentences);
+    } catch (_) {
+      return res.status(400).json({ success: false, error: 'Invalid sentences format' });
+    }
+
+    const jobData = {
+      videoFile: uploadedFile,
+      srt,
+      wordSrt: wordSrt || null,
+      sentences: parsedSentences,
+      paddingSeconds: Number(paddingSeconds || 0.3),
+      maxTotalSeconds: Number(60),
+      portrait: String(portrait || 'false') === 'true',
+      fontKey: fontKey || 'notosans',
+      textColor: textColor || 'white',
+      userId,
+      type: 'video-to-reels-segments'
+    };
+
+    // Create the job
+    const job = await videoToReelsJobService.createJob(jobData);
+
+    // Move uploaded video into a stable, job-specific working directory
+    try {
+      const ext = path.extname(uploadedFile.originalname || uploadedFile.path || '').toLowerCase() || '.mp4';
+      const jobDir = path.join('temp', 'jobs', job.jobId);
+      fs.mkdirSync(jobDir, { recursive: true });
+      const stableInputPath = path.join(jobDir, `input${ext}`);
+      fs.copyFileSync(uploadedFile.path, stableInputPath);
+      try { fs.unlinkSync(uploadedFile.path); } catch (_) {}
+
+      const sanitizedOriginalName = sanitizeFilename(uploadedFile.originalname, 50);
+      job.originalVideoFile = {
+        path: stableInputPath,
+        originalName: sanitizedOriginalName,
+        size: uploadedFile.size,
+        mimetype: uploadedFile.mimetype
+      };
+      await job.save();
+
+      jobData.videoFile = {
+        path: stableInputPath,
+        originalname: sanitizedOriginalName,
+        size: uploadedFile.size,
+        mimetype: uploadedFile.mimetype
+      };
+    } catch (fileErr) {
+      console.error('Failed to prepare stable input file for segments job', job.jobId, fileErr);
+      return res.status(500).json({ success: false, error: 'Failed to prepare input file' });
+    }
+
+    // Parse images (optional, for overlays later if needed)
+    let runtimeImages = [];
+    try {
+      if (images) {
+        const im = Array.isArray(images) ? images : JSON.parse(images);
+        if (Array.isArray(im)) runtimeImages = im.filter(Boolean);
+      }
+    } catch (_) {}
+
+    await videoToReelsJobService.startSegmentsJob(job.jobId, { ...jobData, images: runtimeImages });
+
+    res.json({
+      success: true,
+      message: 'Segments generation started',
+      jobId: job.jobId,
+      status: 'processing',
+      progress: 0,
+      estimatedTime: '1-2 minutes'
+    });
+  } catch (error) {
+    console.error('Error creating async segments job:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to start segments generation' });
+  }
+}
