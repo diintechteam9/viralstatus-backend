@@ -366,7 +366,7 @@ exports.trimByParagraphs = async (req, res) => {
               .on('error', reject)
               .on('end', resolve)
               .save(finalSegPath);
-          });
+          });h
           // keep finalSegPath
         } else {
           try { fs.copyFileSync(portraitSegPath, finalSegPath); } catch {}
