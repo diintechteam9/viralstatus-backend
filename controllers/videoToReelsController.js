@@ -701,7 +701,7 @@ function convertToWordSRT(result) {
 
 module.exports.generateWordSrt = generateWordSrt;
 
-// Generate important sentences (ordered) from SRT via OpenRouter
+// Generate important sentences (ordered) and group into N paragraphs within a time window
 async function generateImportantSentences(req, res) {
   try {
     const { srt, count } = req.body || {};
@@ -774,37 +774,74 @@ async function generateImportantSentences(req, res) {
       }
     }
 
-    // Fallback: heuristic pick by cumulative duration target, keep order
-    if (!Array.isArray(important) || important.length === 0) {
-      // Try to estimate sentence durations from SRT entries and accumulate within target window
-      const entries = parseSRT(srt);
-      const grouped = groupSRTIntoSentencesFromEntries(entries);
-      const byOrder = grouped.map((g, i) => ({ idx: i, text: (g.text || '').trim(), dur: Math.max(0, (g.endTime || 0) - (g.startTime || 0)) }));
-      // Filter to only sentences present in the transcript list (conservative match by inclusion)
-      const normalizedSet = new Set(sentences.map(s => normalizeText(s)));
-      const filtered = byOrder.filter(x => normalizedSet.has(normalizeText(x.text)));
-      let total = 0;
-      const picked = [];
-      for (const item of filtered) {
-        if (picked.length >= targetCount) break;
-        // Prefer to keep total within [minSeconds, maxSeconds]; allow slight overshoot to reach targetCount
-        if (total < maxSeconds || picked.length === 0) {
-          picked.push(item);
-          total += item.dur || 0;
-        }
-        if (total >= minSeconds && picked.length >= targetCount) break;
+    // Build paragraphs constrained by time per paragraph (minSeconds..maxSeconds)
+    // Strategy: map transcript sentences to durations, then assign in order across N paragraphs
+    const allEntries = parseSRT(srt);
+    const groupedEntries = groupSRTIntoSentencesFromEntries(allEntries);
+    const sentenceDurations = groupedEntries.map(g => ({
+      text: (g.text || '').trim(),
+      dur: Math.max(0, (g.endTime || 0) - (g.startTime || 0))
+    }));
+    const avgDur = sentenceDurations.length
+      ? sentenceDurations.reduce((s, x) => s + x.dur, 0) / sentenceDurations.length
+      : 2.5;
+    const findDur = (t) => {
+      const norm = normalizeText(t);
+      const m = sentenceDurations.find(x => normalizeText(x.text) === norm || normalizeText(x.text).includes(norm) || norm.includes(normalizeText(x.text)));
+      return m ? m.dur : avgDur;
+    };
+
+    // If AI didn't provide any selection, use all sentences in order
+    const sourceList = Array.isArray(important) && important.length > 0 ? important : sentences;
+    // Map each chosen sentence back to its index in groupedEntries (best match)
+    const indexForSentence = (t) => {
+      const nt = normalizeText(t);
+      let best = { idx: -1, score: 0 };
+      for (let i = 0; i < groupedEntries.length; i++) {
+        const ne = normalizeText(groupedEntries[i].text || '');
+        if (!ne) continue;
+        const contains = nt.includes(ne) || ne.includes(nt);
+        const score = contains ? 1 : jaccardSimilarity(nt, ne);
+        if (score > best.score) best = { idx: i, score };
       }
-      if (picked.length === 0) {
-        // Fallback to top-N by length as last resort
-        const scored = sentences.map((text, idx) => ({ idx, text, score: text.split(/\s+/).length }));
-        scored.sort((a, b) => b.score - a.score);
-        important = scored.slice(0, targetCount).sort((a, b) => a.idx - b.idx).map(s => s.text);
-      } else {
-        important = picked.sort((a, b) => a.idx - b.idx).map(p => p.text);
+      return best.idx;
+    };
+    const sourceIndexes = sourceList.map(s => indexForSentence(s)).filter(i => i >= 0);
+
+    const paragraphs = [];
+    const paragraphIndices = [];
+    let current = [];
+    let currentDur = 0;
+    let currentIdxs = [];
+    for (let i = 0; i < sourceList.length && paragraphs.length < targetCount; i++) {
+      const sent = String(sourceList[i]).trim();
+      if (!sent) continue;
+      const d = findDur(sent);
+      // Always add at least one sentence to a paragraph
+      current.push(sent);
+      currentDur += d;
+      currentIdxs.push(sourceIndexes[i] ?? -1);
+      // Close paragraph if we reached minSeconds, or if adding next would exceed maxSeconds significantly
+      if (currentDur >= minSeconds || currentDur >= maxSeconds) {
+        paragraphs.push(current);
+        paragraphIndices.push(currentIdxs.filter(x => x >= 0));
+        current = [];
+        currentDur = 0;
+        currentIdxs = [];
       }
     }
+    if (paragraphs.length < targetCount && current.length > 0) {
+      paragraphs.push(current);
+      paragraphIndices.push(currentIdxs.filter(x => x >= 0));
+    }
+    // Ensure exactly targetCount paragraphs
+    while (paragraphs.length < targetCount) { paragraphs.push([]); paragraphIndices.push([]); }
+    if (paragraphs.length > targetCount) paragraphs.length = targetCount;
 
-    return res.json({ sentences: important });
+    // Flatten for backward compatibility
+    const flatSentences = sourceList;
+
+    return res.json({ paragraphs, paragraphIndices, sentences: flatSentences });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to generate important sentences', details: err.message });
   }
@@ -1066,8 +1103,8 @@ async function generateReel(req, res) {
           .addOption('-loglevel', 'error');
 
         const filterList = [
-          'scale=-2:1920',
-          "crop=1080:1920:(iw-1080)*0.8:0"
+          'scale=1080:1920:force_original_aspect_ratio=increase',
+          'crop=1080:1920:(iw-1080)/2:(ih-1920)/2'
         ];
         command = command.videoFilters(filterList);
 
@@ -1337,11 +1374,26 @@ async function generateReel(req, res) {
 }
 
 // Helper: generate individual reel segment files (no concat). Returns up to maxCount paths.
-async function generateReelSegments({ inputPath, srt, wordSrt, sentences, paddingSeconds = 0.3, portrait = false, maxCount = 3, textColor = 'white', fontKey = 'notosans' }) {
+async function generateReelSegments({ inputPath, srt, wordSrt, sentences, paragraphIndices, paddingSeconds = 0.3, portrait = false, maxCount = 3, textColor = 'white', fontKey = 'notosans' }) {
   const entries = parseSRT(srt);
   const grouped = groupSRTIntoSentencesFromEntries(entries);
   const wordEntries = wordSrt ? parseSRT(wordSrt) : [];
-  const segments = matchSentencesToSegments(sentences, grouped, Number(paddingSeconds || 0.3));
+  // If paragraphIndices provided, build segments directly from index spans per paragraph
+  let segments;
+  if (Array.isArray(paragraphIndices) && paragraphIndices.length > 0) {
+    const clamped = paragraphIndices
+      .map(arr => Array.isArray(arr) ? arr.map(i => Math.max(0, Math.min(grouped.length - 1, i))) : [])
+      .filter(a => a.length > 0);
+    segments = clamped.map(idxs => {
+      const minI = Math.min(...idxs);
+      const maxI = Math.max(...idxs);
+      const start = Math.max(0, (grouped[minI]?.startTime ?? 0) - Number(paddingSeconds || 0.3));
+      const end = (grouped[maxI]?.endTime ?? 0) + Number(paddingSeconds || 0.3);
+      return { start, end };
+    });
+  } else {
+    segments = matchSentencesToSegments(sentences, grouped, Number(paddingSeconds || 0.3));
+  }
   if (!Array.isArray(segments) || segments.length === 0) return [];
 
   // Match word-level SRT entries to segments for text overlay
@@ -1368,8 +1420,8 @@ async function generateReelSegments({ inputPath, srt, wordSrt, sentences, paddin
         .outputOptions(['-movflags +faststart', '-preset veryfast', '-crf 23'])
         .addOption('-loglevel', 'error');
       const filterList = [
-        'scale=-2:1920',
-        "crop=1080:1920:(iw-1080)*0.8:0"
+        'scale=1080:1920:force_original_aspect_ratio=increase',
+        'crop=1080:1920:(iw-1080)/2:(ih-1920)/2'
       ];
       command = command.videoFilters(filterList);
       command
@@ -1381,14 +1433,20 @@ async function generateReelSegments({ inputPath, srt, wordSrt, sentences, paddin
 
     // Pass 2: Add text overlay if we have word-level SRT entries
     if (overlays.length > 0) {
-      console.log(`[VTR] Adding ${overlays.length} text overlays to segment ${i}`);
+      const MAX_SEGMENT_OVERLAYS = 25; // avoid ENAMETOOLONG on Windows
+      let selected = overlays;
+      if (overlays.length > MAX_SEGMENT_OVERLAYS) {
+        const step = Math.max(1, Math.ceil(overlays.length / MAX_SEGMENT_OVERLAYS));
+        selected = overlays.filter((_, idx) => idx % step === 0).slice(0, MAX_SEGMENT_OVERLAYS);
+      }
+      console.log(`[VTR] Adding ${selected.length}/${overlays.length} text overlays to segment ${i}`);
       
       // Build drawtext filters for this segment
       const drawFilters = [];
       let lastLabel = '0:v';
       
-      for (let j = 0; j < overlays.length; j++) {
-        const overlay = overlays[j];
+      for (let j = 0; j < selected.length; j++) {
+        const overlay = selected[j];
         const cleanText = cleanTextForDrawtext(overlay.text);
         
         if (!cleanText.trim()) continue;
@@ -1397,7 +1455,7 @@ async function generateReelSegments({ inputPath, srt, wordSrt, sentences, paddin
         const position = (j % 2 === 0) ? 'top' : 'bottom';
         const drawtextFilter = buildDrawtextFilter(cleanText, fontKey, position, textColor);
         
-        const outLabel = j === overlays.length - 1 ? 'vout' : `v${j}`;
+        const outLabel = j === selected.length - 1 ? 'vout' : `v${j}`;
         const filter = `[${lastLabel}]${drawtextFilter}:enable='between(t,${overlay.startTime.toFixed(3)},${overlay.endTime.toFixed(3)})'[${outLabel}]`;
         drawFilters.push(filter);
         lastLabel = outLabel;
@@ -1446,28 +1504,45 @@ function matchSentencesToSegments(importantSentences, sentenceEntries, paddingSe
   const segments = [];
   for (const imp of importantSentences) {
     const normImp = normalizeText(imp);
-    let bestIdx = -1;
-    let bestScore = 0;
+    // Collect all transcript sentences that overlap with this paragraph text
+    const matches = [];
     for (let i = 0; i < sentenceEntries.length; i++) {
       const s = sentenceEntries[i];
       const normText = normalizeText(s.text || '');
-      // Prefer substring containment
-      const contains = normText.includes(normImp) || normImp.includes(normText);
-      // score by token overlap
+      if (!normText) continue;
+      const contains = normImp.includes(normText) || normText.includes(normImp);
       const score = contains ? 1 : jaccardSimilarity(normImp, normText);
-      if (score > bestScore) {
-        bestScore = score; 
-        bestIdx = i;
+      if (contains || score > 0.18) {
+        matches.push({ idx: i, start: s.startTime, end: s.endTime });
       }
     }
-    if (bestIdx >= 0 && bestScore > 0.08) {
-      const se = sentenceEntries[bestIdx];
-      const start = Math.max(0, se.startTime - paddingSeconds);
-      const end = se.endTime + paddingSeconds;
-      segments.push({ start, end });
+    if (matches.length === 0) {
+      // Fallback: pick best single sentence as before
+      let bestIdx = -1;
+      let bestScore = 0;
+      for (let i = 0; i < sentenceEntries.length; i++) {
+        const s = sentenceEntries[i];
+        const normText = normalizeText(s.text || '');
+        const contains = normText.includes(normImp) || normImp.includes(normText);
+        const score = contains ? 1 : jaccardSimilarity(normImp, normText);
+        if (score > bestScore) { bestScore = score; bestIdx = i; }
+      }
+      if (bestIdx >= 0 && bestScore > 0.08) {
+        const se = sentenceEntries[bestIdx];
+        const start = Math.max(0, se.startTime - paddingSeconds);
+        const end = se.endTime + paddingSeconds;
+        segments.push({ start, end });
+      }
+      continue;
     }
+    // Expand to contiguous span covering all matched sentences
+    const minStart = Math.min(...matches.map(m => m.start));
+    const maxEnd = Math.max(...matches.map(m => m.end));
+    const start = Math.max(0, minStart - paddingSeconds);
+    const end = maxEnd + paddingSeconds;
+    segments.push({ start, end });
   }
-  // Merge overlapping segments
+  // Merge overlapping segments but preserve order
   segments.sort((a, b) => a.start - b.start);
   const merged = [];
   for (const seg of segments) {
@@ -1570,7 +1645,7 @@ async function generateMiniReelWithImages(req, res) {
         .audioCodec('aac')
         .outputOptions(['-movflags +faststart', '-preset veryfast', '-crf 23'])
         .videoFilters([
-          'scale=-2:1920',
+          'scale=1080:1920:force_original_aspect_ratio=increase',
           'crop=1080:1920:(iw-1080)/2:(ih-1920)/2'
         ])
         .addOption('-loglevel', 'error')
@@ -1686,7 +1761,7 @@ async function overlayImagesOnVideo(req, res) {
     // 3) Build overlay filter chain at 3s intervals; ensure base video portrait
     const overlayFilters = [];
     // Add a base scale/crop to 1080x1920 to be safe if source isn't portrait
-    overlayFilters.push('[0:v]scale=-2:1920,crop=1080:1920:(iw-1080)/2:(ih-1920)/2[base]');
+    overlayFilters.push('[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)/2:(ih-1920)/2[base]');
     let prevLabel = '[base]';
     // Materialize images
     const imgPaths = [];

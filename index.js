@@ -36,6 +36,7 @@ const videoCompressionRoutes = require('./routes/videoCompressionRoutes');  // v
 const telegramRoute=require('./routes/telegramroutes');// telegram
 const videoToReelsRoutes = require('./routes/videoToReels');  // video to reel tool 
 const audioExtractionRoutes = require('./routes/audioExtraction');  // async audio extraction
+const videoToSegmentsRoutes = require('./routes/videotosegments');
 
 
 dotenv.config();
@@ -185,6 +186,10 @@ app.use('/api/vtr', videoToReelsRoutes);
 
 // Audio Extraction Routes
 app.use('/api/audio', audioExtractionRoutes);
+
+// Video To Segments (VTS) Routes
+app.use('/api/vts', videoToSegmentsRoutes);
+
 
 
 // Error handling middleware

@@ -31,7 +31,7 @@ const sanitizeFilename = (filename, maxLength = 50) => {
 const createAsyncReelJob = async (req, res) => {
   try {
     const uploadedFile = req.file;
-    const { srt, wordSrt, sentences, paddingSeconds, maxTotalSeconds, portrait, images, fontKey, textColor } = req.body;
+    const { srt, wordSrt, sentences, paragraphs, paddingSeconds, maxTotalSeconds, portrait, images, fontKey, textColor } = req.body;
     const userId = req.user?.id || req.user?._id || null;
 
     // Validate required fields
@@ -49,22 +49,21 @@ const createAsyncReelJob = async (req, res) => {
       });
     }
 
-    if (!sentences) {
+    if (!sentences && !paragraphs) {
       return res.status(400).json({ 
         success: false,
-        error: 'Important sentences are required' 
+        error: 'Important sentences or paragraphs are required' 
       });
     }
 
-    // Parse sentences if it's a string
+    // Parse sentences/paragraphs if they are strings
     let parsedSentences;
+    let parsedParagraphs;
     try {
-      parsedSentences = Array.isArray(sentences) ? sentences : JSON.parse(sentences);
+      if (sentences) parsedSentences = Array.isArray(sentences) ? sentences : JSON.parse(sentences);
+      if (paragraphs) parsedParagraphs = Array.isArray(paragraphs) ? paragraphs : JSON.parse(paragraphs);
     } catch (error) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Invalid sentences format' 
-      });
+      return res.status(400).json({ success: false, error: 'Invalid sentences/paragraphs format' });
     }
 
     // Create the job data
@@ -73,6 +72,7 @@ const createAsyncReelJob = async (req, res) => {
       srt,
       wordSrt: wordSrt || null,
       sentences: parsedSentences,
+      paragraphs: parsedParagraphs,
       paddingSeconds: Number(paddingSeconds || 0.3),
       maxTotalSeconds: Number(maxTotalSeconds || 60),
       portrait: String(portrait || 'false') === 'true',
@@ -261,7 +261,7 @@ module.exports = {
 async function createAsyncSegmentsJob(req, res) {
   try {
     const uploadedFile = req.file;
-    const { srt, wordSrt, sentences, paddingSeconds, portrait, images, fontKey, textColor } = req.body;
+    const { srt, wordSrt, sentences, paragraphs, paddingSeconds, portrait, images, fontKey, textColor } = req.body;
     const userId = req.user?.id || req.user?._id || null;
 
     if (!uploadedFile) {
@@ -270,22 +270,25 @@ async function createAsyncSegmentsJob(req, res) {
     if (!srt) {
       return res.status(400).json({ success: false, error: 'SRT content is required' });
     }
-    if (!sentences) {
-      return res.status(400).json({ success: false, error: 'Important sentences are required' });
+    if (!sentences && !paragraphs) {
+      return res.status(400).json({ success: false, error: 'Important sentences or paragraphs are required' });
     }
 
     let parsedSentences;
+    let parsedParagraphs;
     try {
-      parsedSentences = Array.isArray(sentences) ? sentences : JSON.parse(sentences);
+      if (sentences) parsedSentences = Array.isArray(sentences) ? sentences : JSON.parse(sentences);
+      if (paragraphs) parsedParagraphs = Array.isArray(paragraphs) ? paragraphs : JSON.parse(paragraphs);
     } catch (_) {
-      return res.status(400).json({ success: false, error: 'Invalid sentences format' });
+      return res.status(400).json({ success: false, error: 'Invalid sentences/paragraphs format' });
     }
 
     const jobData = {
       videoFile: uploadedFile,
       srt,
       wordSrt: wordSrt || null,
-      sentences: parsedSentences,
+      // Store something in sentences for compatibility (use paragraphs if sentences missing)
+      sentences: parsedSentences || parsedParagraphs || [],
       paddingSeconds: Number(paddingSeconds || 0.3),
       maxTotalSeconds: Number(60),
       portrait: String(portrait || 'false') === 'true',
@@ -336,7 +339,7 @@ async function createAsyncSegmentsJob(req, res) {
       }
     } catch (_) {}
 
-    await videoToReelsJobService.startSegmentsJob(job.jobId, { ...jobData, images: runtimeImages });
+    await videoToReelsJobService.startSegmentsJob(job.jobId, { ...jobData, images: runtimeImages, paragraphs: parsedParagraphs });
 
     res.json({
       success: true,

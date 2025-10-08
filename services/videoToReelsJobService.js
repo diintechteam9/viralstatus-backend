@@ -311,10 +311,13 @@ class VideoToReelsJobService {
             inputPath,
             srt: job.srt,
             wordSrt: job.wordSrt,
-            sentences: job.importantSentences,
+            sentences: Array.isArray(requestData?.paragraphs) && requestData.paragraphs.length
+                ? requestData.paragraphs // Treat each paragraph (string) as one unit
+                : job.importantSentences,
+            paragraphIndices: Array.isArray(requestData?.paragraphIndices) ? requestData.paragraphIndices : undefined,
             paddingSeconds: job.paddingSeconds,
             portrait: job.portrait,
-            maxCount: 3,
+            maxCount: Array.isArray(requestData?.paragraphs) ? Math.min(5, Math.max(1, requestData.paragraphs.length)) : 3,
             textColor: job.textColor,
             fontKey: job.fontKey
         });
@@ -413,38 +416,7 @@ class VideoToReelsJobService {
         }
     }
 
-    /**
-     * Get jobs by user ID
-     */
-    async getJobsByUserId(userId, limit = 50) {
-        try {
-            return await VideoToReelsJob.getJobsByUserId(userId, limit);
-        } catch (error) {
-            console.error(`Error getting jobs for user ${userId}:`, error);
-            throw error;
-        }
-    }
-
-    /**
-     * Clean up old jobs (optional maintenance method)
-     */
-    async cleanupOldJobs(daysOld = 30) {
-        try {
-            const cutoffDate = new Date();
-            cutoffDate.setDate(cutoffDate.getDate() - daysOld);
-            
-            const result = await VideoToReelsJob.deleteMany({
-                createdAt: { $lt: cutoffDate },
-                status: { $in: ['completed', 'failed'] }
-            });
-            
-            console.log(`Cleaned up ${result.deletedCount} old video-to-reels jobs`);
-            return result.deletedCount;
-        } catch (error) {
-            console.error('Error cleaning up old jobs:', error);
-            throw error;
-        }
-    }
+    // Removed unused methods: getJobsByUserId, cleanupOldJobs
 
     /**
      * Clean up all progress update timers (for graceful shutdown)
