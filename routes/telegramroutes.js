@@ -1,0 +1,110 @@
+const express = require('express');
+const router = express.Router();
+const TelegramServiceController = require('../controllers/telegramcontroller');
+
+const telegramService = new TelegramServiceController();
+
+// Test Telegram bot connection
+router.post('/test-connection', async (req, res) => {
+  try {
+    const result = await telegramService.testConnection();
+    if (result.success) {
+      res.json({ success: true, message: result.message });
+    } else {
+      res.status(500).json({ success: false, error: result.error });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
+
+// Analyze video before sending (for debugging)
+router.post('/analyze-video', async (req, res) => {
+  try {
+    const { videoBase64 } = req.body;
+    
+    if (!videoBase64) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Video data is required' 
+      });
+    }
+
+    // Convert base64 video to buffer
+    const videoBuffer = Buffer.from(videoBase64, 'base64');
+    
+    // Get video information
+    const videoInfo = telegramService.getVideoInfo(videoBuffer);
+    
+    res.json({ 
+      success: true, 
+      videoInfo: videoInfo
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Send only text message
+router.post('/send-text', async (req, res) => {
+  try {
+    const { text } = req.body;
+    
+    if (!text) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Text message is required' 
+      });
+    }
+
+    const result = await telegramService.sendTextMessage(text);
+    
+    if (result.success) {
+      res.json({ success: true, message: result.message });
+    } else {
+      res.status(500).json({ success: false, error: result.error });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Send video to Telegram
+router.post('/send-video', async (req, res) => {
+  try {
+    const { videoUrl, caption } = req.body;
+    
+    if (!videoUrl) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Video URL is required' 
+      });
+    }
+
+    // Fetch video from URL and convert to base64
+    const fetch = require('node-fetch');
+    const response = await fetch(videoUrl);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch video: ${response.status} ${response.statusText}`);
+    }
+    
+    const videoBuffer = await response.buffer();
+    const videoBase64 = videoBuffer.toString('base64');
+    
+    // Send video using the existing method
+    const result = await telegramService.sendVideoWithRetry(videoBuffer, caption || '');
+    
+    if (result.success) {
+      res.json({ success: true, message: result.message });
+    } else {
+      res.status(500).json({ success: false, error: result.error });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+module.exports = router;

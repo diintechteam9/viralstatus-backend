@@ -32,6 +32,11 @@ const videomergeta1000seriesRoutes = require('./routes/videomergeta1000series');
 const creditWalletRoutes = require("./routes/creditWalletRoute");
 
 const videocardRoute=require('./routes/aivideogen');  // generate videocard
+const videoCompressionRoutes = require('./routes/videoCompressionRoutes');  // video compression
+const telegramRoute=require('./routes/telegramroutes');// telegram
+const videoToReelsRoutes = require('./routes/videoToReels');  // video to reel tool 
+const audioExtractionRoutes = require('./routes/audioExtraction');  // async audio extraction
+
 
 dotenv.config();
 
@@ -100,7 +105,7 @@ app.use((req, res, next) => {
     
     // Handle preflight requests
     if (req.method === 'OPTIONS') {
-        res.header('Access-Control-Allow-Origin', req.headers.origin || 'https://viralstatus-frontend.vercel.app');
+        res.header('Access-Control-Allow-Origin', req.headers.origin || 'https://viralstatus-frontend.vercel.app' || 'https://client.yovoai.com');
         res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
         res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
         res.header('Access-Control-Allow-Credentials', 'true');
@@ -169,6 +174,19 @@ app.use('/api/reelta1000series', videomergeta1000seriesRoutes);
 
 app.use('/api/videocard',videocardRoute);
 
+// Video Compression Routes
+app.use('/api/compression', videoCompressionRoutes);
+
+// Telegram Routes
+app.use('/api/telegram', telegramRoute);
+
+// Video to Reels (VTR) Routes
+app.use('/api/vtr', videoToReelsRoutes);
+
+// Audio Extraction Routes
+app.use('/api/audio', audioExtractionRoutes);
+
+
 // Error handling middleware
 app.use((error, req, res, next) => {
     console.error('Unhandled error:', error);
@@ -187,9 +205,45 @@ app.use((req, res) => {
 });
 
 connectDB().then(() => {
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
         console.log("Server is running on port 4000");
     });
+
+    // Graceful shutdown handling
+    const gracefulShutdown = (signal) => {
+        console.log(`Received ${signal}. Starting graceful shutdown...`);
+        
+        // Clean up video-to-reels job service timers
+        try {
+            const videoToReelsJobService = require('./services/videoToReelsJobService');
+            videoToReelsJobService.cleanupTimers();
+        } catch (error) {
+            console.warn('Error cleaning up video-to-reels timers:', error.message);
+        }
+        
+        // Clean up audio extraction job service timers
+        try {
+            const audioExtractionJobService = require('./services/audioExtractionJobService');
+            audioExtractionJobService.cleanupTimers();
+        } catch (error) {
+            console.warn('Error cleaning up audio extraction timers:', error.message);
+        }
+        
+        server.close(() => {
+            console.log('Server closed successfully');
+            process.exit(0);
+        });
+        
+        // Force close after 10 seconds
+        setTimeout(() => {
+            console.error('Forced shutdown after timeout');
+            process.exit(1);
+        }, 10000);
+    };
+
+    // Handle shutdown signals
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 });
 
 

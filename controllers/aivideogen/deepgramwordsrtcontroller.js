@@ -100,7 +100,7 @@ function convertToSRT(result) {
 
         console.log(`Total words found: ${allWords.length}`);
         
-        // Generate SRT with 4 words at a time
+        // Generate SRT with 3 words at a time
         let srtContent = '';
         let captionIndex = 1;
         const wordsPerCaption = 3;
