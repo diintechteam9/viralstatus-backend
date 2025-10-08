@@ -331,7 +331,7 @@ exports.getUserRegisteredCampaigns = async (req, res) => {
     const lookupUserId = userId || googleId;
     const reg = await RegisteredCampaign.findOne({ userId: lookupUserId }).lean();
     if (!reg) {
-      return res.status(404).json({ success: false, message: 'No registered campaigns found for user' });
+      return res.status(200).json({ success: true, message: 'No registered campaigns found for user', active: [], expired: [] });
     }
 
     // Extract campaign ids from stored entries (if present)
