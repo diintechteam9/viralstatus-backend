@@ -17,6 +17,23 @@ function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
+// Test function to validate crop expressions
+function validateCropExpression(cropPosition) {
+  const pos = String(cropPosition || 'middle').toLowerCase();
+  let xExpr;
+  if (pos === 'left') {
+    xExpr = '0';
+  } else if (pos === 'right') {
+    xExpr = 'iw*2/3';
+  } else {
+    xExpr = 'iw/3';
+  }
+  // Ensure width is divisible by 2 by using floor division
+  const cropExpr = `crop=floor(iw/3)*2:ih:${xExpr}:0`;
+  console.log(`[CROP-VALIDATION] Position: ${pos}, Expression: ${cropExpr}`);
+  return cropExpr;
+}
+
 function srtTimestampToMs(ts) {
   // Format: HH:MM:SS,mmm
   const match = /^(\d{2}):(\d{2}):(\d{2}),(\d{1,3})$/.exec(ts.trim());
@@ -279,19 +296,50 @@ async function ffmpegTrim(inputPath, startMs, endMs, outputPath) {
   });
 }
 
-async function ffmpegNormalizePortrait(inputPath, outputPath) {
+async function ffmpegNormalizePortrait(inputPath, outputPath, cropPosition = 'middle') {
   // Scale and crop to 1080x1920 portrait to ensure 9:16 reels format
+  // For 16:9 video, divide into 3 equal sections: left, middle, right
   return new Promise((resolve, reject) => {
+    const pos = String(cropPosition || 'middle').toLowerCase();
+    console.log(`[FFMPEG] Normalizing portrait with crop position: ${pos}`);
+    
+    // Validate input file exists
+    if (!fs.existsSync(inputPath)) {
+      const error = new Error(`Input file does not exist: ${inputPath}`);
+      console.error(`[FFMPEG] ${error.message}`);
+      return reject(error);
+    }
+    
+    // Calculate crop position based on video width divided into 3 sections
+    // Each section should be 1/3 of the video width
+    const cropExpr = validateCropExpression(pos);
+    const scaleExpr = 'scale=1080:1920:force_original_aspect_ratio=increase';
+    
+    console.log(`[FFMPEG] Crop expression: ${cropExpr}`);
+    console.log(`[FFMPEG] Scale expression: ${scaleExpr}`);
+    
     ffmpeg(inputPath)
       .videoFilters([
-        'scale=1080:1920:force_original_aspect_ratio=increase',
-        'crop=1080:1920:(iw-1080)/2:(ih-1920)/2'
+        cropExpr,
+        scaleExpr,
+        'crop=1080:1920' // enforce exact 9:16 output size
       ])
       .videoCodec('libx264')
       .audioCodec('aac')
       .outputOptions(['-movflags +faststart', '-preset veryfast', '-crf 23'])
-      .on('error', reject)
-      .on('end', () => resolve(outputPath))
+      .on('start', (commandLine) => {
+        console.log(`[FFMPEG] Starting portrait normalization with command: ${commandLine}`);
+      })
+      .on('error', (err, stdout, stderr) => {
+        console.error(`[FFMPEG] Error normalizing portrait:`, err);
+        console.error(`[FFMPEG] FFmpeg stderr:`, stderr);
+        console.error(`[FFMPEG] FFmpeg stdout:`, stdout);
+        reject(err);
+      })
+      .on('end', () => {
+        console.log(`[FFMPEG] Portrait normalization completed: ${outputPath}`);
+        resolve(outputPath);
+      })
       .save(outputPath);
   });
 }
@@ -500,7 +548,7 @@ exports.trimByParagraphs = async (req, res) => {
 
       // Normalize to 9:16 portrait first
       console.log(`[VTS] Job ${jobId}: [Seg ${index}] Portrait normalization start`);
-      await ffmpegNormalizePortrait(rawSegPath, portraitSegPath);
+      await ffmpegNormalizePortrait(rawSegPath, portraitSegPath, req.body?.cropPosition || 'middle');
       console.log(`[VTS] Job ${jobId}: [Seg ${index}] Portrait normalization done -> ${portraitSegPath}`);
       try { fs.unlinkSync(rawSegPath); } catch {}
 
@@ -590,7 +638,7 @@ exports.trimByParagraphs = async (req, res) => {
           // 1) Normalize outro to portrait
           console.log(`[VTS] Job ${jobId}: [Seg ${index}] Outro normalization start`);
           // eslint-disable-next-line no-await-in-loop
-          await ffmpegNormalizePortrait(outroFile.path, outroPortrait);
+          await ffmpegNormalizePortrait(outroFile.path, outroPortrait, req.body?.cropPosition || 'middle');
 
           // 2) Normalize both the segment and outro to consistent codec/fps/pix_fmt/audio
           const segNorm = path.join(jobDir, `seg_norm_${index}.mp4`);
@@ -599,10 +647,21 @@ exports.trimByParagraphs = async (req, res) => {
           // Normalize segment (finalSegPath currently points to portrait+overlay video)
           // eslint-disable-next-line no-await-in-loop
           await new Promise((resolve, reject) => {
+            const pos = String(req.body?.cropPosition || 'middle').toLowerCase();
+            let xExpr;
+            if (pos === 'left') {
+              xExpr = '0';
+            } else if (pos === 'right') {
+              xExpr = 'iw*2/3';
+            } else {
+              xExpr = 'iw/3';
+            }
+            const cropExpr = `crop=floor(iw/3)*2:ih:${xExpr}:0`;
+            const scaleExpr = 'scale=1080:1920:force_original_aspect_ratio=increase';
             ffmpeg(finalSegPath)
               .videoFilters([
-                'scale=1080:1920:force_original_aspect_ratio=increase',
-                'crop=1080:1920:(iw-1080)/2:(ih-1920)/2',
+                cropExpr,
+                scaleExpr,
                 'fps=30'
               ])
               .videoCodec('libx264')
@@ -619,10 +678,21 @@ exports.trimByParagraphs = async (req, res) => {
           // Normalize outro
           // eslint-disable-next-line no-await-in-loop
           await new Promise((resolve, reject) => {
+            const pos = String(req.body?.cropPosition || 'middle').toLowerCase();
+            let xExpr;
+            if (pos === 'left') {
+              xExpr = '0';
+            } else if (pos === 'right') {
+              xExpr = 'iw*2/3';
+            } else {
+              xExpr = 'iw/3';
+            }
+            const cropExpr = `crop=floor(iw/3)*2:ih:${xExpr}:0`;
+            const scaleExpr = 'scale=1080:1920:force_original_aspect_ratio=increase';
             ffmpeg(outroPortrait)
               .videoFilters([
-                'scale=1080:1920:force_original_aspect_ratio=increase',
-                'crop=1080:1920:(iw-1080)/2:(ih-1920)/2',
+                cropExpr,
+                scaleExpr,
                 'fps=30'
               ])
               .videoCodec('libx264')
@@ -740,8 +810,10 @@ exports.trimByParagraphsInternal = async (params, onProgress) => {
     textColor = 'white',
     logoFilePath = null,
     logoPosition = 'top-right',
-    outroFilePath = null
+    outroFilePath = null,
+    cropPosition = 'middle'
   } = params || {};
+  console.log(`[VTS-INT] Received crop position in internal: ${String(cropPosition)}`);
   if (!jobId) throw new Error('jobId required');
   if (!inputPath || !fs.existsSync(inputPath)) throw new Error('Input video not found');
   if (!srt) throw new Error('SRT required');
@@ -774,7 +846,7 @@ exports.trimByParagraphsInternal = async (params, onProgress) => {
     await ffmpegTrim(inputPath, startMs, endMs, rawSegPath);
     // Normalize portrait
     // eslint-disable-next-line no-await-in-loop
-    await ffmpegNormalizePortrait(rawSegPath, portraitSegPath);
+    await ffmpegNormalizePortrait(rawSegPath, portraitSegPath, cropPosition || 'middle');
     try { fs.unlinkSync(rawSegPath); } catch {}
     // Optional logo
     let logoProcessedPath = portraitSegPath;
@@ -851,15 +923,26 @@ exports.trimByParagraphsInternal = async (params, onProgress) => {
       const outroPortrait = path.join(jobDir, `outro_${index}.mp4`);
       try {
         // eslint-disable-next-line no-await-in-loop
-        await ffmpegNormalizePortrait(outroFilePath, outroPortrait);
+        await ffmpegNormalizePortrait(outroFilePath, outroPortrait, cropPosition || 'middle');
         const segNorm = path.join(jobDir, `seg_norm_${index}.mp4`);
         const outroNorm = path.join(jobDir, `outro_norm_${index}.mp4`);
         // eslint-disable-next-line no-await-in-loop
         await new Promise((resolve, reject) => {
+          const pos = String(cropPosition || 'middle').toLowerCase();
+          let xExpr;
+          if (pos === 'left') {
+            xExpr = '0';
+          } else if (pos === 'right') {
+            xExpr = 'iw*2/3';
+          } else {
+            xExpr = 'iw/3';
+          }
+          const cropExpr = `crop=floor(iw/3)*2:ih:${xExpr}:0`;
+          const scaleExpr = 'scale=1080:1920:force_original_aspect_ratio=increase';
           ffmpeg(finalSegPath)
             .videoFilters([
-              'scale=1080:1920:force_original_aspect_ratio=increase',
-              'crop=1080:1920:(iw-1080)/2:(ih-1920)/2',
+              cropExpr,
+              scaleExpr,
               'fps=30'
             ])
             .videoCodec('libx264')
@@ -874,10 +957,21 @@ exports.trimByParagraphsInternal = async (params, onProgress) => {
         });
         // eslint-disable-next-line no-await-in-loop
         await new Promise((resolve, reject) => {
+          const pos = String(cropPosition || 'middle').toLowerCase();
+          let xExpr;
+          if (pos === 'left') {
+            xExpr = '0';
+          } else if (pos === 'right') {
+            xExpr = 'iw*2/3';
+          } else {
+            xExpr = 'iw/3';
+          }
+          const cropExpr = `crop=floor(iw/3)*2:ih:${xExpr}:0`;
+          const scaleExpr = 'scale=1080:1920:force_original_aspect_ratio=increase';
           ffmpeg(outroPortrait)
             .videoFilters([
-              'scale=1080:1920:force_original_aspect_ratio=increase',
-              'crop=1080:1920:(iw-1080)/2:(ih-1920)/2',
+              cropExpr,
+              scaleExpr,
               'fps=30'
             ])
             .videoCodec('libx264')

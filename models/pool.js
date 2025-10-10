@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
 const PoolSchema = new mongoose.Schema({
+  clientId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Client',
+    required: true,
+    index: true
+  },
   name: {
     type: String,
     required: true,

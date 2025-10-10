@@ -17,8 +17,10 @@ async function createAsyncSegmentsJob(req, res) {
     const uploadedFile = req.file || (req.files && Array.isArray(req.files.video) && req.files.video[0]) || null;
     const outroFile = req.files && Array.isArray(req.files.outro) ? req.files.outro[0] : null;
     const logoFile = req.files && Array.isArray(req.files.logo) ? req.files.logo[0] : null;
-    const { srt, wordSrt, paragraphs, fontKey, textColor, logoPosition } = req.body || {};
+    const { srt, wordSrt, paragraphs, fontKey, textColor, logoPosition, cropPosition } = req.body || {};
     const userId = req.user?.id || req.user?._id || null;
+    
+    console.log(`[VTS-ASYNC] Received crop position: ${cropPosition}`);
 
     if (!uploadedFile) return res.status(400).json({ success: false, error: 'Video file is required' });
     if (!srt) return res.status(400).json({ success: false, error: 'SRT content is required' });
@@ -55,6 +57,7 @@ async function createAsyncSegmentsJob(req, res) {
       fontKey: (fontKey || 'notosans'),
       textColor: (textColor || 'white'),
       logoPosition: (logoPosition || 'top-right'),
+      cropPosition: (cropPosition || 'middle'),
       userId
     };
 
@@ -112,7 +115,7 @@ async function createAsyncSegmentsJob(req, res) {
       return res.status(500).json({ success: false, error: 'Failed to prepare input file' });
     }
 
-    await videoToSegmentsJobService.startJob(job.jobId, { paragraphs: job.paragraphs });
+    await videoToSegmentsJobService.startJob(job.jobId, { paragraphs: job.paragraphs, cropPosition: job.cropPosition || 'middle' });
 
     return res.json({ success: true, message: 'Segments generation started', jobId: job.jobId, status: 'processing', progress: 0 });
   } catch (error) {

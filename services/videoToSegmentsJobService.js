@@ -52,6 +52,8 @@ class VideoToSegmentsJobService {
       // Generate local segment files using existing trimming logic
       const partialUploaded = [];
       const uploadedIndices = new Set();
+      const cropPos = (requestData?.cropPosition) || job.cropPosition || 'middle';
+      console.log(`[VTS-JOB] Processing with crop position: ${cropPos}`);
       const { segmentPaths } = await trimByParagraphsInternal({
         jobId,
         inputPath: job.originalVideoFile?.path,
@@ -63,6 +65,7 @@ class VideoToSegmentsJobService {
         logoFilePath: job.logoFile?.path,
         logoPosition: job.logoPosition,
         outroFilePath: job.outroFile?.path,
+        cropPosition: cropPos,
         onSegment: async (index, pathToSegment) => {
           try {
             // Upload immediately when a segment is ready
