@@ -20,16 +20,18 @@ function ensureDir(dirPath) {
 // Test function to validate crop expressions
 function validateCropExpression(cropPosition) {
   const pos = String(cropPosition || 'middle').toLowerCase();
+  // Target a 2/3 width crop window (divisible by 2) from the selected side
+  const widthExpr = 'iw*2/3';
   let xExpr;
+  
   if (pos === 'left') {
     xExpr = '0';
   } else if (pos === 'right') {
-    xExpr = 'iw*2/3';
+    xExpr = 'iw/3';  // Right edge: starts at 1/3 of width
   } else {
-    xExpr = 'iw/3';
+    xExpr = 'iw/6';  // Center: starts at 1/6 of width
   }
-  // Ensure width is divisible by 2 by using floor division
-  const cropExpr = `crop=floor(iw/3)*2:ih:${xExpr}:0`;
+  const cropExpr = `crop=${widthExpr}:ih:${xExpr}:0`;
   console.log(`[CROP-VALIDATION] Position: ${pos}, Expression: ${cropExpr}`);
   return cropExpr;
 }
@@ -648,15 +650,7 @@ exports.trimByParagraphs = async (req, res) => {
           // eslint-disable-next-line no-await-in-loop
           await new Promise((resolve, reject) => {
             const pos = String(req.body?.cropPosition || 'middle').toLowerCase();
-            let xExpr;
-            if (pos === 'left') {
-              xExpr = '0';
-            } else if (pos === 'right') {
-              xExpr = 'iw*2/3';
-            } else {
-              xExpr = 'iw/3';
-            }
-            const cropExpr = `crop=floor(iw/3)*2:ih:${xExpr}:0`;
+            const cropExpr = validateCropExpression(pos);
             const scaleExpr = 'scale=1080:1920:force_original_aspect_ratio=increase';
             ffmpeg(finalSegPath)
               .videoFilters([
@@ -679,15 +673,7 @@ exports.trimByParagraphs = async (req, res) => {
           // eslint-disable-next-line no-await-in-loop
           await new Promise((resolve, reject) => {
             const pos = String(req.body?.cropPosition || 'middle').toLowerCase();
-            let xExpr;
-            if (pos === 'left') {
-              xExpr = '0';
-            } else if (pos === 'right') {
-              xExpr = 'iw*2/3';
-            } else {
-              xExpr = 'iw/3';
-            }
-            const cropExpr = `crop=floor(iw/3)*2:ih:${xExpr}:0`;
+            const cropExpr = validateCropExpression(pos);
             const scaleExpr = 'scale=1080:1920:force_original_aspect_ratio=increase';
             ffmpeg(outroPortrait)
               .videoFilters([
@@ -929,15 +915,7 @@ exports.trimByParagraphsInternal = async (params, onProgress) => {
         // eslint-disable-next-line no-await-in-loop
         await new Promise((resolve, reject) => {
           const pos = String(cropPosition || 'middle').toLowerCase();
-          let xExpr;
-          if (pos === 'left') {
-            xExpr = '0';
-          } else if (pos === 'right') {
-            xExpr = 'iw*2/3';
-          } else {
-            xExpr = 'iw/3';
-          }
-          const cropExpr = `crop=floor(iw/3)*2:ih:${xExpr}:0`;
+          const cropExpr = validateCropExpression(pos);
           const scaleExpr = 'scale=1080:1920:force_original_aspect_ratio=increase';
           ffmpeg(finalSegPath)
             .videoFilters([
@@ -958,15 +936,7 @@ exports.trimByParagraphsInternal = async (params, onProgress) => {
         // eslint-disable-next-line no-await-in-loop
         await new Promise((resolve, reject) => {
           const pos = String(cropPosition || 'middle').toLowerCase();
-          let xExpr;
-          if (pos === 'left') {
-            xExpr = '0';
-          } else if (pos === 'right') {
-            xExpr = 'iw*2/3';
-          } else {
-            xExpr = 'iw/3';
-          }
-          const cropExpr = `crop=floor(iw/3)*2:ih:${xExpr}:0`;
+          const cropExpr = validateCropExpression(pos);
           const scaleExpr = 'scale=1080:1920:force_original_aspect_ratio=increase';
           ffmpeg(outroPortrait)
             .videoFilters([

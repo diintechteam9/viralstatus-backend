@@ -33,6 +33,7 @@ const videoToSegmentsJobSchema = new mongoose.Schema({
     fontKey: { type: String, default: 'notosans' },
     textColor: { type: String, default: 'white' },
     logoPosition: { type: String, default: 'top-right' },
+    cropPosition: { type: String, default: 'middle' },
 
     videos: [{
         url: String,
@@ -81,7 +82,8 @@ videoToSegmentsJobSchema.statics.createJob = async function(jobData) {
         portrait: jobData.portrait,
         fontKey: jobData.fontKey,
         textColor: jobData.textColor,
-        logoPosition: jobData.logoPosition
+        logoPosition: jobData.logoPosition,
+        cropPosition: jobData.cropPosition || 'middle'
     });
     await job.save();
     return job;
