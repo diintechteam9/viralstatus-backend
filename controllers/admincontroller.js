@@ -2,6 +2,9 @@ const Admin = require("../models/admin");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const Client = require("../models/client");
+const { s3, BUCKET_NAME } = require("../config/s3");
+const { PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 // Generate JWT Token for admin
 const generateAdminToken = (id) => {
@@ -137,7 +140,9 @@ const getClients = async (req, res) => {
         pincode,
         gstNo,
         panNo,
-        aadharNo
+        aadharNo,
+        businessLogoKey,
+        businessLogoUrl
       } = req.body;
   
       // Check if client already exists
@@ -152,6 +157,12 @@ const getClients = async (req, res) => {
       // Hash password
       const hashedPassword = await bcrypt.hash(password, 10);
   
+      // Use the provided businessLogoUrl or construct from key if needed
+      let finalBusinessLogoUrl = businessLogoUrl;
+      if (businessLogoKey && !businessLogoUrl) {
+        finalBusinessLogoUrl = `https://${BUCKET_NAME}.s3.amazonaws.com/${businessLogoKey}`;
+      }
+
       // Create new client
       const client = await Client.create({
         name,
@@ -163,7 +174,9 @@ const getClients = async (req, res) => {
         pincode,
         gstNo,
         panNo,
-        aadharNo
+        aadharNo,
+        businessLogoKey,
+        businessLogoUrl: finalBusinessLogoUrl
       });
   
       // Remove password from response
@@ -268,6 +281,112 @@ const getClientToken = async (req, res) => {
   }
 };
 
+// Upload business logo for admin
+const uploadBusinessLogo = async (req, res) => {
+  try {
+    const { fileName, fileSize, mimeType } = req.body;
+
+    if (!fileName || !fileSize || !mimeType) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: fileName, fileSize, mimeType"
+      });
+    }
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(mimeType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid file type. Only image files are allowed."
+      });
+    }
+
+    // Validate file size (max 5MB)
+    if (fileSize > 5 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        message: "File size too large. Maximum 5MB allowed."
+      });
+    }
+
+    // Generate unique S3 key for business logo
+    const timestamp = Date.now();
+    const fileExtension = fileName.split('.').pop();
+    const s3Key = `admin/business-logos/${timestamp}_${fileName}`;
+
+    // Create presigned URL for upload
+    const command = new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: s3Key,
+      ContentType: mimeType,
+      ACL: 'private'
+    });
+
+    const uploadUrl = await getSignedUrl(s3, command, { 
+      expiresIn: 3600,
+      signableHeaders: new Set(['host', 'content-type'])
+    });
+
+    // Construct the final S3 URL
+    const fileUrl = `https://${BUCKET_NAME}.s3.amazonaws.com/${s3Key}`;
+
+    res.json({
+      success: true,
+      uploadUrl,
+      s3Key,
+      fileUrl,
+      message: "Upload URL generated successfully"
+    });
+
+  } catch (error) {
+    console.error("Error generating upload URL:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate upload URL"
+    });
+  }
+};
+
+// Get presigned URL for business logo
+const getBusinessLogoUrl = async (req, res) => {
+  try {
+    const { businessLogoKey } = req.body;
+
+    if (!businessLogoKey) {
+      return res.status(400).json({
+        success: false,
+        message: "Business logo key is required"
+      });
+    }
+
+    // Create presigned URL for accessing the business logo
+    const command = new GetObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: businessLogoKey
+    });
+
+    const presignedUrl = await getSignedUrl(s3, command, {
+      expiresIn: 3600, // 1 hour
+      signableHeaders: new Set(['host'])
+    });
+
+    res.json({
+      success: true,
+      url: presignedUrl,
+      message: "Presigned URL generated successfully",
+      expiresIn: "1 hour"
+    });
+
+  } catch (error) {
+    console.error("Error generating presigned URL:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate presigned URL"
+    });
+  }
+};
+
 module.exports = {
   registerAdmin,
   registerclient,
@@ -275,5 +394,7 @@ module.exports = {
   getClients,
   getClientById,
   deleteclient,
-  getClientToken
+  getClientToken,
+  uploadBusinessLogo,
+  getBusinessLogoUrl
 };

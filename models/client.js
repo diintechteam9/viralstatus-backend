@@ -73,6 +73,13 @@ const clientSchema = new mongoose.Schema({
   websiteUrl: {
     type: String,
   },
+  // Business logo fields
+  businessLogoKey: {
+    type: String,
+  },
+  businessLogoUrl: {
+    type: String,
+  },
   // Profile completion status
   isProfileCompleted: {
     type: Boolean,

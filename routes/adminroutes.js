@@ -6,7 +6,9 @@ const {
   getClientById, 
   registerclient, 
   deleteclient,
-  getClientToken 
+  getClientToken,
+  uploadBusinessLogo,
+  getBusinessLogoUrl
 } = require("../controllers/admincontroller");
 const { authMiddleware } = require("../middleware/authmiddleware");
 const router = express.Router();
@@ -29,5 +31,11 @@ router.delete('/deleteclient/:id', deleteclient);
 
 // Get client token for admin access
 router.get('/get-client-token/:clientId', authMiddleware, getClientToken);
+
+// Upload business logo
+router.post('/upload-business-logo', authMiddleware, uploadBusinessLogo);
+
+// Get presigned URL for business logo
+router.post('/get-business-logo-url', authMiddleware, getBusinessLogoUrl);
 
 module.exports = router;

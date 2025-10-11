@@ -139,7 +139,9 @@ const loginClient = async (req, res) => {
         aadharNo,
         city,
         pincode,
-        websiteUrl
+        websiteUrl,
+        businessLogoKey,
+        businessLogoUrl
       } = req.body;
   
       // Check if client email already exists
@@ -171,6 +173,13 @@ const loginClient = async (req, res) => {
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
   
+      // Use the provided businessLogoUrl or construct from key if needed
+      let finalBusinessLogoUrl = businessLogoUrl;
+      if (businessLogoKey && !businessLogoUrl) {
+        const { BUCKET_NAME } = require("../config/s3");
+        finalBusinessLogoUrl = `https://${BUCKET_NAME}.s3.amazonaws.com/${businessLogoKey}`;
+      }
+
       // Create new client
       const client = await Client.create({
         name,
@@ -182,7 +191,9 @@ const loginClient = async (req, res) => {
         aadharNo,
         city,
         pincode,
-        websiteUrl
+        websiteUrl,
+        businessLogoKey,
+        businessLogoUrl: finalBusinessLogoUrl
       });
   
       // Generate token
