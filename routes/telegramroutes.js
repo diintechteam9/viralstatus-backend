@@ -1,8 +1,62 @@
 const express = require('express');
 const router = express.Router();
 const TelegramServiceController = require('../controllers/telegramcontroller');
+const TelegramSettings = require('../models/Settings');
 
 const telegramService = new TelegramServiceController();
+
+// Settings: get current Telegram alert toggles
+router.get('/settings', async (req, res) => {
+  try {
+    let settings = await TelegramSettings.findOne();
+    if (!settings) {
+      settings = await TelegramSettings.create({});
+    }
+    res.json({
+      success: true,
+      settings: {
+        telegramAlertsEnabledOnRegistration: settings.telegramAlertsEnabledOnRegistration,
+        telegramAlertsEnabledOnProfileCreated: settings.telegramAlertsEnabledOnProfileCreated,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Settings: update Telegram alert toggles
+router.put('/settings', async (req, res) => {
+  try {
+    const {
+      telegramAlertsEnabledOnRegistration,
+      telegramAlertsEnabledOnProfileCreated,
+    } = req.body || {};
+
+    const update = {};
+    if (typeof telegramAlertsEnabledOnRegistration === 'boolean') {
+      update.telegramAlertsEnabledOnRegistration = telegramAlertsEnabledOnRegistration;
+    }
+    if (typeof telegramAlertsEnabledOnProfileCreated === 'boolean') {
+      update.telegramAlertsEnabledOnProfileCreated = telegramAlertsEnabledOnProfileCreated;
+    }
+
+    const settings = await TelegramSettings.findOneAndUpdate(
+      {},
+      Object.keys(update).length ? update : {},
+      { new: true, upsert: true }
+    );
+
+    res.json({
+      success: true,
+      settings: {
+        telegramAlertsEnabledOnRegistration: settings.telegramAlertsEnabledOnRegistration,
+        telegramAlertsEnabledOnProfileCreated: settings.telegramAlertsEnabledOnProfileCreated,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // Test Telegram bot connection
 router.post('/test-connection', async (req, res) => {
@@ -106,5 +160,31 @@ router.post('/send-video', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+
+// Send only text message
+router.post('/send-text', async (req, res) => {
+  try {
+    const { text } = req.body;
+    
+    if (!text) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Text message is required' 
+      });
+    }
+
+    const result = await telegramService.sendTextMessage(text);
+    
+    if (result.success) {
+      res.json({ success: true, message: result.message });
+    } else {
+      res.status(500).json({ success: false, error: result.error });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 
 module.exports = router;

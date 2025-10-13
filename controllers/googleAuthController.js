@@ -7,6 +7,9 @@ const { USER_REFRESH_ACCOUNT_TYPE } = require("google-auth-library/build/src/aut
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // const CreditWallet = require('../models/CreditWallet');
+const TelegramServiceController = require('./telegram/telegrambotalertcontroller');
+const telegramService = new TelegramServiceController();
+const TelegramSettings = require('../models/Settings');
 
 // Generate JWT Token
 const generateToken = (id) => {
@@ -48,6 +51,7 @@ const verifyUserOrClient = async (req, res) => {
 
     // Find or create user/client
     let entity = await Model.findOne({ email });
+    let isNewEntity = false;
     if (!entity) {
       const baseDoc = {
         name: name || email.split("@")[0],
@@ -64,6 +68,7 @@ const verifyUserOrClient = async (req, res) => {
         baseDoc.isClient = false;
       }
       entity = await Model.create(baseDoc);
+      isNewEntity = true;
     } else {
       // Update login metadata
       entity.googlePicture = picture || entity.googlePicture;
@@ -74,6 +79,30 @@ const verifyUserOrClient = async (req, res) => {
 
     const authToken = generateToken(entity._id);
     const MongoId = entity._id;
+
+    // Send Telegram alert for newly created Google user/client if enabled
+    if (isNewEntity) {
+      let allowAlert = true;
+      try {
+        const settings = await TelegramSettings.findOne();
+        if (settings && settings.telegramAlertsEnabledOnRegistration === false) {
+          allowAlert = false;
+        }
+      } catch (_) {}
+      if (allowAlert) {
+      const roleLabel = (Model === Client) ? 'Client' : 'User';
+      const loginTime = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+      const message = `🆕 <b>New ${roleLabel} Registered</b>\n\n` +
+        `🧑‍💼 <b>Name:</b> ${entity.name || '-'}\n` +
+        `✉️ <b>Email:</b> ${entity.email || '-'}\n` +
+        `⏰ <b>Time:</b> ${loginTime}`;
+      try {
+        await telegramService.sendTextMessage(message);
+      } catch (e) {
+        console.error('Failed to send Telegram alert for Google signup:', e && e.message ? e.message : e);
+      }
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -165,6 +194,31 @@ const completeProfile = async (req, res) => {
       },
       { new: true, runValidators: true }
     );
+
+    // Send Telegram alert for completed profile after Google login if enabled
+    try {
+      let allowAlert = true;
+      try {
+        const settings = await TelegramSettings.findOne();
+        if (settings && settings.telegramAlertsEnabledOnProfileCreated === false) {
+          allowAlert = false;
+        }
+      } catch (_) {}
+      if (allowAlert) {
+      const loginTime = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+      const message = `📄 <b>New Profile Created</b>\n\n` +
+        `🧑‍💼 <b>Name:</b> ${updatedClient.name || '-'}\n` +
+        `✉️ <b>Email:</b> ${updatedClient.email || '-'}\n` +
+        `🏢 <b>Business:</b> ${updatedClient.businessName || '-'}\n` +
+        `🌆 <b>City:</b> ${updatedClient.city || '-'}\n` +
+        `📦 <b>Pincode:</b> ${updatedClient.pincode || '-'}\n` +
+        `🔗 <b>Website:</b> ${updatedClient.websiteUrl || '-'}\n` +
+        `⏰ <b>Time:</b> ${loginTime}`;
+      await telegramService.sendTextMessage(message);
+      }
+    } catch (e) {
+      console.error('Failed to send Telegram alert for profile completion:', e && e.message ? e.message : e);
+    }
 
     res.status(200).json({
       success: true,
