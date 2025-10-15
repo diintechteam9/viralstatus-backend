@@ -17,6 +17,7 @@ router.get('/settings', async (req, res) => {
       settings: {
         telegramAlertsEnabledOnRegistration: settings.telegramAlertsEnabledOnRegistration,
         telegramAlertsEnabledOnProfileCreated: settings.telegramAlertsEnabledOnProfileCreated,
+        telegramAlertsEnabledOnCampaignStart: settings.telegramAlertsEnabledOnCampaignStart,
       },
     });
   } catch (error) {
@@ -30,6 +31,7 @@ router.put('/settings', async (req, res) => {
     const {
       telegramAlertsEnabledOnRegistration,
       telegramAlertsEnabledOnProfileCreated,
+      telegramAlertsEnabledOnCampaignStart,
     } = req.body || {};
 
     const update = {};
@@ -38,6 +40,9 @@ router.put('/settings', async (req, res) => {
     }
     if (typeof telegramAlertsEnabledOnProfileCreated === 'boolean') {
       update.telegramAlertsEnabledOnProfileCreated = telegramAlertsEnabledOnProfileCreated;
+    }
+    if (typeof telegramAlertsEnabledOnCampaignStart === 'boolean') {
+      update.telegramAlertsEnabledOnCampaignStart = telegramAlertsEnabledOnCampaignStart;
     }
 
     const settings = await TelegramSettings.findOneAndUpdate(
@@ -51,6 +56,7 @@ router.put('/settings', async (req, res) => {
       settings: {
         telegramAlertsEnabledOnRegistration: settings.telegramAlertsEnabledOnRegistration,
         telegramAlertsEnabledOnProfileCreated: settings.telegramAlertsEnabledOnProfileCreated,
+        telegramAlertsEnabledOnCampaignStart: settings.telegramAlertsEnabledOnCampaignStart,
       },
     });
   } catch (error) {

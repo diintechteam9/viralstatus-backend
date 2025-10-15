@@ -455,7 +455,7 @@ async function generateSentenceSrt(req, res) {
       return res.status(500).json({ error: "Deepgram API key not configured" });
     }
 
-    const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+  const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
 
     // Strip data URL prefix if present
     const base64Data = String(audioBase64).replace(/^data:audio\/[^;]+;base64,/, "");
@@ -520,19 +520,30 @@ function convertToSRT(result) {
     }
     if (allWords.length === 0) return "";
 
-    const sentences = groupWordsIntoSentences(allWords);
+    // Build captions of 10-15 words per block for readability
+    const minWords = 10;
+    const maxWords = 15;
     let srt = "";
     let idx = 1;
-    for (const sentence of sentences) {
-      if (sentence.words.length === 0) continue;
-      const start = sentence.words[0].start;
-      const end = sentence.words[sentence.words.length - 1].end;
-      const text = sentence.text.trim();
-      if (!text) continue;
-      srt += `${idx}\n`;
-      srt += `${formatTime(start)} --> ${formatTime(end)}\n`;
-      srt += `${text}\n\n`;
-      idx++;
+    for (let i = 0; i < allWords.length; ) {
+      // Ensure at least minWords, up to maxWords or until a natural sentence end
+      let endIdx = Math.min(allWords.length, i + minWords);
+      // Try to extend up to maxWords while staying within limit
+      while (endIdx < Math.min(allWords.length, i + maxWords)) {
+        endIdx++;
+      }
+      const chunk = allWords.slice(i, endIdx);
+      if (chunk.length === 0) break;
+      const startTime = chunk[0].start;
+      const endTime = chunk[chunk.length - 1].end;
+      const captionText = chunk.map(w => w.punctuated_word || w.word).join(' ');
+      if (String(captionText).trim()) {
+        srt += `${idx}\n`;
+        srt += `${formatTime(startTime)} --> ${formatTime(endTime)}\n`;
+        srt += `${captionText.trim()}\n\n`;
+        idx++;
+      }
+      i = endIdx;
     }
     return srt;
   } catch (_) {
@@ -676,7 +687,7 @@ function convertToWordSRT(result) {
 
     let srtContent = "";
     let captionIndex = 1;
-    const wordsPerCaption = 3; // chunk size
+    const wordsPerCaption = 4; // chunk size adjusted to 4
 
     for (let i = 0; i < allWords.length; i += wordsPerCaption) {
       const wordGroup = allWords.slice(i, i + wordsPerCaption);

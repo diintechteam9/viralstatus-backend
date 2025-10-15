@@ -1,5 +1,5 @@
 const AudioExtractionJob = require('../models/AudioExtractionJob');
-const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { PutObjectCommand, GetObjectCommand, ListObjectsV2Command, HeadObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { s3, BUCKET_NAME } = require('../config/s3');
 const fs = require('fs');
@@ -49,6 +49,11 @@ class AudioExtractionJobService {
             try {
                 const job = await AudioExtractionJob.getJobById(jobId);
                 if (job) {
+                    // Do not allow regressions once job is terminal
+                    if (job.status === 'completed' || job.status === 'failed') {
+                        return;
+                    }
+                    // Only update progress; keep status as processing
                     await job.updateProgress(progress, status);
                 }
             } catch (error) {
@@ -134,6 +139,14 @@ class AudioExtractionJobService {
 
             // Save to S3
             const uploaded = await this.saveAudioToS3(audioBuffer, job.jobId);
+
+            // Clear any pending progress timer before completing to avoid race downgrades
+            try {
+                if (this.progressUpdateTimers.has(jobId)) {
+                    clearTimeout(this.progressUpdateTimers.get(jobId));
+                    this.progressUpdateTimers.delete(jobId);
+                }
+            } catch (_) {}
 
             // Complete the job
             await job.complete({
@@ -315,6 +328,59 @@ class AudioExtractionJobService {
         } catch (error) {
             console.error(`Error getting job status for ${jobId}:`, error);
             throw error;
+        }
+    }
+
+    /**
+     * Reconcile job state by checking S3. If audio exists but job not marked completed,
+     * promote it to completed and ensure a fresh presigned URL is set.
+     */
+    async reconcileIfCompleted(jobId) {
+        try {
+            const job = await AudioExtractionJob.getJobById(jobId);
+            if (!job) return null;
+
+            if (job.status === 'completed') return job;
+
+            // If we already have an S3 key, verify it exists; else try to find by prefix
+            let s3Key = job.audioS3Key;
+            if (!s3Key) {
+                const prefix = `audio-extraction/${jobId}/`;
+                const listCmd = new ListObjectsV2Command({ Bucket: BUCKET_NAME, Prefix: prefix });
+                const listed = await s3.send(listCmd);
+                const candidates = (listed.Contents || []).sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified));
+                const latest = candidates.find(obj => obj.Key && obj.Key.endsWith('/audio.mp3')) || candidates[0];
+                if (latest && latest.Key) s3Key = latest.Key;
+            }
+
+            if (!s3Key) return job; // Nothing to reconcile
+
+            // Verify object exists
+            try {
+                await s3.send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: s3Key }));
+            } catch (e) {
+                // Object not found, nothing to do
+                return job;
+            }
+
+            // Generate presigned URL
+            const getCmd = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: s3Key });
+            const presignedUrl = await getSignedUrl(s3, getCmd, { expiresIn: 604800 });
+
+            // Promote to completed (idempotent)
+            await job.complete({
+                s3Key,
+                s3Url: presignedUrl,
+                fileName: path.basename(s3Key) || 'audio.mp3',
+                fileSize: job.audioFileSize || 0,
+                duration: job.audioDuration || 0,
+                contentType: 'audio/mpeg'
+            });
+
+            return await AudioExtractionJob.getJobById(jobId);
+        } catch (error) {
+            console.warn(`[Audio][Job] ${jobId} reconciliation failed:`, error?.message || error);
+            return await AudioExtractionJob.getJobById(jobId);
         }
     }
 

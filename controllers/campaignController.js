@@ -7,6 +7,31 @@ const RegisteredCampaign = require('../models/RegisteredCampaign');
 const userResponse = require('../models/userResponse');
 const sharp = require('sharp');
 const campaign = require('../models/campaign');
+const TelegramServiceController = require('./telegram/telegrambotalertcontroller');
+const telegramService = new TelegramServiceController();
+const TelegramSettings = require('../models/Settings');
+
+function formatCampaignStartMessage(c) {
+  const start = c.startDate ? new Date(c.startDate).toLocaleString('en-US') : '-';
+  const end = c.endDate ? new Date(c.endDate).toLocaleString('en-US') : '-';
+  const lines = [
+    `🚀 <b>Campaign Started</b>`,
+    `\n<b>Name:</b> ${c.campaignName}`,
+    `<b>Brand:</b> ${c.brandName}`,
+    `<b>Goal:</b> ${c.goal}`,
+    `<b>Client:</b> ${c.clientId}`,
+    `<b>Credits:</b> ${c.credits}`,
+    `<b>Target Channels:</b> ${c.limit}`,
+    `<b>Target Views:</b> ${c.views}`,
+    `<b>Location:</b> ${c.location}`,
+    `<b>Start:</b> ${start}`,
+    `<b>End:</b> ${end}`,
+  ];
+  if (Array.isArray(c.tags) && c.tags.length) {
+    lines.push(`<b>Tags:</b> ${c.tags.join(', ')}`);
+  }
+  return lines.join('\n');
+}
 
 // Helper to extract group index from groupId (e.g., travel-&-tourism-2 => 2)
 // function getGroupIndex(groupId) {
@@ -89,6 +114,18 @@ exports.createCampaign = [
       const imageUrl = await getobject(s3Key);
       // Compose image object for DB
       const image = { key: s3Key, url: imageUrl };
+      // Determine isActive at creation based on dates and status
+      const now = new Date();
+      const startAt = new Date(startDate);
+      const endAt = new Date(endDate);
+      const statusValue = status || "Active";
+      const computedIsActive = (
+        statusValue !== 'Inactive' &&
+        startAt instanceof Date && !isNaN(startAt) &&
+        endAt instanceof Date && !isNaN(endAt) &&
+        startAt <= now && now <= endAt
+      );
+
       const campaign = new Campaign({
         campaignName,
         brandName,
@@ -105,13 +142,24 @@ exports.createCampaign = [
         endDate,
         limit,
         views,
-        status: status || "Active",
-        isActive: true,
+        status: statusValue,
+        isActive: computedIsActive,
         cutoff: cutoff !== undefined ? Number(cutoff) : undefined,
         // members should be an array of googleId strings
         userIds: members ? (Array.isArray(members) ? members : members.split(',')) : [],
       });
       await campaign.save();
+      // Send Telegram alert if campaign is active immediately and settings allow
+      try {
+        const settings = await TelegramSettings.findOne();
+        const allow = !settings || settings.telegramAlertsEnabledOnCampaignStart !== false;
+        if (allow && campaign.isActive) {
+          const text = formatCampaignStartMessage(campaign);
+          await telegramService.sendTextMessage(text);
+        }
+      } catch (alertErr) {
+        console.error('Failed to send Telegram start alert on create:', alertErr);
+      }
       res.json({ success: true, campaign });
     } catch (err) {
       console.error('Campaign creation error:', err);
@@ -254,6 +302,21 @@ exports.updateCampaign = async (req, res) => {
     );
 
     updateData.isActive = computedIsActive;
+
+    // If it transitions to active, send alert based on settings
+    if (computedIsActive && existing.isActive !== true) {
+      try {
+        const settings = await TelegramSettings.findOne();
+        const allow = !settings || settings.telegramAlertsEnabledOnCampaignStart !== false;
+        if (allow) {
+          const toSend = { ...existing.toObject(), ...updateData };
+          const text = formatCampaignStartMessage(toSend);
+          await telegramService.sendTextMessage(text);
+        }
+      } catch (alertErr) {
+        console.error('Failed to send Telegram start alert on update:', alertErr);
+      }
+    }
 
     const updatedCampaign = await Campaign.findOneAndUpdate(
       { _id: campaignId },

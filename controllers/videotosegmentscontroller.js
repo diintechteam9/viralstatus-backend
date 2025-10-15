@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const ffmpegPath = require('ffmpeg-static');
 const ffprobePath = require('ffprobe-static').path;
 const ffmpeg = require('fluent-ffmpeg');
+const { createClient } = require('@deepgram/sdk');
 
 // Configure ffmpeg binaries
 if (ffmpegPath) {
@@ -47,6 +48,68 @@ function srtTimestampToMs(ts) {
     parseInt(ss, 10) * 1000 +
     parseInt(ms.padEnd(3, '0'), 10)
   );
+}
+
+function formatTime(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  const milliseconds = Math.floor((seconds % 1) * 1000);
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs
+    .toString()
+    .padStart(2, '0')},${milliseconds.toString().padStart(3, '0')}`;
+}
+
+function groupWordsIntoSentences(words) {
+  const sentences = [];
+  let current = { words: [], text: '' };
+  const sentenceEnders = /[.!?]/;
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const punctuated = word.punctuated_word || word.word;
+    current.words.push(word);
+    current.text += (current.text ? ' ' : '') + punctuated;
+    if (sentenceEnders.test(punctuated)) {
+      const isAbbrev = /\b[A-Z][a-z]?\.$/.test(punctuated) && i < words.length - 1 && !/^[A-Z]/.test((words[i + 1].punctuated_word || words[i + 1].word));
+      if (!isAbbrev) {
+        sentences.push({ ...current });
+        current = { words: [], text: '' };
+        continue;
+      }
+    }
+    if (i < words.length - 1) {
+      const gap = words[i + 1].start - word.end;
+      if (gap > 2.0 && current.words.length > 0) {
+        sentences.push({ ...current });
+        current = { words: [], text: '' };
+      }
+    }
+  }
+  if (current.words.length > 0) sentences.push(current);
+  return sentences;
+}
+
+function buildSentenceSrtFromDeepgramWords(allWords) {
+  const sentences = groupWordsIntoSentences(allWords);
+  // Group captions into blocks of up to 2 consecutive sentences
+  let srt = '';
+  let idx = 1;
+  for (let i = 0; i < sentences.length; ) {
+    const first = sentences[i];
+    if (!first || first.words.length === 0) { i++; continue; }
+    const second = (i + 1 < sentences.length) ? sentences[i + 1] : null;
+    const start = first.words[0].start;
+    const end = second && second.words.length > 0 ? second.words[second.words.length - 1].end : first.words[first.words.length - 1].end;
+    const text = [first.text, second ? second.text : null].filter(Boolean).join(' ');
+    if (String(text).trim()) {
+      srt += `${idx}\n`;
+      srt += `${formatTime(start)} --> ${formatTime(end)}\n`;
+      srt += `${text.trim()}\n\n`;
+      idx++;
+    }
+    i += 2; // advance by max 2 sentences per block
+  }
+  return srt;
 }
 
 function parseSrt(srtText) {
@@ -482,6 +545,118 @@ exports.generateImportantParagraphs = async (req, res) => {
     return res.json({ paragraphs: fallback });
   } catch (err) {
     return res.status(500).json({ error: err.message || 'Failed to generate paragraphs' });
+  }
+};
+
+// ================= Deepgram-based SRT generation for VTS =================
+exports.generateSentenceSrt = async (req, res) => {
+  try {
+    const audioBase64 = req.body && req.body.audio;
+    if (!audioBase64) {
+      return res.status(400).json({ error: 'Audio (base64) is required' });
+    }
+    if (!process.env.DEEPGRAM_API_KEY) {
+      return res.status(500).json({ error: 'Deepgram API key not configured' });
+    }
+    const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+    const base64Data = String(audioBase64).replace(/^data:audio\/[^;]+;base64,/, '');
+    const audioBuffer = Buffer.from(base64Data, 'base64');
+    const transcriptionOptions = {
+      model: 'nova-2',
+      smart_format: true,
+      utterances: true,
+      punctuate: true,
+      diarize: false,
+      timestamps: true,
+      paragraphs: true,
+      language: 'hi',
+      detect_language: false,
+    };
+    const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
+      audioBuffer,
+      { mimetype: 'audio/mp3', ...transcriptionOptions }
+    );
+    if (error) {
+      return res.status(500).json({ error: 'Transcription failed', details: error.message || error });
+    }
+    if (!result) {
+      return res.status(500).json({ error: 'No transcription result received' });
+    }
+    let allWords = [];
+    if (result?.results?.channels?.[0]?.alternatives?.[0]?.words && result.results.channels[0].alternatives[0].words.length > 0) {
+      allWords = result.results.channels[0].alternatives[0].words;
+    } else if (result?.results?.alternatives?.[0]?.words && result.results.alternatives[0].words.length > 0) {
+      allWords = result.results.alternatives[0].words;
+    }
+    const srtContent = buildSentenceSrtFromDeepgramWords(allWords);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'inline; filename="captions.srt"');
+    return res.send(srtContent);
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+};
+
+exports.generateWordSrt = async (req, res) => {
+  try {
+    const audioBase64 = req.body && req.body.audio;
+    if (!audioBase64) {
+      return res.status(400).json({ error: 'Audio (base64) is required' });
+    }
+    if (!process.env.DEEPGRAM_API_KEY) {
+      return res.status(500).json({ error: 'Deepgram API key not configured' });
+    }
+    const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+    const base64Data = String(audioBase64).replace(/^data:audio\/[^;]+;base64,/, '');
+    const audioBuffer = Buffer.from(base64Data, 'base64');
+    const transcriptionOptions = {
+      model: 'nova-2',
+      language: 'hi',
+      detect_language: false,
+      smart_format: true,
+      utterances: true,
+      punctuate: true,
+      diarize: false,
+      timestamps: true,
+    };
+    const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
+      audioBuffer,
+      { mimetype: 'audio/mp3', ...transcriptionOptions }
+    );
+    if (error) {
+      return res.status(500).json({ error: 'Transcription failed', details: error.message || error });
+    }
+    if (!result) {
+      return res.status(500).json({ error: 'No transcription result received' });
+    }
+    let allWords = [];
+    if (result?.results?.channels?.[0]?.alternatives?.[0]?.words && result.results.channels[0].alternatives[0].words.length > 0) {
+      allWords = result.results.channels[0].alternatives[0].words;
+    } else if (result?.results?.alternatives?.[0]?.words && result.results.alternatives[0].words.length > 0) {
+      allWords = result.results.alternatives[0].words;
+    }
+    // Chunk words into small groups for readable word-level SRT
+    let srtContent = '';
+    let captionIndex = 1;
+    const wordsPerCaption = 3;
+    for (let i = 0; i < allWords.length; i += wordsPerCaption) {
+      const wordGroup = allWords.slice(i, i + wordsPerCaption);
+      if (wordGroup.length === 0) continue;
+      const startTime = wordGroup[0].start;
+      const endTime = wordGroup[wordGroup.length - 1].end;
+      const captionText = wordGroup.map(w => w.punctuated_word || w.word).join(' ');
+      if (String(captionText).trim()) {
+        srtContent += `${captionIndex}\n`;
+        srtContent += `${formatTime(startTime)} --> ${formatTime(endTime)}\n`;
+        srtContent += `${captionText.trim()}\n\n`;
+        captionIndex++;
+      }
+    }
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'inline; filename="captions_words.srt"');
+    return res.send(srtContent);
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal server error', details: err.message });
   }
 };
 

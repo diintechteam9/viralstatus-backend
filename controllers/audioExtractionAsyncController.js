@@ -120,13 +120,18 @@ const getJobStatus = async (req, res) => {
   try {
     const { jobId } = req.params;
     
-    const job = await audioExtractionJobService.getJobStatus(jobId);
+    let job = await audioExtractionJobService.getJobStatus(jobId);
     
     if (!job) {
       return res.status(404).json({
         success: false,
         error: 'Job not found'
       });
+    }
+
+    // If job appears stuck in processing but audio may exist on S3, reconcile
+    if (job.status === 'processing') {
+      job = await audioExtractionJobService.reconcileIfCompleted(jobId) || job;
     }
 
     // Debug logging

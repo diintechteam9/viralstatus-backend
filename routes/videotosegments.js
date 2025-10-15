@@ -2,7 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-const { generateImportantParagraphs, trimByParagraphs, streamSegment, cleanupJob } = require("../controllers/videotosegmentscontroller");
+const { generateImportantParagraphs, trimByParagraphs, streamSegment, cleanupJob, generateSentenceSrt, generateWordSrt } = require("../controllers/videotosegmentscontroller");
 const { createAsyncSegmentsJob, getJobStatus: getAsyncJobStatus, cleanupJob: cleanupAsyncJob } = require("../controllers/videoToSegmentsAsyncController");
 
 const router = express.Router();
@@ -64,6 +64,10 @@ const upload = multer({
 
 // JSON body for important paragraphs
 router.post('/important-paragraphs', express.json({ limit: '10mb' }), generateImportantParagraphs);
+
+// SRT generation endpoints (Deepgram-backed)
+router.post('/generate-srt', express.json({ limit: '20mb' }), generateSentenceSrt);
+router.post('/generate-srt-words', express.json({ limit: '20mb' }), generateWordSrt);
 
 // Multipart for trim by paragraphs (supports optional outro video and logo image)
 router.post('/trim', upload.fields([
