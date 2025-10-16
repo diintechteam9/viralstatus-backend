@@ -12,6 +12,11 @@ const reelSchema = mongoose.Schema({
     s3Url:{
         type:String
     },
+    source: {
+        type: String,
+        enum: ['auto', 'manual'],
+        default: 'manual'
+    },
     title: {
         type: String,
         default: ''

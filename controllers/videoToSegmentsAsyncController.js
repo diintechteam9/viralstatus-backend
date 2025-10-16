@@ -17,7 +17,7 @@ async function createAsyncSegmentsJob(req, res) {
     const uploadedFile = req.file || (req.files && Array.isArray(req.files.video) && req.files.video[0]) || null;
     const outroFile = req.files && Array.isArray(req.files.outro) ? req.files.outro[0] : null;
     const logoFile = req.files && Array.isArray(req.files.logo) ? req.files.logo[0] : null;
-    const { srt, wordSrt, paragraphs, fontKey, textColor, logoPosition, cropPosition } = req.body || {};
+    const { srt, wordSrt, paragraphs, fontKey, textColor, logoPosition, cropPosition, poolId } = req.body || {};
     const userId = req.user?.id || req.user?._id || null;
     
     console.log(`[VTS-ASYNC] Received crop position: ${cropPosition}`);
@@ -58,7 +58,8 @@ async function createAsyncSegmentsJob(req, res) {
       textColor: (textColor || 'white'),
       logoPosition: (logoPosition || 'top-right'),
       cropPosition: (cropPosition || 'middle'),
-      userId
+      userId,
+      poolId: poolId || null
     };
 
     const job = await videoToSegmentsJobService.createJob(jobData);

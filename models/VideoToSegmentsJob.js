@@ -5,6 +5,7 @@ const videoToSegmentsJobSchema = new mongoose.Schema({
     status: { type: String, enum: ['pending', 'processing', 'completed', 'failed'], default: 'pending' },
     progress: { type: Number, default: 0, min: 0, max: 100 },
     userId: { type: String, default: null },
+    poolId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pool', default: null },
 
     originalVideoFile: {
         path: String,
@@ -67,6 +68,7 @@ videoToSegmentsJobSchema.statics.createJob = async function(jobData) {
     const job = new this({
         jobId,
         userId: jobData.userId,
+        poolId: jobData.poolId || null,
         originalVideoFile: {
             path: jobData.videoFile.path,
             originalName: jobData.videoFile.originalname,

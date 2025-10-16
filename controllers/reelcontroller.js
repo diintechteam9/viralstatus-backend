@@ -72,6 +72,7 @@ exports.uploadReels = async (req, res) => {
             poolId,
             s3Key,
             s3Url,
+            source: 'manual',
             title: `${campaignName} Reel ${currentReelNumber}`
           });
           reels.push(reelDoc);
@@ -102,11 +103,16 @@ exports.uploadReels = async (req, res) => {
 
 exports.getReelsByPoolId = async (req, res) => {
   const { poolId } = req.params;
+  const { source } = req.query; // optional: 'auto' | 'manual'
   if (!poolId) {
     return res.status(400).json({ success: false, error: "poolId is required" });
   }
   try {
-    const reels = await Reel.find({ poolId });
+    const match = { poolId };
+    if (source === 'auto' || source === 'manual') {
+      match.source = source;
+    }
+    const reels = await Reel.find(match);
     
     // Generate fresh S3 URLs for each reel to prevent expiration
     const reelsWithFreshUrls = await Promise.all(
