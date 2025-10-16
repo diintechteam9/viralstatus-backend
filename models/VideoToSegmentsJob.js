@@ -5,7 +5,7 @@ const videoToSegmentsJobSchema = new mongoose.Schema({
     status: { type: String, enum: ['pending', 'processing', 'completed', 'failed'], default: 'pending' },
     progress: { type: Number, default: 0, min: 0, max: 100 },
     userId: { type: String, default: null },
-    poolId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pool', default: null },
+    poolId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pool', default: null, index: true },
 
     originalVideoFile: {
         path: String,
@@ -56,6 +56,7 @@ const videoToSegmentsJobSchema = new mongoose.Schema({
 });
 
 videoToSegmentsJobSchema.index({ userId: 1, createdAt: -1 });
+videoToSegmentsJobSchema.index({ poolId: 1, createdAt: -1 });
 videoToSegmentsJobSchema.index({ status: 1, createdAt: -1 });
 
 videoToSegmentsJobSchema.pre('save', function(next) {

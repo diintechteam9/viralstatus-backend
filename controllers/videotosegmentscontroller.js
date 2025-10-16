@@ -958,7 +958,7 @@ exports.cleanupJob = async (req, res) => {
   }
 };
 // Internal helper used by async job service to generate segment files and return their paths
-// params: { jobId, inputPath, srt, wordSrt, paragraphs, fontKey, textColor, logoFilePath, logoPosition, outroFilePath }
+// params: { jobId, inputPath, srt, wordSrt, paragraphs, fontKey, textColor, logoFilePath, logoPosition, outroFilePath, poolId }
 // onProgress: optional callback(number)
 exports.trimByParagraphsInternal = async (params, onProgress) => {
   const {
@@ -972,7 +972,8 @@ exports.trimByParagraphsInternal = async (params, onProgress) => {
     logoFilePath = null,
     logoPosition = 'top-right',
     outroFilePath = null,
-    cropPosition = 'middle'
+    cropPosition = 'middle',
+    poolId = null
   } = params || {};
   console.log(`[VTS-INT] Received crop position in internal: ${String(cropPosition)}`);
   if (!jobId) throw new Error('jobId required');

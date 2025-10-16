@@ -66,6 +66,7 @@ class VideoToSegmentsJobService {
         logoPosition: job.logoPosition,
         outroFilePath: job.outroFile?.path,
         cropPosition: cropPos,
+        poolId: job.poolId || null,
         onSegment: async (index, pathToSegment) => {
           try {
             // Upload immediately when a segment is ready
@@ -97,32 +98,6 @@ class VideoToSegmentsJobService {
       const finalList = partialUploaded.concat(uploaded);
 
       await job.complete(finalList);
-
-      // If a poolId is attached, also persist reels for this pool immediately
-      try {
-        if (job.poolId && Array.isArray(finalList) && finalList.length) {
-          const Reel = require('../models/Reel');
-          const Pool = require('../models/pool');
-          const created = await Promise.all(finalList.map(async (v, idx) => {
-            try {
-              const doc = await Reel.create({
-                poolId: job.poolId,
-                s3Key: v.key || '',
-                s3Url: v.url || '',
-                source: 'auto',
-                title: `Auto Reel ${idx + 1}`
-              });
-              return doc;
-            } catch (_) { return null; }
-          }));
-          const count = created.filter(Boolean).length;
-          if (count > 0) {
-            try { await Pool.findByIdAndUpdate(job.poolId, { $inc: { reelCount: count } }); } catch (_) {}
-          }
-        }
-      } catch (persistErr) {
-        console.warn('[VTS-JOB] Failed to persist reels from job completion:', persistErr?.message);
-      }
 
       // Cleanup local temp dir
       try { this.cleanupJobDirectory(job); } catch (_) {}
