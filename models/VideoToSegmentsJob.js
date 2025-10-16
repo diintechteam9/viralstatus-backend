@@ -97,48 +97,47 @@ videoToSegmentsJobSchema.statics.getJobById = async function(jobId) {
 };
 
 videoToSegmentsJobSchema.methods.updateProgress = async function(progress, status) {
-    this.progress = progress;
-    if (status) this.status = status;
-    this.updatedAt = new Date();
-    await this.save();
-    return this;
+    const update = { updatedAt: new Date() };
+    if (typeof progress === 'number') update.progress = progress;
+    if (status) update.status = status;
+    await this.constructor.updateOne({ _id: this._id }, { $set: update }).exec();
+    return this.constructor.findById(this._id);
 };
 
 videoToSegmentsJobSchema.methods.complete = async function(videos) {
-    this.status = 'completed';
-    this.progress = 100;
-    this.completedAt = new Date();
-    this.updatedAt = new Date();
-    this.videos = Array.isArray(videos) ? videos : [];
-    await this.save();
-    return this;
+    const now = new Date();
+    const update = {
+        status: 'completed',
+        progress: 100,
+        completedAt: now,
+        updatedAt: now,
+        videos: Array.isArray(videos) ? videos : []
+    };
+    await this.constructor.updateOne({ _id: this._id }, { $set: update }).exec();
+    return this.constructor.findById(this._id);
 };
 
 videoToSegmentsJobSchema.methods.setError = async function(error) {
-    this.status = 'failed';
-    this.error = {
-        message: error.message,
-        details: error.details || null,
-        stack: error.stack || null
+    const update = {
+        status: 'failed',
+        error: {
+            message: error.message,
+            details: error.details || null,
+            stack: error.stack || null
+        },
+        updatedAt: new Date()
     };
-    this.updatedAt = new Date();
-    await this.save();
-    return this;
+    await this.constructor.updateOne({ _id: this._id }, { $set: update }).exec();
+    return this.constructor.findById(this._id);
 };
 
 videoToSegmentsJobSchema.methods.setPartialVideos = async function(videos, progress) {
-    if (Array.isArray(videos)) {
-        this.videos = videos;
-    }
-    if (typeof progress === 'number') {
-        this.progress = Math.max(0, Math.min(99, progress));
-    }
-    if (this.status !== 'completed' && this.status !== 'failed') {
-        this.status = 'processing';
-    }
-    this.updatedAt = new Date();
-    await this.save();
-    return this;
+    const update = { updatedAt: new Date() };
+    if (Array.isArray(videos)) update.videos = videos;
+    if (typeof progress === 'number') update.progress = Math.max(0, Math.min(99, progress));
+    if (this.status !== 'completed' && this.status !== 'failed') update.status = 'processing';
+    await this.constructor.updateOne({ _id: this._id }, { $set: update }).exec();
+    return this.constructor.findById(this._id);
 };
 
 module.exports = mongoose.model('VideoToSegmentsJob', videoToSegmentsJobSchema);

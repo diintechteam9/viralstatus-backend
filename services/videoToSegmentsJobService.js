@@ -102,8 +102,10 @@ class VideoToSegmentsJobService {
       // Cleanup local temp dir
       try { this.cleanupJobDirectory(job); } catch (_) {}
     } catch (error) {
-      const job = await VideoToSegmentsJob.getJobById(jobId);
-      if (job) await job.setError(error);
+      try {
+        const job = await VideoToSegmentsJob.getJobById(jobId);
+        if (job) await job.setError(error);
+      } catch (_) {}
     } finally {
       this.activeJobs.delete(jobId);
       if (this.progressUpdateTimers.has(jobId)) {

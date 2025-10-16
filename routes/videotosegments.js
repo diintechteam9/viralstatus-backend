@@ -3,7 +3,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const { generateImportantParagraphs, trimByParagraphs, streamSegment, cleanupJob, generateSentenceSrt, generateWordSrt } = require("../controllers/videotosegmentscontroller");
-const { createAsyncSegmentsJob, getJobStatus: getAsyncJobStatus, cleanupJob: cleanupAsyncJob } = require("../controllers/videoToSegmentsAsyncController");
+const { createAsyncSegmentsJob, getJobStatus: getAsyncJobStatus, cleanupJob: cleanupAsyncJob, getPoolVideos } = require("../controllers/videoToSegmentsAsyncController");
 
 const router = express.Router();
 
@@ -84,6 +84,9 @@ router.post('/generate-segments-async', upload.fields([
 ]), createAsyncSegmentsJob);
 router.get('/job-status/:jobId', getAsyncJobStatus);
 router.post('/cleanup-job/:jobId', cleanupAsyncJob);
+
+// Fetch completed videos by poolId
+router.get('/pool/:poolId/videos', getPoolVideos);
 
 // Stream individual segment
 router.get('/segment/:jobId/:index', streamSegment);

@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const videoToSegmentsJobService = require('../services/videoToSegmentsJobService');
+const VideoToSegmentsJob = require('../models/VideoToSegmentsJob');
 
 function sanitizeFilename(filename, maxLength = 50) {
   if (!filename || typeof filename !== 'string') return `video_${Date.now()}`;
@@ -167,5 +168,29 @@ async function cleanupJob(req, res) {
 }
 
 module.exports = { createAsyncSegmentsJob, getJobStatus, cleanupJob };
+
+// Additional helper to fetch completed videos by poolId
+async function getPoolVideos(req, res) {
+  try {
+    const { poolId } = req.params;
+    if (!poolId) return res.status(400).json({ success: false, error: 'poolId is required' });
+    const jobs = await VideoToSegmentsJob.find({ poolId, status: 'completed' }).sort({ createdAt: -1 }).lean();
+    const videos = [];
+    for (const job of jobs) {
+      if (Array.isArray(job.videos)) {
+        for (const v of job.videos) {
+          if (v && v.url) {
+            videos.push({ url: v.url, jobId: job.jobId, createdAt: job.completedAt || job.updatedAt || job.createdAt });
+          }
+        }
+      }
+    }
+    return res.json({ success: true, videos });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || 'Failed to fetch pool videos' });
+  }
+}
+
+module.exports.getPoolVideos = getPoolVideos;
 
 
