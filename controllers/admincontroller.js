@@ -145,12 +145,39 @@ const getClients = async (req, res) => {
         businessLogoUrl
       } = req.body;
   
-      // Check if client already exists
+      // Check if client already exists with email
       const existingClient = await Client.findOne({ email });
       if (existingClient) {
         return res.status(400).json({
           success: false,
           message: "Client with this email already exists"
+        });
+      }
+
+      // Check for duplicate GST, PAN, and Aadhar numbers
+      const duplicateFields = [];
+      const existingBusinessClient = await Client.findOne({
+        $or: [
+          { gstNo: gstNo },
+          { panNo: panNo },
+          { aadharNo: aadharNo }
+        ]
+      });
+
+      if (existingBusinessClient) {
+        if (existingBusinessClient.gstNo === gstNo) {
+          duplicateFields.push("GST Number");
+        }
+        if (existingBusinessClient.panNo === panNo) {
+          duplicateFields.push("PAN Number");
+        }
+        if (existingBusinessClient.aadharNo === aadharNo) {
+          duplicateFields.push("Aadhar Number");
+        }
+        
+        return res.status(400).json({
+          success: false,
+          message: `Client already exists with the same ${duplicateFields.join(", ")}`
         });
       }
   
@@ -190,6 +217,20 @@ const getClients = async (req, res) => {
       });
     } catch (error) {
       console.error('Error creating client:', error);
+      
+      // Handle MongoDB duplicate key errors
+      if (error.code === 11000) {
+        const field = Object.keys(error.keyPattern)[0];
+        const fieldName = field === 'gstNo' ? 'GST Number' : 
+                         field === 'panNo' ? 'PAN Number' : 
+                         field === 'aadharNo' ? 'Aadhar Number' : field;
+        
+        return res.status(400).json({
+          success: false,
+          message: `Client already exists with the same ${fieldName}`
+        });
+      }
+      
       res.status(500).json({
         success: false,
         message: "Failed to create client"
