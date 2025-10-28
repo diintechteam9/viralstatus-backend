@@ -133,7 +133,6 @@ const completeProfile = async (req, res) => {
       businessName,
       gstNo,
       panNo,
-      aadharNo,
       city,
       pincode,
       websiteUrl
@@ -155,7 +154,7 @@ const completeProfile = async (req, res) => {
     }
 
     // Validate required fields
-    if (!businessName || !gstNo || !panNo || !aadharNo || !city || !pincode) {
+    if (!businessName || !gstNo || !panNo || !city || !pincode) {
       return res.status(400).json({
         success: false,
         message: 'All business fields are required'
@@ -167,15 +166,14 @@ const completeProfile = async (req, res) => {
       _id: { $ne: user._id },
       $or: [
         { gstNo },
-        { panNo },
-        { aadharNo }
+        { panNo }
       ]
     });
 
     if (existingClient) {
       return res.status(400).json({
         success: false,
-        message: 'Business details already exist with the same GST, PAN, or Aadhar number'
+        message: 'Business details already exist with the same GST or PAN number'
       });
     }
 
@@ -186,7 +184,6 @@ const completeProfile = async (req, res) => {
         businessName,
         gstNo,
         panNo,
-        aadharNo,
         city,
         pincode,
         websiteUrl,
@@ -234,7 +231,6 @@ const completeProfile = async (req, res) => {
         businessName: updatedClient.businessName,
         gstNo: updatedClient.gstNo,
         panNo: updatedClient.panNo,
-        aadharNo: updatedClient.aadharNo,
         city: updatedClient.city,
         pincode: updatedClient.pincode,
         websiteUrl: updatedClient.websiteUrl,
@@ -279,7 +275,6 @@ const getProfile = async (req, res) => {
         businessName: user.businessName,
         gstNo: user.gstNo,
         panNo: user.panNo,
-        aadharNo: user.aadharNo,
         city: user.city,
         pincode: user.pincode,
         websiteUrl: user.websiteUrl,
@@ -339,7 +334,6 @@ const updateProfile = async (req, res) => {
         businessName: updatedClient.businessName,
         gstNo: updatedClient.gstNo,
         panNo: updatedClient.panNo,
-        aadharNo: updatedClient.aadharNo,
         city: updatedClient.city,
         pincode: updatedClient.pincode,
         websiteUrl: updatedClient.websiteUrl,

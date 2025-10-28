@@ -55,14 +55,6 @@ const clientSchema = new mongoose.Schema({
     unique: true,
     sparse: true,
   },
-  aadharNo: {
-    type: String,
-    required: function() {
-      return !this.googleId;
-    },
-    unique: true,
-    sparse: true,
-  },
   city: {
     type: String,
     

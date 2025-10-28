@@ -38,7 +38,6 @@ const loginClient = async (req, res) => {
             businessName: '',
             gstNo: "GOOGLE" + Date.now(),
             panNo: "GOOGLE" + Date.now(),
-            aadharNo: "GOOGLE" + Date.now(),
             city: "",
             pincode: "",
           });
@@ -111,7 +110,6 @@ const loginClient = async (req, res) => {
           businessName: client.businessName,
           gstNo: client.gstNo,
           panNo: client.panNo,
-          aadharNo: client.aadharNo,
           city: client.city,
           pincode: client.pincode,
           websiteUrl: client.websiteUrl
@@ -136,7 +134,6 @@ const loginClient = async (req, res) => {
         businessName,
         gstNo,
         panNo,
-        aadharNo,
         city,
         pincode,
         websiteUrl,
@@ -153,19 +150,18 @@ const loginClient = async (req, res) => {
         });
       }
   
-      // Check if client already exists with the same GST/PAN/Aadhar
+      // Check if client already exists with the same GST/PAN
       const existingBusinessClient = await Client.findOne({
         $or: [
           { gstNo },
-          { panNo },
-          { aadharNo }
+          { panNo }
         ]
       });
   
       if (existingBusinessClient) {
         return res.status(400).json({
           success: false,
-          message: "Client already exists with the same GST, PAN, or Aadhar number"
+          message: "Client already exists with the same GST or PAN number"
         });
       }
   
@@ -188,7 +184,6 @@ const loginClient = async (req, res) => {
         businessName,
         gstNo,
         panNo,
-        aadharNo,
         city,
         pincode,
         websiteUrl,

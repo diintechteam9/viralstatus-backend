@@ -140,7 +140,6 @@ const getClients = async (req, res) => {
         pincode,
         gstNo,
         panNo,
-        aadharNo,
         businessLogoKey,
         businessLogoUrl
       } = req.body;
@@ -154,13 +153,12 @@ const getClients = async (req, res) => {
         });
       }
 
-      // Check for duplicate GST, PAN, and Aadhar numbers
+      // Check for duplicate GST and PAN numbers
       const duplicateFields = [];
       const existingBusinessClient = await Client.findOne({
         $or: [
           { gstNo: gstNo },
-          { panNo: panNo },
-          { aadharNo: aadharNo }
+          { panNo: panNo }
         ]
       });
 
@@ -170,9 +168,6 @@ const getClients = async (req, res) => {
         }
         if (existingBusinessClient.panNo === panNo) {
           duplicateFields.push("PAN Number");
-        }
-        if (existingBusinessClient.aadharNo === aadharNo) {
-          duplicateFields.push("Aadhar Number");
         }
         
         return res.status(400).json({
@@ -201,7 +196,6 @@ const getClients = async (req, res) => {
         pincode,
         gstNo,
         panNo,
-        aadharNo,
         businessLogoKey,
         businessLogoUrl: finalBusinessLogoUrl
       });
@@ -222,8 +216,7 @@ const getClients = async (req, res) => {
       if (error.code === 11000) {
         const field = Object.keys(error.keyPattern)[0];
         const fieldName = field === 'gstNo' ? 'GST Number' : 
-                         field === 'panNo' ? 'PAN Number' : 
-                         field === 'aadharNo' ? 'Aadhar Number' : field;
+                         field === 'panNo' ? 'PAN Number' : field;
         
         return res.status(400).json({
           success: false,
