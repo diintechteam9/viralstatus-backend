@@ -6,6 +6,7 @@ const {
   getClientById, 
   registerclient, 
   deleteclient,
+  updateClient,
   getClientToken,
   uploadBusinessLogo,
   getBusinessLogoUrl
@@ -28,6 +29,9 @@ router.get("/getclientbyid/:id", getClientById);
 router.post('/registerclient', registerclient);
 
 router.delete('/deleteclient/:id', deleteclient);
+
+// Update client (set filter, etc)
+router.put('/updateclient/:id', authMiddleware, updateClient);
 
 // Get client token for admin access
 router.get('/get-client-token/:clientId', authMiddleware, getClientToken);

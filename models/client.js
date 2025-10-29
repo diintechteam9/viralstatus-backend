@@ -34,6 +34,13 @@ const clientSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  // Client filter/category
+  filter: {
+    type: String,
+    enum: ["all", "prime", "demo", "in-house", "testing", "rejected"],
+    default: "all",
+    index: true,
+  },
   // Business fields (optional for Google users)
   businessName: {
     type: String,

@@ -262,6 +262,58 @@ const getClients = async (req, res) => {
     }
   }
 
+  // Update client (e.g., set filter and editable fields)
+  const updateClient = async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        return res.status(400).json({ success: false, message: "Client ID is required" });
+      }
+
+      const allowedFields = [
+        "name",
+        "email",
+        "businessName",
+        "websiteUrl",
+        "city",
+        "pincode",
+        "gstNo",
+        "panNo",
+        "businessLogoKey",
+        "businessLogoUrl",
+        "filter",
+      ];
+
+      const updatePayload = {};
+      for (const key of allowedFields) {
+        if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+          updatePayload[key] = req.body[key];
+        }
+      }
+
+      const updated = await Client.findByIdAndUpdate(
+        id,
+        { $set: updatePayload },
+        { new: true, runValidators: true, select: "-password" }
+      );
+
+      if (!updated) {
+        return res.status(404).json({ success: false, message: "Client not found" });
+      }
+
+      res.status(200).json({ success: true, message: "Client updated", data: updated });
+    } catch (error) {
+      // Handle duplicate key errors
+      if (error.code === 11000) {
+        const field = Object.keys(error.keyPattern)[0];
+        const fieldName = field === "gstNo" ? "GST Number" : field === "panNo" ? "PAN Number" : field;
+        return res.status(400).json({ success: false, message: `Duplicate value for ${fieldName}` });
+      }
+      console.error("Error updating client:", error);
+      res.status(500).json({ success: false, message: "Failed to update client" });
+    }
+  };
+
 // Get client token for admin access
 const getClientToken = async (req, res) => {
   try {
@@ -428,6 +480,7 @@ module.exports = {
   getClients,
   getClientById,
   deleteclient,
+  updateClient,
   getClientToken,
   uploadBusinessLogo,
   getBusinessLogoUrl

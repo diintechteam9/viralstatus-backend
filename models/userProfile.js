@@ -53,7 +53,7 @@ const userProfileSchema = new mongoose.Schema({
   businessInterests: [{
     type: String,
     enum: [
-      'Fashion & Lifestyle',
+    'Fashion & Lifestyle',
     'Beauty & Cosmetics',
     'Health & Wellness',
     'Travel & Tourism',
