@@ -65,12 +65,14 @@ const createUserProfile = async (req, res) => {
     const requiredFields = [name, userEmail, mobileNumber, city, pincode, businessName, gender, ageRange, occupation, highestQualification];
     const isProfileCompleted = requiredFields.every(field => field && field.trim() !== '');
 
-    // Fetch the user's MongoDB ObjectId from the User model
+    // Fetch the user's MongoDB ObjectId and googleId from the User model
     let userMongoId = undefined;
+    let userGoogleId = undefined;
     if (userEmail) {
-      const userDoc = await User.findOne({ email: userEmail }).select('_id');
+      const userDoc = await User.findOne({ email: userEmail }).select('_id googleId');
       if (userDoc) {
         userMongoId = userDoc._id;
+        userGoogleId = userDoc.googleId;
       }
     }
 
@@ -102,6 +104,7 @@ const createUserProfile = async (req, res) => {
       skills,
       otherSkills,
       socialMedia,
+      googleId: userGoogleId || "",
       isProfileCompleted,
       isClient: !!clientMongoId, // mark client if coming from client
       userId: userMongoId, // Save the user's MongoDB ObjectId
@@ -308,6 +311,40 @@ const getUserProfileByEmail = async (req, res) => {
 };
 
 /**
+ * Get user profile by Google ID
+ */
+const getUserProfileByGoogleId = async (req, res) => {
+  try {
+    const { googleId } = req.params;
+
+    // Try direct lookup by googleId on UserProfile
+    let userProfile = await UserProfile.findOne({ googleId });
+
+    // If not found, resolve via User model (by googleId) and find profile by email or userId
+    if (!userProfile) {
+      const user = await User.findOne({ googleId }).select('email _id googleId');
+      if (user) {
+        userProfile = await UserProfile.findOne({ email: user.email }) ||
+                       await UserProfile.findOne({ userId: user._id });
+        if (userProfile && !userProfile.googleId && user.googleId) {
+          userProfile.googleId = user.googleId;
+          await userProfile.save();
+        }
+      }
+    }
+
+    if (!userProfile) {
+      return res.status(404).json({ success: false, message: 'User profile not found' });
+    }
+
+    res.status(200).json({ success: true, userProfile });
+  } catch (error) {
+    console.error('Get user profile by Google ID error:', error);
+    res.status(500).json({ success: false, message: error.message || 'An error occurred while fetching user profile' });
+  }
+};
+
+/**
  * Get current user's profile
  */
 const getCurrentUserProfile = async (req, res) => {
@@ -474,6 +511,26 @@ const updateUserProfile = async (req, res) => {
         success: false,
         message: "User profile not found"
       });
+    }
+
+    // Ensure googleId is synced from User to UserProfile if missing
+    try {
+      if (!updatedProfile.googleId) {
+        let googleIdToSet;
+        if (authenticatedEmail) {
+          const userDoc = await User.findOne({ email: authenticatedEmail }).select('googleId');
+          googleIdToSet = userDoc?.googleId;
+        } else if (userMongoId && mongoose.Types.ObjectId.isValid(userMongoId)) {
+          const userDoc = await User.findById(userMongoId).select('googleId');
+          googleIdToSet = userDoc?.googleId;
+        }
+        if (googleIdToSet) {
+          updatedProfile.googleId = googleIdToSet;
+          await updatedProfile.save();
+        }
+      }
+    } catch (e) {
+      console.error('Failed syncing googleId to UserProfile:', e);
     }
 
     // Sync isProfileCompleted to User/Client models as well
@@ -691,5 +748,6 @@ module.exports = {
   updateUserProfile,
   deleteUserProfile,
   verifyUserProfile,
-  getProfileStats
+  getProfileStats,
+  getUserProfileByGoogleId
 }; 

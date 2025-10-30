@@ -10,7 +10,8 @@ const {
   updateUserProfile,
   deleteUserProfile,
   verifyUserProfile,
-  getProfileStats
+  getProfileStats,
+  getUserProfileByGoogleId
 } = require('../controllers/userProfileController');
 const { verifyToken } = require('../middleware/authmiddleware');
 
@@ -115,6 +116,13 @@ router.get('/me', protect, getCurrentUserProfile);
  * Example: GET /api/user-profiles/email/john@example.com
  */
 router.get('/email/:email', getUserProfileByEmail);
+
+/**
+ * @route   GET /api/user-profiles/google/:googleId
+ * @desc    Get user profile by Google ID
+ * @access  Public
+ */
+router.get('/google/:googleId', getUserProfileByGoogleId);
 
 /**
  * @route   GET /api/user-profiles/:id
