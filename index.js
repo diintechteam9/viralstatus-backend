@@ -27,6 +27,7 @@ const userProfileRoutes = require('./routes/userProfile');
 const groupRoutes = require('./routes/grouproutes');
 const campaignRoutes = require('./routes/campaignRoutes');
 const poolRoutes = require('./routes/poolRoutes');
+const imagePoolRoutes = require('./routes/imagePoolRoutes');
 const ta1000seriesRoutes = require('./routes/ta1000series');
 const videomergeta1000seriesRoutes = require('./routes/videomergeta1000series');
 const creditWalletRoutes = require("./routes/creditWalletRoute");
@@ -164,6 +165,9 @@ app.use('/api/auth/user/campaign', campaignRoutes);
 
 // Pool Routes and Reel Routes (for uploading and managing reels)
 app.use('/api/pools', poolRoutes);
+
+// Image Pool Routes and Image Routes (for uploading and managing images)
+app.use('/api/image-pools', imagePoolRoutes);
 
 //credit Routes
 app.use('/api/user/creditWallet', creditWalletRoutes);
