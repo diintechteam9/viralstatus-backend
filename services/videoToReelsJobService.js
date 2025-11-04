@@ -1,5 +1,6 @@
 const VideoToReelsJob = require('../models/VideoToReelsJob');
 const { generateReel, generateReelSegments } = require('../controllers/videoToReelsController');
+const { generateVideoWithWordSrt } = require('../controllers/videosubtitlecontroller');
 const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { s3, BUCKET_NAME } = require('../config/s3');
@@ -62,31 +63,128 @@ class VideoToReelsJobService {
             if (!job) {
                 throw new Error(`Job ${jobId} not found`);
             }
-
             if (job.status !== 'pending') {
                 throw new Error(`Job ${jobId} is not in pending status`);
             }
-
-            // Check if we can start more jobs
             if (this.activeJobs.size >= this.maxConcurrentJobs) {
                 throw new Error('Maximum concurrent jobs reached. Please try again later.');
             }
-
-            // Mark job as processing
             await job.updateProgress(0, 'processing');
             this.activeJobs.set(jobId, job);
-
             console.log(`Starting video-to-reels job: ${jobId}`);
-
-            // Start video generation in background
             this.processVideoToReelsAsync(jobId, requestData);
-
             return job;
         } catch (error) {
             console.error(`Error starting job ${jobId}:`, error);
             throw error;
         }
     }
+
+  /**
+   * Start processing a subtitles job
+   */
+  async startSubtitleJob(jobId, requestData) {
+    try {
+      const job = await VideoToReelsJob.getJobById(jobId);
+      if (!job) {
+        throw new Error(`Job ${jobId} not found`);
+      }
+      if (job.status !== 'pending') {
+        throw new Error(`Job ${jobId} is not in pending status`);
+      }
+      if (this.activeJobs.size >= this.maxConcurrentJobs) {
+        throw new Error('Maximum concurrent jobs reached. Please try again later.');
+      }
+      await job.updateProgress(0, 'processing');
+      this.activeJobs.set(jobId, job);
+      this.processSubtitlesAsync(jobId, requestData);
+      return job;
+    } catch (error) {
+      console.error(`Error starting subtitles job ${jobId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Process subtitles generation asynchronously
+   */
+  async processSubtitlesAsync(jobId, requestData) {
+    try {
+      const job = await VideoToReelsJob.getJobById(jobId);
+      if (!job) { console.error(`Job ${jobId} not found during processing`); return; }
+      await job.updateProgress(10, 'processing');
+      const buffer = await this.generateSubtitledVideoBuffer(job, requestData);
+      await job.updateProgress(90, 'processing');
+      const uploaded = await this.saveVideoToS3(buffer, jobId);
+      await job.complete({
+        url: uploaded?.url || null,
+        key: uploaded?.key || null,
+        fileName: uploaded?.fileName || null,
+        fileSize: uploaded?.fileSize || null,
+        duration: 0,
+        videos: uploaded ? [{ ...uploaded, index: 1 }] : []
+      });
+      try { this.cleanupJobDirectory(job); } catch (_) {}
+    } catch (error) {
+      console.error(`Error processing subtitles job ${jobId}:`, error);
+      const job = await VideoToReelsJob.getJobById(jobId);
+      if (job) { await job.setError(error); }
+    } finally {
+      this.activeJobs.delete(jobId);
+      if (this.progressUpdateTimers.has(jobId)) {
+        clearTimeout(this.progressUpdateTimers.get(jobId));
+        this.progressUpdateTimers.delete(jobId);
+      }
+    }
+  }
+
+  /**
+   * Generate buffer by running the subtitles overlay pipeline
+   */
+  async generateSubtitledVideoBuffer(job, requestData) {
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      let chunkCount = 0;
+      const inputPath = job.originalVideoFile?.path;
+      if (!inputPath || !fs.existsSync(inputPath)) {
+        return reject(new Error(`Input video not found at ${inputPath || '(empty path)'}`));
+      }
+      const mockReq = {
+        file: {
+          path: inputPath,
+          originalname: job.originalVideoFile.originalName,
+          size: job.originalVideoFile.size,
+          mimetype: job.originalVideoFile.mimetype
+        },
+        body: {
+          wordSrt: job.wordSrt || job.srt,
+          fontKey: job.fontKey,
+          textColor: job.textColor
+        }
+      };
+      const mockRes = {
+        setHeader: () => {},
+        on: () => {},
+        once: () => {},
+        emit: () => {},
+        removeListener: () => {},
+        write: (chunk) => {
+          chunks.push(chunk);
+          chunkCount++;
+          const progress = Math.min(80, 10 + (chunkCount * 0.7));
+          this.debouncedProgressUpdate(job.jobId, progress, 'processing');
+          return true;
+        },
+        end: () => {
+          const buf = Buffer.concat(chunks);
+          resolve(buf);
+        },
+        status: (code) => ({ json: (data) => reject(new Error((data?.error || `Subtitle generation failed (${code})`) + (data?.details ? `: ${data.details}` : ''))) }),
+        json: (data) => reject(new Error((data?.error || 'Subtitle generation failed') + (data?.details ? `: ${data.details}` : '')))
+      };
+      generateVideoWithWordSrt(mockReq, mockRes).catch(reject);
+    });
+  }
 
     /**
      * Process video-to-reels generation asynchronously

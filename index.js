@@ -5,6 +5,13 @@ const session = require('express-session');
 const connectDB = require("./config/db");
 const { configureCors } = require("./config/s3Cors");
 
+// lead capture
+const helmet = require('helmet');
+const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
+const path = require('path');
+const fs = require('fs');
+
 
 const userRoutes= require('./routes/userroutes')
 const clientRoutes = require("./routes/clientroutes");
@@ -33,12 +40,18 @@ const videomergeta1000seriesRoutes = require('./routes/videomergeta1000series');
 const creditWalletRoutes = require("./routes/creditWalletRoute");
 
 const videocardRoute=require('./routes/aivideogen');  // generate videocard
+const heygenRoutes = require('./routes/heygenRoutes');  // HeyGen video generation
 const videoCompressionRoutes = require('./routes/videoCompressionRoutes');  // video compression
 const telegramRoute=require('./routes/telegramroutes');// telegram
 const videoToReelsRoutes = require('./routes/videoToReels');  // video to reel tool 
 const audioExtractionRoutes = require('./routes/audioExtraction');  // async audio extraction
+const subtitlesRoutes = require('./routes/subtitles');
 const videoToSegmentsRoutes = require('./routes/videotosegments');
 
+// lead capture routes
+const cardRoutes = require('./routes/leadcapture/cardRoutes');
+const phoneNumberRoutes = require('./routes/leadcapture/phoneNumberRoutes');
+const screenshotRoutes = require('./routes/leadcapture/screenshotRoutes');
 
 dotenv.config();
 
@@ -179,6 +192,9 @@ app.use('/api/reelta1000series', videomergeta1000seriesRoutes);
 
 app.use('/api/videocard',videocardRoute);
 
+// HeyGen Video Generation Routes
+app.use('/api/heygen', heygenRoutes);
+
 // Video Compression Routes
 app.use('/api/compression', videoCompressionRoutes);
 
@@ -191,9 +207,15 @@ app.use('/api/vtr', videoToReelsRoutes);
 // Audio Extraction Routes
 app.use('/api/audio', audioExtractionRoutes);
 
+// Subtitles Routes
+app.use('/api/subtitles', subtitlesRoutes);
+
 // Video To Segments (VTS) Routes
 app.use('/api/vts', videoToSegmentsRoutes);
 
+// lead capture 
+// Logging middleware
+app.use(morgan('combined'));
 
 
 // Error handling middleware
@@ -204,6 +226,19 @@ app.use((error, req, res, next) => {
         message: error.message || "Something went wrong"
     });
 });
+// Create uploads directory if it doesn't exist
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Serve static files from uploads directory
+app.use('/uploads', express.static(uploadsDir));
+
+// API routes
+app.use('/api/screenshots', screenshotRoutes);
+app.use('/api/phone-numbers', phoneNumberRoutes);
+app.use('/api/cards', cardRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -212,6 +247,8 @@ app.use((req, res) => {
         message: `Cannot ${req.method} ${req.url}`
     });
 });
+
+
 
 connectDB().then(() => {
     const server = app.listen(PORT, () => {
