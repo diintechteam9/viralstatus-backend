@@ -159,7 +159,10 @@ class VideoToReelsJobService {
         body: {
           wordSrt: job.wordSrt || job.srt,
           fontKey: job.fontKey,
-          textColor: job.textColor
+          textColor: job.textColor,
+          backgroundColor: job.backgroundColor,
+          boxOpacity: typeof job.boxOpacity === 'number' ? job.boxOpacity : undefined,
+          textPosition: job.textPosition
         }
       };
       const mockRes = {
@@ -351,6 +354,7 @@ class VideoToReelsJobService {
                     portrait: job.portrait,
                     fontKey: job.fontKey,
                     textColor: job.textColor,
+                    backgroundColor: job.backgroundColor,
                     images: JSON.stringify(Array.isArray(requestData?.images) ? requestData.images : [])
                 }
             };
@@ -417,7 +421,8 @@ class VideoToReelsJobService {
             portrait: job.portrait,
             maxCount: Array.isArray(requestData?.paragraphs) ? Math.min(5, Math.max(1, requestData.paragraphs.length)) : 3,
             textColor: job.textColor,
-            fontKey: job.fontKey
+            fontKey: job.fontKey,
+            backgroundColor: job.backgroundColor
         });
         if (!segments || segments.length === 0) {
             // Fallback to single buffer using concat path

@@ -189,13 +189,31 @@ const cleanTextForDrawtext = (text) => {
     .replace(/\s+/g, ' ')
     .trim();
 };
-const buildDrawtextFilter = (text, fontKey, position = 'bottom', textColor = 'white') => {
-  const yExpr = position === 'top' ? `120` : `h-(text_h+220)`;
+const sanitizeBackgroundColor = (input, fallback, alpha) => {
+  const a = Math.min(1, Math.max(0, Number(alpha) || 0));
+  const fb = fallback || 'black';
+  if (!input) return `${fb}@${a}`;
+  const val = String(input).trim();
+  // Accept hex like #RRGGBB or #rrggbb
+  if (/^#([0-9a-fA-F]{6})$/.test(val)) {
+    return `${val}@${a}`;
+  }
+  // Accept a few named colors
+  const named = ['black','white','red','green','blue','yellow','cyan','magenta','gray','grey'];
+  if (named.includes(val.toLowerCase())) {
+    return `${val.toLowerCase()}@${a}`;
+  }
+  return `${fb}@${a}`;
+};
+
+const buildDrawtextFilter = (text, fontKey, position = 'bottom', textColor = 'white', boxOpacity = 0.35, backgroundColor) => {
+  const yExpr = position === 'top' ? `120` : (position === 'middle' ? `(h-text_h)/2` : `h-(text_h+220)`);
   const isWhiteText = textColor === 'white';
   const fontColor = isWhiteText ? '0xFDFDFD' : '0x000000';
   const borderColor = isWhiteText ? '0x000000' : '0xFFFFFF';
   const shadowColor = isWhiteText ? '0x000000AA' : '0xFFFFFFAA';
-  const boxColor = isWhiteText ? 'black@0.35' : 'white@0.35';
+  const alpha = Math.min(1, Math.max(0, Number(boxOpacity) || 0));
+  const boxColor = sanitizeBackgroundColor(backgroundColor, isWhiteText ? 'black' : 'white', alpha);
   const base = [
     `text='${text}'`,
     `fontcolor=${fontColor}`,
@@ -252,6 +270,11 @@ async function generateVideoWithWordSrt(req, res) {
     const selectedFontKey = allowedFonts.includes(fontKeyFromReq) ? fontKeyFromReq : 'notosans';
     const textColorFromReq = (req.body?.textColor || 'white').toString().toLowerCase();
     const selectedTextColor = ['white','black'].includes(textColorFromReq) ? textColorFromReq : 'white';
+    const rawOpacity = (req.body && req.body.boxOpacity != null) ? Number(req.body.boxOpacity) : undefined;
+    const selectedBoxOpacity = isFinite(rawOpacity) ? Math.min(1, Math.max(0, rawOpacity)) : 0.35;
+    const textPositionFromReq = (req.body?.textPosition || '').toString().toLowerCase();
+    const selectedTextPosition = ['top','middle','bottom'].includes(textPositionFromReq) ? textPositionFromReq : 'bottom';
+    const backgroundColorFromReq = (req.body?.backgroundColor || '').toString();
 
     if (!uploadedFile || !uploadedFile.path) {
       return res.status(400).json({ error: 'Video file is required' });
@@ -275,8 +298,8 @@ async function generateVideoWithWordSrt(req, res) {
       const e = entries[i];
       const clean = cleanTextForDrawtext(e.text);
       if (!clean) continue;
-      const pos = (i % 2 === 0) ? 'top' : 'bottom';
-      const draw = buildDrawtextFilter(clean, selectedFontKey, pos, selectedTextColor);
+      const pos = selectedTextPosition;
+      const draw = buildDrawtextFilter(clean, selectedFontKey, pos, selectedTextColor, selectedBoxOpacity, backgroundColorFromReq);
       const outLabel = (i === entries.length - 1) ? 'vout' : `v${i}`;
       filters.push(`[${lastLabel}]${draw}:enable='between(t,${e.start.toFixed(3)},${e.end.toFixed(3)})'[${outLabel}]`);
       lastLabel = outLabel;

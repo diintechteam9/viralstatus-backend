@@ -6,7 +6,13 @@ const path = require('path');
 async function createAsyncSubtitleJob(req, res) {
   try {
     const uploadedFile = req.file;
-    const { wordSrt, fontKey, textColor } = req.body || {};
+  const { wordSrt, fontKey, textColor } = req.body || {};
+  const rawBg = (req.body && req.body.backgroundColor != null) ? String(req.body.backgroundColor).toLowerCase() : undefined;
+  const backgroundColor = ['white','black'].includes(rawBg) ? rawBg : undefined;
+  const rawOpacity = (req.body && req.body.boxOpacity != null) ? Number(req.body.boxOpacity) : undefined;
+  const boxOpacity = isFinite(rawOpacity) ? Math.min(1, Math.max(0, rawOpacity)) : 0.35;
+  const rawPos = (req.body && req.body.textPosition ? String(req.body.textPosition) : '').toLowerCase();
+  const textPosition = ['top','middle','bottom'].includes(rawPos) ? rawPos : 'bottom';
     const userId = req.user?.id || req.user?._id || null;
 
     if (!uploadedFile) {
@@ -27,6 +33,9 @@ async function createAsyncSubtitleJob(req, res) {
       portrait: false,
       fontKey: (fontKey || 'notosans'),
       textColor: (textColor || 'white'),
+      backgroundColor,
+      boxOpacity,
+      textPosition,
       userId,
       type: 'video-subtitle'
     };

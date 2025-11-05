@@ -32,6 +32,8 @@ const createAsyncReelJob = async (req, res) => {
   try {
     const uploadedFile = req.file;
     const { srt, wordSrt, sentences, paragraphs, paddingSeconds, maxTotalSeconds, portrait, images, fontKey, textColor } = req.body;
+    const bgRaw = (req.body && req.body.backgroundColor) ? String(req.body.backgroundColor).toLowerCase() : undefined;
+    const backgroundColor = ['white','black'].includes(bgRaw) ? bgRaw : undefined;
     const userId = req.user?.id || req.user?._id || null;
 
     // Validate required fields
@@ -78,6 +80,7 @@ const createAsyncReelJob = async (req, res) => {
       portrait: String(portrait || 'false') === 'true',
       fontKey: fontKey || 'notosans',
       textColor: textColor || 'white',
+      backgroundColor: backgroundColor, // optional explicit bg; controller will default if missing
       userId,
       type: 'video-to-reels'
     };

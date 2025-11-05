@@ -74,7 +74,7 @@ const cleanTextForDrawtext = (text) => {
 };
 
 // Build drawtext filter using selected bundled font when available
-const buildDrawtextFilter = (text, fontKey, position = 'bottom', textColor = 'white') => {
+const buildDrawtextFilter = (text, fontKey, position = 'bottom', textColor = 'white', backgroundColor = undefined) => {
   const yExpr = position === 'top' ? `120` : `h-(text_h+220)`;
   
                              
@@ -83,7 +83,11 @@ const buildDrawtextFilter = (text, fontKey, position = 'bottom', textColor = 'wh
   const fontColor = isWhiteText ? '0xFDFDFD' : '0x000000';
   const borderColor = isWhiteText ? '0x000000' : '0xFFFFFF';
   const shadowColor = isWhiteText ? '0x000000AA' : '0xFFFFFFAA';
-  const boxColor = isWhiteText ? 'black@0.35' : 'white@0.35';
+  // If backgroundColor is provided as 'white' or 'black', honor it; else default to opposite of text for contrast
+  const bg = (typeof backgroundColor === 'string' && ['white','black'].includes(backgroundColor.toLowerCase()))
+    ? backgroundColor.toLowerCase()
+    : (isWhiteText ? 'black' : 'white');
+  const boxColor = `${bg}@0.35`;
   
   // Modern, high-contrast styling with configurable colors
   const base = [
@@ -1247,7 +1251,9 @@ async function generateReel(req, res) {
         const cleanText = cleanTextForDrawtext(o.text);
         if (!cleanText.trim()) continue;
         const position = (j % 2 === 0) ? 'top' : 'bottom';
-        const drawtextFilter = buildDrawtextFilter(cleanText, selectedFontKey, position, selectedTextColor);
+    const bgFromReq = (req.body?.backgroundColor || '').toString().toLowerCase();
+    const selectedBgColor = ['white','black'].includes(bgFromReq) ? bgFromReq : undefined;
+    const drawtextFilter = buildDrawtextFilter(cleanText, selectedFontKey, position, selectedTextColor, selectedBgColor);
         const outLabel = (i === segments.length - 1 && j === overlays.length - 1) ? 'vout' : `v_${i}_${j}`;
         const startT = Math.max(0, baseOffset.start + o.startTime);
         const endT = Math.max(0, baseOffset.start + o.endTime);
@@ -1385,7 +1391,7 @@ async function generateReel(req, res) {
 }
 
 // Helper: generate individual reel segment files (no concat). Returns up to maxCount paths.
-async function generateReelSegments({ inputPath, srt, wordSrt, sentences, paragraphIndices, paddingSeconds = 0.3, portrait = false, maxCount = 3, textColor = 'white', fontKey = 'notosans' }) {
+async function generateReelSegments({ inputPath, srt, wordSrt, sentences, paragraphIndices, paddingSeconds = 0.3, portrait = false, maxCount = 3, textColor = 'white', fontKey = 'notosans', backgroundColor = undefined }) {
   const entries = parseSRT(srt);
   const grouped = groupSRTIntoSentencesFromEntries(entries);
   const wordEntries = wordSrt ? parseSRT(wordSrt) : [];
@@ -1464,7 +1470,7 @@ async function generateReelSegments({ inputPath, srt, wordSrt, sentences, paragr
         
         // Alternate position: top for even indices, bottom for odd
         const position = (j % 2 === 0) ? 'top' : 'bottom';
-        const drawtextFilter = buildDrawtextFilter(cleanText, fontKey, position, textColor);
+        const drawtextFilter = buildDrawtextFilter(cleanText, fontKey, position, textColor, backgroundColor);
         
         const outLabel = j === selected.length - 1 ? 'vout' : `v${j}`;
         const filter = `[${lastLabel}]${drawtextFilter}:enable='between(t,${overlay.startTime.toFixed(3)},${overlay.endTime.toFixed(3)})'[${outLabel}]`;
