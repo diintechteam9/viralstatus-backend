@@ -1,5 +1,6 @@
 const express = require("express");
 const dotenv = require("dotenv");
+const http = require('http');
 const cors = require("cors");
 const session = require('express-session');
 const connectDB = require("./config/db");
@@ -39,6 +40,16 @@ const ta1000seriesRoutes = require('./routes/ta1000series');
 const videomergeta1000seriesRoutes = require('./routes/videomergeta1000series');
 const creditWalletRoutes = require("./routes/creditWalletRoute");
 
+// for whatsapp
+const requestedTemplateRoutes = require("./routes/whatsapp/requestedTemplateRoutes");
+const createRequestedTemplateRoutes = require("./routes/whatsapp/createRequestedTemplateRoute");
+const whatsappRoutes=require('./routes/whatsapp/whatsapproute');
+const phonenumberRoutes=require('./routes/whatsapp/phonenumberroute');
+const messageRoutes=require('./routes/whatsapp/messageroute');
+
+
+
+
 const videocardRoute=require('./routes/aivideogen');  // generate videocard
 const heygenRoutes = require('./routes/heygenRoutes');  // HeyGen video generation
 const videoCompressionRoutes = require('./routes/videoCompressionRoutes');  // video compression
@@ -53,9 +64,17 @@ const cardRoutes = require('./routes/leadcapture/cardRoutes');
 const phoneNumberRoutes = require('./routes/leadcapture/phoneNumberRoutes');
 const screenshotRoutes = require('./routes/leadcapture/screenshotRoutes');
 
+const {
+  startTemplateSyncScheduler,
+  stopTemplateSyncScheduler,
+} = require("./services/whatsappTemplateSyncScheduler");
+
 dotenv.config();
 
 const app = express();
+const server = http.createServer(app);
+const { Server } = require('socket.io');
+const { setIO } = require('./socket');
 
 // Increase payload size limit to handle large base64 data
 app.use(express.json({ limit: '200mb' }));
@@ -185,6 +204,7 @@ app.use('/api/image-pools', imagePoolRoutes);
 //credit Routes
 app.use('/api/user/creditWallet', creditWalletRoutes);
 
+
 // TA1000Series Routes
 app.use('/api/ta1000series', ta1000seriesRoutes);
 app.use('/api/reelta1000series', videomergeta1000seriesRoutes);
@@ -218,6 +238,13 @@ app.use('/api/vts', videoToSegmentsRoutes);
 app.use(morgan('combined'));
 
 
+// for the whatsapp template 
+app.use("/api/requested-templates", requestedTemplateRoutes);
+app.use("/api/create-template",createRequestedTemplateRoutes );
+app.use('/api/whatsapp',whatsappRoutes);
+app.use('/api/phonenumber',phonenumberRoutes);
+app.use('/api/chat',messageRoutes);
+
 // Error handling middleware
 app.use((error, req, res, next) => {
     console.error('Unhandled error:', error);
@@ -248,12 +275,36 @@ app.use((req, res) => {
     });
 });
 
+const io = new Server(server, {
+    cors: {
+        origin: ["http://localhost:5173"],
+        methods: ["GET","POST"],
+        credentials: true
+    }
+});
+
+setIO(io);
+
+io.on('connection', (socket) => {
+    // Client joins a room per waID
+    socket.on('join', (waID) => {
+        if (!waID) return;
+        socket.join(waID);
+    });
+
+    socket.on('leave', (waID) => {
+        if (!waID) return;
+        socket.leave(waID);
+    });
+});
 
 
 connectDB().then(() => {
     const server = app.listen(PORT, () => {
         console.log("Server is running on port 4000");
     });
+
+    startTemplateSyncScheduler();
 
     // Graceful shutdown handling
     const gracefulShutdown = (signal) => {
@@ -273,6 +324,12 @@ connectDB().then(() => {
             audioExtractionJobService.cleanupTimers();
         } catch (error) {
             console.warn('Error cleaning up audio extraction timers:', error.message);
+        }
+
+        try {
+            stopTemplateSyncScheduler();
+        } catch (error) {
+            console.warn("Error stopping WhatsApp template sync scheduler:", error.message);
         }
         
         server.close(() => {

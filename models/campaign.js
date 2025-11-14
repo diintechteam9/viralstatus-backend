@@ -35,6 +35,7 @@ const campaignSchema = new mongoose.Schema({
   },
   image: {
     key: { type: String, required: true },
+    url: { type: String }
   },
   description: {
     type: String,

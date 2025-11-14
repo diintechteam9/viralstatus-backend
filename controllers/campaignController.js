@@ -11,25 +11,50 @@ const TelegramServiceController = require('./telegram/telegrambotalertcontroller
 const telegramService = new TelegramServiceController();
 const TelegramSettings = require('../models/Settings');
 
+function escapeHtml(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function formatCampaignStartMessage(c) {
   const start = c.startDate ? new Date(c.startDate).toLocaleString('en-US') : '-';
   const end = c.endDate ? new Date(c.endDate).toLocaleString('en-US') : '-';
+  const createdAt = c.createdAt ? new Date(c.createdAt).toLocaleString('en-US') : '-';
+  const tags = Array.isArray(c.tags) && c.tags.length ? c.tags.map(escapeHtml).join(', ') : '-';
+  const groupIds = Array.isArray(c.groupIds) && c.groupIds.length ? c.groupIds.map(escapeHtml).join(', ') : '-';
+  const members = Array.isArray(c.userIds) ? c.userIds.length : 0;
   const lines = [
-    `🚀 <b>Campaign Started</b>`,
-    `\n<b>Name:</b> ${c.campaignName}`,
-    `<b>Brand:</b> ${c.brandName}`,
-    `<b>Goal:</b> ${c.goal}`,
-    `<b>Client:</b> ${c.clientId}`,
-    `<b>Credits:</b> ${c.credits}`,
-    `<b>Target Channels:</b> ${c.limit}`,
-    `<b>Target Views:</b> ${c.views}`,
-    `<b>Location:</b> ${c.location}`,
+    `🚀 <b>New Campaign Created</b>`,
+    `\n<b>Name:</b> ${escapeHtml(c.campaignName)}`,
+    `<b>Brand:</b> ${escapeHtml(c.brandName)}`,
+    `<b>Goal:</b> ${escapeHtml(c.goal)}`,
+    // `<b>Client ID:</b> ${escapeHtml(c.clientId)}`,
+    `<b>Status:</b> ${escapeHtml(c.status || '-')}`,
+    `<b>Created At:</b> ${createdAt}`,
     `<b>Start:</b> ${start}`,
     `<b>End:</b> ${end}`,
+    `<b>Credits:</b> ${escapeHtml(c.credits !== undefined ? c.credits : '-')}`,
+    `<b>Target Channels:</b> ${escapeHtml(c.limit !== undefined ? c.limit : '-')}`,
+    `<b>Target Views:</b> ${escapeHtml(c.views !== undefined ? c.views : '-')}`,
+    `<b>Cutoff:</b> ${escapeHtml(c.cutoff !== undefined ? c.cutoff : '-')}`,
+    `<b>Location:</b> ${escapeHtml(c.location || '-')}`,
+    `<b>Tags:</b> ${tags}`,
+    // `<b>Group IDs:</b> ${groupIds}`,
+    `<b>Active Participants:</b> ${escapeHtml(members)}`,
+    `<b>Description:</b> ${escapeHtml(c.description || '-')}`,
+    `<b>Terms & Conditions:</b> ${escapeHtml(c.tNc || '-')}`,
   ];
-  if (Array.isArray(c.tags) && c.tags.length) {
-    lines.push(`<b>Tags:</b> ${c.tags.join(', ')}`);
-  }
+  // if (c.image?.key) {
+  //   lines.push(`<b>Image Key:</b> ${escapeHtml(c.image.key)}`);
+  // }
+  // if (c.image?.url) {
+  //   lines.push(`<b>Image URL:</b> ${escapeHtml(c.image.url)}`);
+  // }
   return lines.join('\n');
 }
 
@@ -148,19 +173,20 @@ exports.createCampaign = [
         // members should be an array of googleId strings
         userIds: members ? (Array.isArray(members) ? members : members.split(',')) : [],
       });
-      await campaign.save();
-      // Send Telegram alert if campaign is active immediately and settings allow
+      const savedCampaign = await campaign.save();
+      // Send Telegram alert after campaign is stored
       try {
         const settings = await TelegramSettings.findOne();
         const allow = !settings || settings.telegramAlertsEnabledOnCampaignStart !== false;
-        if (allow && campaign.isActive) {
-          const text = formatCampaignStartMessage(campaign);
+        if (allow) {
+          const campaignData = savedCampaign.toObject();
+          const text = formatCampaignStartMessage(campaignData);
           await telegramService.sendTextMessage(text);
         }
       } catch (alertErr) {
-        console.error('Failed to send Telegram start alert on create:', alertErr);
+        console.error('Failed to send Telegram creation alert:', alertErr);
       }
-      res.json({ success: true, campaign });
+      res.json({ success: true, campaign: savedCampaign });
     } catch (err) {
       console.error('Campaign creation error:', err);
       res.status(500).json({ success: false, message: 'Server error', error: err.message });
