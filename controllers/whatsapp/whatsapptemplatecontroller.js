@@ -195,6 +195,30 @@ const createTemplate = async (req, res) => {
       draft.status = 'pending';
       await draft.save();
 
+      // Also save to PendingTemplate collection immediately
+      try {
+        const pendingData = {
+          metaTemplateId: draft.metaTemplateId,
+          name: draft.name,
+          language: draft.language,
+          category: draft.category,
+          status: 'pending',
+          components: draft.components,
+          metaRaw: draft.metaRaw,
+        };
+        if (draft.clientId) {
+          pendingData.clientId = draft.clientId;
+        }
+        await PendingTemplate.findOneAndUpdate(
+          { name: draft.name, language: draft.language },
+          pendingData,
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      } catch (pendingErr) {
+        console.error('Error saving to PendingTemplate:', pendingErr);
+        // Don't fail the request if this fails, just log it
+      }
+
       return res.status(201).json({ success: true, message: 'Template submitted to Meta', template: draft });
     } catch (metaErr) {
       const metaData = metaErr.response?.data || { message: metaErr.message };
@@ -222,6 +246,14 @@ const listTemplates = async (req, res) => {
 // Get pending templates
 const getPendingTemplates = async (req, res) => {
   try {
+    // Sync with Meta first to get latest status
+    try {
+      await syncTemplatesWithMeta();
+    } catch (syncError) {
+      console.error("Error syncing templates with Meta (continuing with cached data):", syncError);
+      // Continue with cached data if sync fails
+    }
+
     const { clientId } = req.query;
     const query = clientId ? { clientId } : {};
     const docs = await PendingTemplate.find(query).sort({ updatedAt: -1 }).lean();
@@ -243,6 +275,14 @@ const getPendingTemplates = async (req, res) => {
 // Get rejected templates
 const getRejectedTemplates = async (req, res) => {
   try {
+    // Sync with Meta first to get latest status
+    try {
+      await syncTemplatesWithMeta();
+    } catch (syncError) {
+      console.error("Error syncing templates with Meta (continuing with cached data):", syncError);
+      // Continue with cached data if sync fails
+    }
+
     const { clientId } = req.query;
     const query = clientId ? { clientId } : {};
     const docs = await RejectedTemplate.find(query).sort({ updatedAt: -1 }).lean();
@@ -264,6 +304,14 @@ const getRejectedTemplates = async (req, res) => {
 // Get approved templates (with optional clientId filter)
 const getApprovedTemplates = async (req, res) => {
   try {
+    // Sync with Meta first to get latest status
+    try {
+      await syncTemplatesWithMeta();
+    } catch (syncError) {
+      console.error("Error syncing templates with Meta (continuing with cached data):", syncError);
+      // Continue with cached data if sync fails
+    }
+
     const { clientId } = req.query;
     const query = clientId ? { clientId } : {};
     const docs = await ApprovedTemplate.find(query).sort({ updatedAt: -1 }).lean();
@@ -282,6 +330,60 @@ const getApprovedTemplates = async (req, res) => {
   }
 };
 
+// Check if template name already exists (across all clients)
+// Meta/Facebook doesn't allow duplicate template names globally
+const checkTemplateNameExists = async (req, res) => {
+  try {
+    const { name } = req.query;
+    
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Template name is required",
+        exists: false
+      });
+    }
+
+    // Check in ApprovedTemplate collection (across all clients)
+    const approvedTemplate = await ApprovedTemplate.findOne({ 
+      name: name.trim() 
+    }).lean();
+
+    // Also check in PendingTemplate and RejectedTemplate to be thorough
+    // since Meta might reject duplicates even if pending/rejected
+    const pendingTemplate = await PendingTemplate.findOne({ 
+      name: name.trim() 
+    }).lean();
+    
+    const rejectedTemplate = await RejectedTemplate.findOne({ 
+      name: name.trim() 
+    }).lean();
+
+    // Also check in main Template collection
+    const template = await Template.findOne({ 
+      name: name.trim() 
+    }).lean();
+
+    const exists = !!(approvedTemplate || pendingTemplate || rejectedTemplate || template);
+
+    return res.status(200).json({
+      success: true,
+      exists: exists,
+      message: exists 
+        ? "Template name already exists. Please choose a different name." 
+        : "Template name is available"
+    });
+  } catch (error) {
+    console.error("Error checking template name:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to check template name",
+      error: error.message || "Unknown error",
+      exists: false // Return false on error to not block user
+    });
+  }
+};
+
 module.exports = { 
   getTemplates, 
   createTemplate, 
@@ -289,5 +391,6 @@ module.exports = {
   syncTemplatesWithMeta,
   getPendingTemplates,
   getRejectedTemplates,
-  getApprovedTemplates
+  getApprovedTemplates,
+  checkTemplateNameExists
 };

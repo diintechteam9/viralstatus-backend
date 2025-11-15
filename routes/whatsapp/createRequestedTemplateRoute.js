@@ -6,7 +6,8 @@ const {
   listTemplates,
   getPendingTemplates,
   getRejectedTemplates,
-  getApprovedTemplates
+  getApprovedTemplates,
+  checkTemplateNameExists
 } = require('../../controllers/whatsapp/whatsapptemplatecontroller');
 
 // to get the list of template from the facebook business account 
@@ -26,5 +27,8 @@ router.get('/templates/pending', getPendingTemplates);
 
 // Get rejected templates
 router.get('/templates/rejected', getRejectedTemplates);
+
+// Check if template name exists (for validation)
+router.get('/templates/check-name', checkTemplateNameExists);
 
 module.exports=router;
