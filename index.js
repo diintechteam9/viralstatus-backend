@@ -54,6 +54,7 @@ const videocardRoute=require('./routes/aivideogen');  // generate videocard
 const heygenRoutes = require('./routes/heygenRoutes');  // HeyGen video generation
 const videoCompressionRoutes = require('./routes/videoCompressionRoutes');  // video compression
 const telegramRoute=require('./routes/telegramroutes');// telegram
+const telegramWebhookRoute = require('./routes/telegram/telegramwebhookroute');
 const videoToReelsRoutes = require('./routes/videoToReels');  // video to reel tool 
 const audioExtractionRoutes = require('./routes/audioExtraction');  // async audio extraction
 const subtitlesRoutes = require('./routes/subtitles');
@@ -220,6 +221,7 @@ app.use('/api/compression', videoCompressionRoutes);
 
 // Telegram Routes
 app.use('/api/telegram', telegramRoute);
+app.use('/api/telegram', telegramWebhookRoute);
 
 // Video to Reels (VTR) Routes
 app.use('/api/vtr', videoToReelsRoutes);
