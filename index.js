@@ -103,6 +103,7 @@ app.use(cors({
         
         const allowedOrigins = [
             "https://viralstatus-frontend.vercel.app",
+            "https://viralstatus-frontend.vercel.app/",
             "http://localhost:5173",
             "http://13.200.235.104:4000",
             "https://vs.yovoai.com",
@@ -243,7 +244,7 @@ app.use(morgan('combined'));
 // for the whatsapp template 
 app.use("/api/requested-templates", requestedTemplateRoutes);
 app.use("/api/create-template",createRequestedTemplateRoutes );
-app.use('/api/whatsapp',whatsappRoutes);
+app.use("/api/whatsapp",whatsappRoutes);
 app.use('/api/phonenumber',phonenumberRoutes);
 app.use('/api/chat',messageRoutes);
 
@@ -279,7 +280,7 @@ app.use((req, res) => {
 
 const io = new Server(server, {
     cors: {
-        origin: ["http://localhost:5173"],
+        origin: ["http://localhost:5173" || "https://viralstatus-frontend.vercel.app"],
         methods: ["GET","POST"],
         credentials: true
     }
