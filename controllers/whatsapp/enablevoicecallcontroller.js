@@ -17,9 +17,9 @@ const enableVoiceCall = async (req, res) => {
 
     // Body required to enable calling
     const payload = {
-      voice: {
+      calling: {
         // Enable calling API
-        "enabled": true
+        enable_calling: true
       }
     };
 
