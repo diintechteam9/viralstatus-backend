@@ -48,8 +48,6 @@ const phonenumberRoutes=require('./routes/whatsapp/phonenumberroute');
 const messageRoutes=require('./routes/whatsapp/messageroute');
 
 
-
-
 const videocardRoute=require('./routes/aivideogen');  // generate videocard
 const heygenRoutes = require('./routes/heygenRoutes');  // HeyGen video generation
 const videoCompressionRoutes = require('./routes/videoCompressionRoutes');  // video compression
@@ -351,5 +349,3 @@ connectDB().then(() => {
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 });
-
-

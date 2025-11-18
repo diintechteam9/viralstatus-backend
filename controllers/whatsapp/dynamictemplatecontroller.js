@@ -9,6 +9,7 @@ const GRAPH_VERSION = process.env.GRAPH_VERSION || "v19.0";
  * Send WhatsApp template message dynamically using values from req.body
  * Expects: { to: string, templateName: string, languageCode: string }
  */
+
 const sendDynamicMessage = async (req, res) => {
   try {
     const { to, templateName, languageCode } = req.body;

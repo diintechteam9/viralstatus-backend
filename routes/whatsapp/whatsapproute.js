@@ -3,11 +3,11 @@ const router = express.Router();
 const { testWebhook, verifyWebhook, receiveMessage } = require('../../controllers/whatsapp/whatsappwebhookcontroller');
 const { sendTextMessage, sendMediaMessage, getMessageStatus, sendInteractiveMessage } = require('../../controllers/whatsapp/whatsappchatcontroller');
 const { sendDynamicMessage} = require('../../controllers/whatsapp/dynamictemplatecontroller');
+const { enableVoiceCall } = require('../../controllers/whatsapp/enablevoicecallcontroller');
 
 // Webhook routes for WhatsApp
 router.get('/webhook', verifyWebhook);   // this is working 
 router.post('/webhook', receiveMessage);
-
 
 router.get('/webhook/test', testWebhook); // this is working 
 
@@ -18,6 +18,7 @@ router.post('/send-interactive', sendInteractiveMessage);
 router.get('/message-status/:messageId', getMessageStatus);
 router.post('/send-dynamic',sendDynamicMessage);
 
+router.post('/enable-voice-call', enableVoiceCall);
 
 
 // // Route to test different WhatsApp API formats
@@ -25,6 +26,5 @@ router.post('/send-dynamic',sendDynamicMessage);
 
 // // Route to get message status (optional)
 // router.get('/message-status/:messageId', getMessageStatus);
-
 
 module.exports = router;
