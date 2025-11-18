@@ -171,6 +171,37 @@ const receiveMessage = async (req, res) => {
             } else {
               // No messages in payload
             }
+          } else if (change.field === "calls") {
+            if (change.value && Array.isArray(change.value.calls)) {
+              change.value.calls.forEach((call, idx) => {
+                try {
+                  const normalizedFrom = call.from?.startsWith("+")
+                    ? call.from
+                    : call.from
+                    ? `+${call.from}`
+                    : undefined;
+                  const normalizedTo = call.to?.startsWith("+")
+                    ? call.to
+                    : call.to
+                    ? `+${call.to}`
+                    : undefined;
+                  console.log("Incoming WhatsApp call:", {
+                    index: idx,
+                    callId: call.id,
+                    from: normalizedFrom,
+                    to: normalizedTo,
+                    direction: call.direction,
+                    status: call.event || call.state,
+                    callType: call.call_type || call.type,
+                    timestamp: call.timestamp,
+                    duration: call.duration,
+                    waId: call.wa_id || call.from,
+                  });
+                } catch (callLogErr) {
+                  console.error("Failed to log call payload:", callLogErr.message);
+                }
+              });
+            }
           } else if (change.field === "statuses") {
             // Handle message status updates (delivered, read, failed)
             if (

@@ -19,7 +19,7 @@ const enableVoiceCall = async (req, res) => {
     const payload = {
       calling: {
         // Enable calling API
-        enable_calling: true
+        status: "enabled"
       }
     };
 
