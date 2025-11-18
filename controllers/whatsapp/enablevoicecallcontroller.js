@@ -2,13 +2,13 @@ const axios = require("axios");
 
 const WHATSAPP_PHONE_ID=process.env.WHATSAPP_PHONE_ID;
 const GRAPH_VERSION=process.env.GRAPH_VERSION;
-const WHATSAPP_VERIFY_TOKEN=process.env.WHATSAPP_VERIFY_TOKEN;
+const WHATSAPP_TOKEN=process.env.WHATSAPP_TOKEN;
 
 
 const enableVoiceCall = async (req, res) => {
   try {
 
-    if (!WHATSAPP_PHONE_ID || !WHATSAPP_VERIFY_TOKEN) {
+    if (!WHATSAPP_PHONE_ID || !WHATSAPP_TOKEN) {
       return res.status(400).json({ error: "Missing environment variables" });
     }
 
@@ -26,7 +26,7 @@ const enableVoiceCall = async (req, res) => {
     // Make the API request
     const response = await axios.post(url, payload, {
       headers: {
-        "Authorization": `Bearer ${WHATSAPP_VERIFY_TOKEN}`,
+        "Authorization": `Bearer ${WHATSAPP_TOKEN}`,
         "Content-Type": "application/json"
       }
     });
