@@ -73,10 +73,27 @@ function generateCampaignId(name) {
   return `${base}-${suffix}`;
 }
 
+// Activate campaigns whose window has started and not yet ended, and status is not 'Inactive'
+async function activateCurrentCampaigns() {
+  const now = new Date();
+  await Campaign.updateMany(
+    {
+      isActive: false,
+      status: { $ne: 'Inactive' },
+      startDate: { $lte: now },
+      endDate: { $gte: now },
+    },
+    { isActive: true }
+  );
+}
+
 // Deactivate campaigns whose endDate has passed
 async function deactivateExpiredCampaigns() {
   const now = new Date();
-  await Campaign.updateMany({ isActive: true, endDate: { $lt: now } }, { isActive: false });
+  await Campaign.updateMany(
+    { isActive: true, endDate: { $lt: now } },
+    { isActive: false }
+  );
 }
 
 // Add multer file filter for images only
@@ -198,7 +215,9 @@ exports.createCampaign = [
 exports.getActiveCampaigns = async (req, res) => {
   console.log('getActiveCampaigns called');
   try {
-    await deactivateExpiredCampaigns(); // Ensure expired campaigns are deactivated
+    // Ensure isActive reflects current time window before querying
+    await activateCurrentCampaigns();
+    await deactivateExpiredCampaigns();
     const { clientId } = req.query;
     console.log('clientId from query:', clientId);
     const filter = { isActive: true };
