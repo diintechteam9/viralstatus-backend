@@ -104,6 +104,7 @@ app.use(cors({
         const allowedOrigins = [
             "https://viralstatus-frontend.vercel.app",
             "https://viralstatus-frontend.vercel.app/",
+            "https://viralstatus-frontend-qiuf.vercel.app",
             "http://localhost:5173",
             "http://13.200.235.104:4000",
             "https://vs.yovoai.com",
@@ -312,6 +313,7 @@ const io = new Server(server, {
             "http://localhost:5174",
             "http://localhost:3000",
             "https://viralstatus-frontend.vercel.app",
+            "https://viralstatus-frontend-qiuf.vercel.app",
             "https://vs.yovoai.com",
             "https://client.yovoai.com"
         ],
