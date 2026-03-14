@@ -277,8 +277,7 @@ userProfileSchema.pre('save', function(next) {
   next();
 });
 
-// Indexes for efficient queries
-userProfileSchema.index({ email: 1 });
+// Indexes for efficient queries (email already has unique: true)
 userProfileSchema.index({ city: 1 });
 userProfileSchema.index({ businessInterests: 1 });
 userProfileSchema.index({ occupation: 1 });

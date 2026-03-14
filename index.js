@@ -53,10 +53,13 @@ const heygenRoutes = require('./routes/heygenRoutes');  // HeyGen video generati
 const videoCompressionRoutes = require('./routes/videoCompressionRoutes');  // video compression
 const telegramRoute=require('./routes/telegramroutes');// telegram
 const telegramWebhookRoute = require('./routes/telegram/telegramwebhookroute');
+const telegramSettingsRoute = require('./routes/telegram/telegramSettingsRoute');
 const videoToReelsRoutes = require('./routes/videoToReels');  // video to reel tool 
 const audioExtractionRoutes = require('./routes/audioExtraction');  // async audio extraction
 const subtitlesRoutes = require('./routes/subtitles');
 const videoToSegmentsRoutes = require('./routes/videotosegments');
+const websiteAnalyzerRoutes = require('./routes/websiteAnalyzerRoutes');  // website analyzer
+const websiteRoutes = require('./routes/websiteRoutes');
 
 // lead capture routes
 const cardRoutes = require('./routes/leadcapture/cardRoutes');
@@ -95,7 +98,6 @@ app.use(session({
 // Configure CORS for Express
 app.use(cors({
     origin: function (origin, callback) {
-        console.log('CORS request from origin:', origin);
         // Allow requests with no origin (like mobile apps or curl requests)
         if (!origin) return callback(null, true);
         
@@ -109,10 +111,8 @@ app.use(cors({
         ];
         
         if (allowedOrigins.indexOf(origin) !== -1) {
-            console.log('CORS allowed for origin:', origin);
             callback(null, true);
         } else {
-            console.log('CORS blocked origin:', origin);
             callback(null, true); // Allow for development, restrict in production
         }
     },
@@ -135,8 +135,6 @@ app.use(cors({
 
 // Additional CORS middleware for all routes
 app.use((req, res, next) => {
-    console.log('Request method:', req.method, 'URL:', req.url, 'Origin:', req.headers.origin);
-    
     // Handle preflight requests
     if (req.method === 'OPTIONS') {
         res.header('Access-Control-Allow-Origin', req.headers.origin || 'https://viralstatus-frontend.vercel.app' || 'https://client.yovoai.com');
@@ -155,12 +153,25 @@ app.use((req, res, next) => {
 });
 
 // Configure CORS for S3
-configureCors().catch(console.error);
+configureCors();
 
 const PORT = process.env.PORT || 4000;
 
 app.get("/", (req, res) => {
-    res.send("Hello World");
+    res.json({
+        status: "success",
+        message: "Viral Status API is running",
+        timestamp: new Date().toISOString()
+    });
+});
+
+app.get("/api/health", (req, res) => {
+    res.json({
+        status: "healthy",
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV || 'development'
+    });
 });
 
 app.use('/api/datastore', datastoreRoutes);
@@ -221,6 +232,7 @@ app.use('/api/compression', videoCompressionRoutes);
 // Telegram Routes
 app.use('/api/telegram', telegramRoute);
 app.use('/api/telegram', telegramWebhookRoute);
+app.use('/api/telegram', telegramSettingsRoute);
 
 // Video to Reels (VTR) Routes
 app.use('/api/vtr', videoToReelsRoutes);
@@ -234,9 +246,16 @@ app.use('/api/subtitles', subtitlesRoutes);
 // Video To Segments (VTS) Routes
 app.use('/api/vts', videoToSegmentsRoutes);
 
-// lead capture 
-// Logging middleware
-app.use(morgan('combined'));
+// Website Analyzer Routes
+app.use('/api/website-analyzer', websiteAnalyzerRoutes);
+
+// Website Analysis Routes
+app.use('/api/website', websiteRoutes);
+
+// Logging middleware (only in development)
+if (process.env.NODE_ENV === 'development') {
+    app.use(morgan('dev'));
+}
 
 
 // for the whatsapp template 
@@ -248,7 +267,9 @@ app.use('/api/chat',messageRoutes);
 
 // Error handling middleware
 app.use((error, req, res, next) => {
-    console.error('Unhandled error:', error);
+    if (process.env.NODE_ENV === 'development') {
+        console.error('❌ Error:', error.message);
+    }
     res.status(500).json({
         error: "Internal server error",
         message: error.message || "Something went wrong"
@@ -263,6 +284,13 @@ if (!fs.existsSync(uploadsDir)) {
 // Serve static files from uploads directory
 app.use('/uploads', express.static(uploadsDir));
 
+// Serve screenshots
+const screenshotsDir = path.join(__dirname, 'uploads', 'screenshots');
+if (!fs.existsSync(screenshotsDir)) {
+  fs.mkdirSync(screenshotsDir, { recursive: true });
+}
+app.use('/screenshots', express.static(screenshotsDir));
+
 // API routes
 app.use('/api/screenshots', screenshotRoutes);
 app.use('/api/phone-numbers', phoneNumberRoutes);
@@ -276,47 +304,67 @@ app.use((req, res) => {
     });
 });
 
+// Socket.io setup BEFORE server.listen()
 const io = new Server(server, {
     cors: {
-        origin: ["http://localhost:5173" || "https://viralstatus-frontend.vercel.app"],
-        methods: ["GET","POST"],
+        origin: [
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://localhost:3000",
+            "https://viralstatus-frontend.vercel.app",
+            "https://vs.yovoai.com",
+            "https://client.yovoai.com"
+        ],
+        methods: ["GET", "POST"],
         credentials: true
-    }
+    },
+    allowEIO3: true
 });
 
 setIO(io);
 
 io.on('connection', (socket) => {
+    console.log('✅ Socket.io client connected:', socket.id);
+    
     // Client joins a room per waID
     socket.on('join', (waID) => {
         if (!waID) return;
         socket.join(waID);
+        console.log(`📱 Socket ${socket.id} joined room: ${waID}`);
     });
 
     socket.on('leave', (waID) => {
         if (!waID) return;
         socket.leave(waID);
+        console.log(`📱 Socket ${socket.id} left room: ${waID}`);
+    });
+
+    socket.on('disconnect', () => {
+        console.log('❌ Socket.io client disconnected:', socket.id);
     });
 });
 
-
 connectDB().then(() => {
-    const server = app.listen(PORT, () => {
-        console.log("Server is running on port 4000");
+    server.listen(PORT, () => {
+        console.log(`\n🚀 Server started successfully`);
+        console.log(`📍 Port: ${PORT}`);
+        console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+        console.log(`🔌 Socket.io enabled on port ${PORT}`);
+        console.log(`⏰ Time: ${new Date().toLocaleString()}\n`);
     });
 
     startTemplateSyncScheduler();
 
     // Graceful shutdown handling
     const gracefulShutdown = (signal) => {
-        console.log(`Received ${signal}. Starting graceful shutdown...`);
+        console.log(`\n⚠️  Received ${signal}. Shutting down gracefully...`);
         
         // Clean up video-to-reels job service timers
         try {
             const videoToReelsJobService = require('./services/videoToReelsJobService');
             videoToReelsJobService.cleanupTimers();
         } catch (error) {
-            console.warn('Error cleaning up video-to-reels timers:', error.message);
+            // Silent cleanup
         }
         
         // Clean up audio extraction job service timers
@@ -324,23 +372,28 @@ connectDB().then(() => {
             const audioExtractionJobService = require('./services/audioExtractionJobService');
             audioExtractionJobService.cleanupTimers();
         } catch (error) {
-            console.warn('Error cleaning up audio extraction timers:', error.message);
+            // Silent cleanup
         }
 
         try {
             stopTemplateSyncScheduler();
         } catch (error) {
-            console.warn("Error stopping WhatsApp template sync scheduler:", error.message);
+            // Silent cleanup
         }
         
+        // Close Socket.io connections
+        io.close(() => {
+            console.log('✅ Socket.io closed successfully');
+        });
+        
         server.close(() => {
-            console.log('Server closed successfully');
+            console.log('✅ Server closed successfully\n');
             process.exit(0);
         });
         
         // Force close after 10 seconds
         setTimeout(() => {
-            console.error('Forced shutdown after timeout');
+            console.error('⚠️  Forced shutdown after timeout\n');
             process.exit(1);
         }, 10000);
     };

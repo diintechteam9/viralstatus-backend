@@ -40,14 +40,11 @@ class CleanupService {
       
       await fs.access(filePath);
       await fs.unlink(filePath);
-      console.log(`Cleaned up file: ${filePath}`);
       return true;
     } catch (error) {
       if (error.code === 'ENOENT') {
-        console.log(`File already removed: ${filePath}`);
         return true;
       }
-      console.error(`Failed to remove file ${filePath}:`, error.message);
       return false;
     }
   }
@@ -84,14 +81,11 @@ class CleanupService {
       
       // Remove the directory itself
       await fs.rmdir(dirPath);
-      console.log(`Cleaned up directory: ${dirPath}`);
       return true;
     } catch (error) {
       if (error.code === 'ENOENT') {
-        console.log(`Directory already removed: ${dirPath}`);
         return true;
       }
-      console.error(`Failed to remove directory ${dirPath}:`, error.message);
       return false;
     }
   }
@@ -106,8 +100,6 @@ class CleanupService {
       failed: 0,
       errors: []
     };
-
-    console.log(`Starting cleanup of ${this.tempDirectories.size} temporary files/directories`);
 
     for (const tempPath of this.tempDirectories) {
       try {
@@ -131,7 +123,6 @@ class CleanupService {
     // Clear the set after cleanup
     this.tempDirectories.clear();
     
-    console.log(`Cleanup completed: ${results.success} successful, ${results.failed} failed`);
     return results;
   }
 
@@ -151,8 +142,6 @@ class CleanupService {
       return results;
     }
 
-    console.log(`Cleaning up ${filePaths.length} files for job`);
-
     for (const filePath of filePaths) {
       try {
         const stats = await fs.stat(filePath);
@@ -169,7 +158,6 @@ class CleanupService {
       } catch (error) {
         if (error.code === 'ENOENT') {
           results.success++;
-          console.log(`File already removed: ${filePath}`);
         } else {
           results.failed++;
           results.errors.push(`Error with ${filePath}: ${error.message}`);
@@ -177,7 +165,6 @@ class CleanupService {
       }
     }
 
-    console.log(`Job cleanup completed: ${results.success} successful, ${results.failed} failed`);
     return results;
   }
 
@@ -211,7 +198,6 @@ class CleanupService {
             
             if (success) {
               results.success++;
-              console.log(`Removed old file: ${filePath}`);
             } else {
               results.failed++;
               results.errors.push(`Failed to remove old file: ${filePath}`);
@@ -226,7 +212,6 @@ class CleanupService {
       results.errors.push(`Error accessing temp directory: ${error.message}`);
     }
 
-    console.log(`Old files cleanup completed: ${results.success} successful, ${results.failed} failed`);
     return results;
   }
 

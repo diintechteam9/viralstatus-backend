@@ -94,9 +94,7 @@ const clientSchema = new mongoose.Schema({
   },
 });
 
-// Index for efficient queries
-clientSchema.index({ email: 1 });
-clientSchema.index({ googleId: 1 });
+// Compound index for efficient queries (email and googleId already have unique indexes)
 clientSchema.index({ email: 1, googleId: 1 });
 
 const Client = mongoose.model("Client", clientSchema);

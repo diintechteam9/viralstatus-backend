@@ -3,12 +3,12 @@ const mongoose = require('mongoose');
 const messageSchema = new mongoose.Schema({
   waID: { type: String, required: true, index: true },
   direction: { type: String, enum: ['sent', 'received', 'system'], required: true },
-  type: { type: String, enum: ['text', 'media', 'interactive'], default: 'text' },
+  type: { type: String, default: 'text' },
   text: { type: String },
   mediaType: { type: String },
   mediaUrl: { type: String },
-  messageId: { type: String },
-  status: { type: String },
+  messageId: { type: String, index: true },
+  status: { type: String, default: 'sent' },
   timestamp: { type: Date, default: Date.now }
 }, { timestamps: true });
 

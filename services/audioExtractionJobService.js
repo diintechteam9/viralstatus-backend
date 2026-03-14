@@ -12,20 +12,12 @@ const ffprobeStatic = require('ffprobe-static');
 try {
     if (ffmpegInstaller && ffmpegInstaller.path) {
         ffmpeg.setFfmpegPath(ffmpegInstaller.path);
-        console.log('[Audio][FFmpeg] Using installer path:', ffmpegInstaller.path);
-    } else {
-        // Fallback to system FFmpeg
-        console.log('[Audio][FFmpeg] Installer path not found, using system FFmpeg');
     }
     if (ffprobeStatic && ffprobeStatic.path) {
         ffmpeg.setFfprobePath(ffprobeStatic.path);
-        console.log('[Audio][FFmpeg] Using ffprobe path:', ffprobeStatic.path);
-    } else {
-        // Fallback to system ffprobe
-        console.log('[Audio][FFmpeg] FFprobe path not found, using system ffprobe');
     }
 } catch (err) {
-    console.error('[Audio][FFmpeg] Setup error:', err.message);
+    console.error('❌ Audio FFmpeg setup failed:', err.message);
 }
 
 class AudioExtractionJobService {

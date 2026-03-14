@@ -1,5 +1,5 @@
 const { PutBucketCorsCommand } = require("@aws-sdk/client-s3");
-const { s3, BUCKET_NAME } = require("./s3");
+const { s3, BUCKET_NAME, isS3Enabled } = require("./s3");
 
 const corsConfig = {
     CORSRules: [
@@ -8,10 +8,9 @@ const corsConfig = {
             AllowedMethods: ["GET", "PUT", "POST", "DELETE", "HEAD"],
             AllowedOrigins: [
                 "http://localhost:5173",
-                // "https://viral-status.vercel.app",
                 "https://viralstatus-frontend.vercel.app",
+                "https://vs.yovoai.com"
             ],
-            // ExposeHeaders: ["ETag"],
             ExposeHeaders: [],
             MaxAgeSeconds: 3600
         }
@@ -19,6 +18,11 @@ const corsConfig = {
 };
 
 const configureCors = async () => {
+    // Skip silently if S3 is not enabled
+    if (!isS3Enabled || !s3 || !BUCKET_NAME) {
+        return;
+    }
+
     try {
         const command = new PutBucketCorsCommand({
             Bucket: BUCKET_NAME,
@@ -26,9 +30,14 @@ const configureCors = async () => {
         });
 
         await s3.send(command);
-        console.log('Successfully configured CORS for S3 bucket');
+        if (process.env.NODE_ENV === 'development') {
+            console.log('✅ S3 CORS configured');
+        }
     } catch (error) {
-        console.error('Error configuring CORS for S3 bucket:', error);
+        // Silent fail - S3 CORS is not critical for server startup
+        if (process.env.NODE_ENV === 'development') {
+            console.warn('⚠️  S3 CORS configuration failed:', error.message);
+        }
     }
 };
 

@@ -14,7 +14,7 @@ class VideoStorageService {
     // Start cleanup interval
     this.startCleanupInterval();
     
-    console.log('VideoStorageService initialized. Storage directory:', this.storageDir);
+    console.log('✅ Video storage service initialized');
   }
 
   ensureStorageDir() {
@@ -49,7 +49,9 @@ class VideoStorageService {
         ...metadata
       });
       
-      console.log(`Video stored temporarily: ${filename} (${(videoBuffer.length / (1024 * 1024)).toFixed(2)}MB)`);
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`📹 Video stored: ${filename} (${(videoBuffer.length / (1024 * 1024)).toFixed(2)}MB)`);
+      }
       
       return {
         filename,
@@ -90,12 +92,10 @@ class VideoStorageService {
       const metadata = this.videoMetadata.get(filename);
       if (metadata && fs.existsSync(metadata.filePath)) {
         fs.unlinkSync(metadata.filePath);
-        console.log(`Video deleted: ${filename}`);
       }
       this.videoMetadata.delete(filename);
       return true;
     } catch (error) {
-      console.error(`Error deleting video ${filename}:`, error);
       return false;
     }
   }
@@ -111,12 +111,13 @@ class VideoStorageService {
       }
     }
     
-    if (expiredVideos.length > 0) {
-      console.log(`Cleaning up ${expiredVideos.length} expired videos...`);
-      expiredVideos.forEach(filename => {
-        this.deleteVideo(filename);
-      });
+    if (expiredVideos.length > 0 && process.env.NODE_ENV === 'development') {
+      console.log(`🧹 Cleaning ${expiredVideos.length} expired videos`);
     }
+    
+    expiredVideos.forEach(filename => {
+      this.deleteVideo(filename);
+    });
   }
 
   // Start cleanup interval
@@ -125,8 +126,6 @@ class VideoStorageService {
     setInterval(() => {
       this.cleanupExpiredVideos();
     }, 15 * 60 * 1000); // 15 minutes
-    
-    console.log('Video cleanup interval started (every 15 minutes)');
   }
 
   // Get storage statistics
@@ -147,7 +146,6 @@ class VideoStorageService {
 
   // Manual cleanup (for testing or admin purposes)
   forceCleanup() {
-    console.log('Force cleanup initiated...');
     this.cleanupExpiredVideos();
     return this.getStorageStats();
   }

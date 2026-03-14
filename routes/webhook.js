@@ -3,7 +3,9 @@ const router = express.Router();
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
-console.log('Webhook route loaded. VERIFY_TOKEN:', VERIFY_TOKEN);
+if (process.env.NODE_ENV === 'development') {
+  console.log('✅ Webhook routes loaded');
+}
 
 // Webhook verification for Instagram
 router.get('/instagram', (req, res) => {
@@ -11,20 +13,9 @@ router.get('/instagram', (req, res) => {
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  console.log('Webhook verification request received:');
-  console.log('Mode:', mode);
-  console.log('Token:', token);
-  console.log('Challenge:', challenge);
-  console.log('Expected VERIFY_TOKEN:', VERIFY_TOKEN);
-  console.log('Token match:', token === VERIFY_TOKEN);
-
   if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-    console.log('Webhook verification successful, sending challenge:', challenge);
     res.status(200).send(challenge);
   } else {
-    console.log('Webhook verification failed');
-    console.log('Mode check:', mode === 'subscribe');
-    console.log('Token check:', token === VERIFY_TOKEN);
     res.sendStatus(403);
   }
 });

@@ -10,14 +10,13 @@ const runSync = async () => {
   isRunning = true;
   try {
     await syncTemplatesWithMeta();
-    console.log(
-      `[WhatsAppTemplateSync] Completed at ${new Date().toISOString()}`,
-    );
   } catch (error) {
-    console.error(
-      "[WhatsAppTemplateSync] Failed to sync templates:",
-      error?.response?.data || error?.message || error,
-    );
+    if (process.env.NODE_ENV === 'development') {
+      console.error(
+        "[WhatsApp] Template sync failed:",
+        error?.message || error,
+      );
+    }
   } finally {
     isRunning = false;
   }
@@ -32,16 +31,13 @@ const startTemplateSyncScheduler = () => {
   runSync();
 
   intervalId = setInterval(runSync, intervalMs);
-  console.log(
-    `[WhatsAppTemplateSync] Scheduler started with interval ${intervalMs}ms`,
-  );
+  console.log(`✅ WhatsApp template sync started (${intervalMs / 60000} min interval)`);
 };
 
 const stopTemplateSyncScheduler = () => {
   if (!intervalId) return;
   clearInterval(intervalId);
   intervalId = null;
-  console.log("[WhatsAppTemplateSync] Scheduler stopped");
 };
 
 module.exports = {

@@ -149,13 +149,13 @@ const receiveMessage = async (req, res) => {
                   status: "received",
                   timestamp: new Date(parseInt(message.timestamp, 10) * 1000),
                 });
+                
                 // emit realtime update to waID room
                 const io = getIO();
                 if (io) {
-                  // Use + prefix for socket room and emission to match frontend expectations
-                  const socketWaID = from?.startsWith("+") ? from : `+${from}`;
-                  io.to(socketWaID).emit("message", {
-                    waID: socketWaID,
+                  // Emit to room using normalized waID (without +)
+                  io.to(waIDNormalized).emit("message", {
+                    waID: waIDNormalized,
                     direction: "received",
                     type: storedType,
                     text: extractedText || undefined,
@@ -209,7 +209,38 @@ const receiveMessage = async (req, res) => {
               change.value.statuses &&
               change.value.statuses.length > 0
             ) {
-              // Status updates received; handle here if needed
+              const status = change.value.statuses[0];
+              const messageId = status.id;
+              const recipientId = status.recipient_id;
+              const statusValue = status.status; // sent, delivered, read, failed
+              
+              console.log('Message status update:', { messageId, recipientId, status: statusValue });
+              
+              // Update message status in database
+              try {
+                const updatedMessage = await Message.findOneAndUpdate(
+                  { messageId: messageId },
+                  { status: statusValue },
+                  { new: true }
+                );
+                
+                if (updatedMessage) {
+                  console.log(`Message ${messageId} status updated to ${statusValue}`);
+                  
+                  // Emit status update via Socket.io
+                  const io = getIO();
+                  if (io) {
+                    const normalizedWaID = recipientId?.startsWith('+') ? recipientId.substring(1) : recipientId;
+                    io.to(normalizedWaID).emit('messageStatus', {
+                      messageId: messageId,
+                      status: statusValue,
+                      waID: normalizedWaID
+                    });
+                  }
+                }
+              } catch (statusErr) {
+                console.error('Failed to update message status:', statusErr.message);
+              }
             }
           } else if (change.field === "message_template_status_update") {
             try {

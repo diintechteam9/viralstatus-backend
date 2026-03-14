@@ -49,7 +49,22 @@ exports.protect = async (req, res, next) => {
       message: 'Not authorized to access this route'
     });
   } catch (error) {
-    console.error('Auth middleware error:', error);
+    // Avoid noisy stack traces in logs for common auth failures
+    if (error && error.name === 'TokenExpiredError') {
+      console.warn('[Auth] Token expired');
+      return res.status(401).json({
+        success: false,
+        message: 'Token expired'
+      });
+    }
+    if (error && error.name === 'JsonWebTokenError') {
+      console.warn('[Auth] Invalid token');
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token'
+      });
+    }
+    console.error('[Auth] Middleware error:', error?.message || error);
     return res.status(401).json({
       success: false,
       message: 'Not authorized to access this route'

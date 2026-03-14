@@ -246,20 +246,12 @@ const IMAGE_VIDEO_DURATION = 2; // seconds for each image overlay window
 try {
   if (ffmpegInstaller && ffmpegInstaller.path) {
     ffmpeg.setFfmpegPath(ffmpegInstaller.path);
-    console.log('[FFmpeg] Using installer path:', ffmpegInstaller.path);
-  } else {
-    // Fallback to system FFmpeg
-    console.log('[FFmpeg] Installer path not found, using system FFmpeg');
   }
   if (ffprobeStatic && ffprobeStatic.path) {
     ffmpeg.setFfprobePath(ffprobeStatic.path);
-    console.log('[FFmpeg] Using ffprobe path:', ffprobeStatic.path);
-  } else {
-    // Fallback to system ffprobe
-    console.log('[FFmpeg] FFprobe path not found, using system ffprobe');
   }
 } catch (err) {
-  console.error('[FFmpeg] Setup error:', err.message);
+  console.error('❌ FFmpeg setup failed:', err.message);
 }
 
 // Extract audio from an uploaded video and stream back as MP3

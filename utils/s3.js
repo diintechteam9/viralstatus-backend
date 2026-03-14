@@ -3,9 +3,15 @@ const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = re
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 require('dotenv').config();
 
+// Trim whitespace from environment variables
+const trimmedAccessKey = process.env.AWS_ACCESS_KEY_ID?.trim();
+const trimmedSecretKey = process.env.AWS_SECRET_ACCESS_KEY?.trim();
+const trimmedRegion = process.env.AWS_REGION?.trim();
+const trimmedBucket = process.env.S3_BUCKET_NAME?.trim();
+
 // Validate required environment variables
 const requiredEnvVars = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_REGION', 'S3_BUCKET_NAME'];
-const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]?.trim());
 
 if (missingEnvVars.length > 0) {
   console.error('Missing required AWS environment variables:', missingEnvVars);
@@ -13,10 +19,10 @@ if (missingEnvVars.length > 0) {
 }
 
 const s3Client = new S3Client({
-  region: process.env.AWS_REGION,
+  region: trimmedRegion,
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    accessKeyId: trimmedAccessKey,
+    secretAccessKey: trimmedSecretKey,
   },
 });
 
@@ -24,7 +30,7 @@ const s3Client = new S3Client({
 const putobject = async (key, contentType) => {
   try {
     const command = new PutObjectCommand({
-      Bucket: process.env.S3_BUCKET_NAME,
+      Bucket: trimmedBucket,
       Key: key,
       ContentType: contentType,
     });
@@ -41,7 +47,7 @@ const putobject = async (key, contentType) => {
 const getobject = async (key) => {
   try {
     const command = new GetObjectCommand({
-      Bucket: process.env.S3_BUCKET_NAME,
+      Bucket: trimmedBucket,
       Key: key,
       ResponseContentDisposition: 'inline',
     });
@@ -57,7 +63,7 @@ const getobject = async (key) => {
 const deleteObject = async (key) => {
   try {
     const command = new DeleteObjectCommand({
-      Bucket: process.env.S3_BUCKET_NAME,
+      Bucket: trimmedBucket,
       Key: key,
     });
 

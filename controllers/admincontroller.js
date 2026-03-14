@@ -398,24 +398,24 @@ const uploadBusinessLogo = async (req, res) => {
 
     // Generate unique S3 key for business logo
     const timestamp = Date.now();
-    const fileExtension = fileName.split('.').pop();
-    const s3Key = `admin/business-logos/${timestamp}_${fileName}`;
+    const s3Key = `admin/business-logos/${timestamp}_${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
 
-    // Create presigned URL for upload
+    // Create presigned URL for upload with proper configuration
     const command = new PutObjectCommand({
       Bucket: BUCKET_NAME,
       Key: s3Key,
-      ContentType: mimeType,
-      ACL: 'private'
+      ContentType: mimeType
     });
 
     const uploadUrl = await getSignedUrl(s3, command, { 
       expiresIn: 3600,
-      signableHeaders: new Set(['host', 'content-type'])
+      unhoistableHeaders: new Set(['x-amz-acl'])
     });
 
     // Construct the final S3 URL
-    const fileUrl = `https://${BUCKET_NAME}.s3.amazonaws.com/${s3Key}`;
+    const fileUrl = `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`;
+
+    console.log('Generated upload URL for:', s3Key);
 
     res.json({
       success: true,
@@ -429,7 +429,8 @@ const uploadBusinessLogo = async (req, res) => {
     console.error("Error generating upload URL:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to generate upload URL"
+      message: "Failed to generate upload URL",
+      error: error.message
     });
   }
 };
@@ -453,8 +454,7 @@ const getBusinessLogoUrl = async (req, res) => {
     });
 
     const presignedUrl = await getSignedUrl(s3, command, {
-      expiresIn: 3600, // 1 hour
-      signableHeaders: new Set(['host'])
+      expiresIn: 3600 // 1 hour
     });
 
     res.json({
