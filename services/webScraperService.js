@@ -39,7 +39,7 @@ class WebScraperService {
       const browser = await puppeteer.launch({
         headless: true,
         devtools: false,
-        executablePath: process.env.CHROMIUM_PATH || '/snap/bin/chromium',
+        executablePath: '/snap/bin/chromium',
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
