@@ -1,5 +1,7 @@
 const VideoJob = require('../models/VideoJob');
 const { generateFinalVideoAsync } = require('../controllers/aivideogen/generatefinalvideocontroller');
+const fs = require('fs');
+const path = require('path');
 
 class VideoJobService {
     constructor() {
@@ -143,8 +145,14 @@ class VideoJobService {
             // Update progress: Saving to S3
             await job.updateProgress(90, 'processing');
 
-            // Save video to S3 with organized structure
-            const s3Data = await this.saveVideoToS3(result.video, job.cardName, job.category);
+            // Save video to S3 with organized structure (fallback to local on any cloud error)
+            let videoStore = null;
+            try {
+                videoStore = await this.saveVideoToS3(result.video, job.cardName, job.category);
+            } catch (storeErr) {
+                console.warn(`Job ${jobId}: failed to upload video to S3, falling back to local storage`, storeErr?.message || storeErr);
+                videoStore = await this.saveVideoToLocal(result.video, job.cardName, job.category);
+            }
 
             // If this job is linked to a card, delete previous S3 video for that card and update the card doc
             if (job.cardId) {
@@ -164,10 +172,10 @@ class VideoJobService {
                         }
 
                         // Update card with latest video info
-                        existing.latestVideoS3Key = s3Data.key;
-                        existing.latestVideoUrl = s3Data.url;
-                        existing.latestVideoFileName = s3Data.fileName;
-                        existing.latestVideoFileSize = s3Data.fileSize;
+                        existing.latestVideoS3Key = videoStore.key || undefined;
+                        existing.latestVideoUrl = videoStore.url;
+                        existing.latestVideoFileName = videoStore.fileName;
+                        existing.latestVideoFileSize = videoStore.fileSize;
                         existing.latestVideoDuration = result.duration;
                         existing.latestVideoCreatedAt = new Date();
                         existing.updatedAt = new Date();
@@ -180,17 +188,17 @@ class VideoJobService {
 
             // Complete the job
             await job.complete({
-                s3Key: s3Data.key,
-                s3Url: s3Data.url,
-                fileName: s3Data.fileName,
-                fileSize: s3Data.fileSize,
+                s3Key: videoStore.key,
+                s3Url: videoStore.url,
+                fileName: videoStore.fileName,
+                fileSize: videoStore.fileSize,
                 duration: result.duration,
                 audioDuration: result.audioDuration,
                 imageCount: result.imageCount,
                 sentenceCount: result.sentenceCount
             });
 
-            console.log(`Video job completed: ${jobId}, S3 URL: ${s3Data.url}`);
+            console.log(`Video job completed: ${jobId}, URL: ${videoStore.url}`);
 
         } catch (error) {
             console.error(`Error processing video job ${jobId}:`, error);
@@ -202,6 +210,50 @@ class VideoJobService {
             // Remove from active jobs
             this.activeJobs.delete(jobId);
         }
+    }
+
+    /**
+     * Build the base public URL for returning assets.
+     * Prefer env when deployed; fallback to localhost for dev.
+     */
+    getPublicBaseUrl() {
+        const envUrl =
+            process.env.PUBLIC_BASE_URL ||
+            process.env.BACKEND_URL ||
+            process.env.API_BASE_URL ||
+            process.env.BASE_URL;
+        if (envUrl && typeof envUrl === 'string') return envUrl.replace(/\/+$/, '');
+        const port = process.env.PORT || 4000;
+        return `http://localhost:${port}`;
+    }
+
+    /**
+     * Save video to local uploads folder and return a public URL.
+     * This is the production-safe fallback if S3/Cloud storage fails.
+     */
+    async saveVideoToLocal(videoBuffer, cardName, category) {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const sanitizedCardName = String(cardName || 'card').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const sanitizedCategory = String(category || 'general').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const fileName = `${sanitizedCardName}_${timestamp}.mp4`;
+
+        const relDir = path.posix.join('uploads', 'videos', sanitizedCategory, sanitizedCardName, timestamp);
+        const absDir = path.resolve(__dirname, '..', relDir);
+        fs.mkdirSync(absDir, { recursive: true });
+
+        const absPath = path.join(absDir, 'final_video.mp4');
+        await fs.promises.writeFile(absPath, videoBuffer);
+
+        // Express serves /uploads from <backend>/uploads, so strip leading "uploads/"
+        const publicPath = `/uploads/videos/${sanitizedCategory}/${sanitizedCardName}/${timestamp}/final_video.mp4`;
+        const url = `${this.getPublicBaseUrl()}${publicPath}`;
+
+        return {
+            key: null,
+            url,
+            fileName,
+            fileSize: videoBuffer.length
+        };
     }
 
     /**
@@ -248,7 +300,8 @@ class VideoJobService {
             };
 
         } catch (error) {
-            console.error('Error saving video to S3:', error);
+            // Avoid dumping full AWS exception objects (can include sensitive metadata).
+            console.error('Error saving video to S3:', error?.message || error);
             throw error;
         }
     }

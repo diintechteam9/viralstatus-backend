@@ -60,6 +60,7 @@ const subtitlesRoutes = require('./routes/subtitles');
 const videoToSegmentsRoutes = require('./routes/videotosegments');
 const websiteAnalyzerRoutes = require('./routes/websiteAnalyzerRoutes');  // website analyzer
 const websiteRoutes = require('./routes/websiteRoutes');
+const newsGeneratorRoute = require('./routes/newsGeneratorRoute');
 
 // lead capture routes
 const cardRoutes = require('./routes/leadcapture/cardRoutes');
@@ -252,6 +253,7 @@ app.use('/api/website-analyzer', websiteAnalyzerRoutes);
 
 // Website Analysis Routes
 app.use('/api/website', websiteRoutes);
+app.use('/api/news', newsGeneratorRoute);
 
 // Logging middleware (only in development)
 if (process.env.NODE_ENV === 'development') {
@@ -308,19 +310,14 @@ app.use((req, res) => {
 // Socket.io setup BEFORE server.listen()
 const io = new Server(server, {
     cors: {
-        origin: [
-            "http://localhost:5173",
-            "http://localhost:5174",
-            "http://localhost:3000",
-            "https://viralstatus-frontend.vercel.app",
-            "https://viralstatus-frontend-qiuf.vercel.app",
-            "https://vs.yovoai.com",
-            "https://client.yovoai.com"
-        ],
+        origin: '*',
         methods: ["GET", "POST"],
-        credentials: true
+        credentials: false
     },
-    allowEIO3: true
+    allowEIO3: true,
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    transports: ['polling']
 });
 
 setIO(io);

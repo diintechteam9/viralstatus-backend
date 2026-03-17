@@ -155,7 +155,11 @@ async function getGlobalVisualStyle(storyContext) {
             return {};
         }
     } catch (e) {
-        console.warn('Style generation failed, using defaults:', e.message);
+        // OpenRouter may return 402 (payment required). In that case, silently fallback.
+        const msg = String(e?.message || '');
+        if (!msg.includes('402')) {
+            console.warn('Style generation failed, using defaults:', e.message);
+        }
         return {};
     }
 }
@@ -192,7 +196,10 @@ async function generatePromptsWithAI(sentences, styleData) {
         }
         return [];
     } catch (e) {
-        console.warn('Prompt generation via AI failed or invalid, will fallback:', e.message);
+        const msg = String(e?.message || '');
+        if (!msg.includes('402')) {
+            console.warn('Prompt generation via AI failed or invalid, will fallback:', e.message);
+        }
         return [];
     }
 }

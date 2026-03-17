@@ -40,6 +40,7 @@ const {veoImageToVideo}=require('../controllers/aivideogen/veoimagetovideocontro
 const {textToSpeech1}=require('../controllers/aivideogen/ttselevenlabscontroller');
 const {textToSpeech2}=require('../controllers/aivideogen/ttslmntcontroller');
 const {textToSpeech3}=require('../controllers/aivideogen/ttssarvamcontroller');
+const { textToSpeechAzure } = require('../controllers/aivideogen/ttsazurecontroller');
 
 
 
@@ -66,6 +67,7 @@ router.post('/generate-prompt',generatePrompt);  // for image prompt
 router.post('/generate-video-pixverse',generateVideo);  // for image to video using the prompt pixverse
 router.post('/generate-video-veo',veoImageToVideo);  // for image to video using the prompt veo
 router.post('/elevenlabs',textToSpeech1);  // for tts using elevenlabs 
+router.post('/azure-tts', textToSpeechAzure); // for tts using Azure Cognitive Services
 router.post('/lmnt',textToSpeech2);  // for tts using lmnt 
 router.post('/sarvam',textToSpeech3);  // for tts using sarvam 
 
