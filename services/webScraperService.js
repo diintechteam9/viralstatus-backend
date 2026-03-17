@@ -37,19 +37,20 @@ class WebScraperService {
       }
 
       const browser = await puppeteer.launch({
-        headless: false,
+        headless: true,
         devtools: false,
+        executablePath: process.env.CHROMIUM_PATH || '/snap/bin/chromium',
         args: [
-          '--start-maximized',
-          '--window-position=0,0',
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
           '--disable-backgrounding-occluded-windows',
           '--disable-background-timer-throttling',
           '--disable-renderer-backgrounding',
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
           `--user-data-dir=${profileDir}`
         ],
-        defaultViewport: null,
+        defaultViewport: { width: 1280, height: 800 },
         timeout: 60000,
         ignoreDefaultArgs: ['--enable-automation']
       });
