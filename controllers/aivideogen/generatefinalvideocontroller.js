@@ -769,7 +769,11 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
     if (onProgress) onProgress(20, 'Processing images...');
     console.log('[async-video] 20% Processing images count=', images.length);
 
-    // Save images and create image sequence
+    // Target reel resolution (industry standard 9:16)
+    const TARGET_W = 1080;
+    const TARGET_H = 1920;
+
+    // Save images and normalize to TARGET_WxTARGET_H (prevents 256x256 output)
     const imagePaths = [];
     for (let i = 0; i < images.length; i++) {
       // Accept either base64 string or object with { image: base64 }
@@ -778,10 +782,44 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
       if (!base64Data || typeof base64Data !== 'string') {
         throw new Error(`Invalid image data at index ${i} - expected base64 string or { image: base64 }`);
       }
+
       const imageBuffer = Buffer.from(base64Data, 'base64');
-      const imagePath = path.join(tempDir, `image_${i}.jpg`);
-      fs.writeFileSync(imagePath, imageBuffer);
-      imagePaths.push(imagePath);
+      const tempImagePath = path.join(tempDir, `temp_image_${i}.jpg`);
+      const finalImagePath = path.join(tempDir, `image_${i}.jpg`);
+      fs.writeFileSync(tempImagePath, imageBuffer);
+
+      // Convert/scale/pad using FFmpeg so the base video becomes 1080x1920
+      await new Promise((resolve) => {
+        ffmpeg()
+          .input(tempImagePath)
+          .outputOptions([
+            '-vf',
+            `scale=${TARGET_W}:${TARGET_H}:force_original_aspect_ratio=decrease,pad=${TARGET_W}:${TARGET_H}:(ow-iw)/2:(oh-ih)/2:black`,
+            '-frames:v',
+            '1',
+            '-q:v',
+            '2',
+            '-y',
+          ])
+          .output(finalImagePath)
+          .on('end', () => {
+            try {
+              if (fs.existsSync(tempImagePath)) fs.unlinkSync(tempImagePath);
+            } catch (_) {}
+            resolve();
+          })
+          .on('error', (err) => {
+            console.warn(`[async-video] Failed to normalize image ${i}, using original.`, err?.message || err);
+            try {
+              fs.copyFileSync(tempImagePath, finalImagePath);
+              fs.unlinkSync(tempImagePath);
+            } catch (_) {}
+            resolve();
+          })
+          .run();
+      });
+
+      imagePaths.push(finalImagePath);
     }
 
     if (onProgress) onProgress(30, 'Creating image sequence...');
@@ -819,7 +857,24 @@ const generateFinalVideoAsync = async (requestData, options = {}) => {
       ffmpeg()
         .input(inputFile)
         .inputOptions(['-f', 'concat', '-safe', '0'])
-        .outputOptions(['-r', '30', '-pix_fmt', 'yuv420p', '-y'])
+        .outputOptions([
+          '-c:v',
+          'libx264',
+          '-preset',
+          'veryfast',
+          // Better quality for reels while keeping size reasonable
+          '-crf',
+          '20',
+          '-pix_fmt',
+          'yuv420p',
+          '-r',
+          '30',
+          '-vf',
+          `scale=${TARGET_W}:${TARGET_H}:force_original_aspect_ratio=decrease,pad=${TARGET_W}:${TARGET_H}:(ow-iw)/2:(oh-ih)/2:black`,
+          '-movflags',
+          '+faststart',
+          '-y',
+        ])
         .addOption('-loglevel', 'verbose')
         .output(tempVideoPath)
         .on('start', (cmd) => {

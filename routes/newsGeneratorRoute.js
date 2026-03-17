@@ -2,6 +2,35 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 
+const extractFirstJsonObject = (text) => {
+  const s = String(text || '').trim();
+  if (!s) return null;
+  // Fast path
+  try {
+    return JSON.parse(s);
+  } catch (_) {
+    // continue
+  }
+  // Try to extract first {...} block
+  const start = s.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '{') depth++;
+    if (ch === '}') depth--;
+    if (depth === 0) {
+      const candidate = s.slice(start, i + 1);
+      try {
+        return JSON.parse(candidate);
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+  return null;
+};
+
 /**
  * POST /api/news/generate-news
  * Generates a structured news article using Groq LLM.
@@ -17,6 +46,10 @@ router.post('/generate-news', async (req, res) => {
   const safeCategory = category || 'General';
   const safeTone = tone || 'Formal';
   const safeLanguage = language || 'English';
+
+  if (!process.env.GROQ_API_KEY || !String(process.env.GROQ_API_KEY).trim()) {
+    return res.status(500).json({ error: 'GROQ_API_KEY is missing on the backend. Add it to .env and restart the server.' });
+  }
 
   const systemPrompt = `You are a professional news journalist. Always respond in ${safeLanguage}. Write structured, factual, and engaging news articles.`;
 
@@ -38,34 +71,125 @@ Rules:
 - Return JSON only, no extra text`;
 
   try {
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        max_tokens: 1024,
-        temperature: 0.7,
-        response_format: { type: 'json_object' }
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
-      }
-    );
+    const groqUrl = 'https://api.groq.com/openai/v1/chat/completions';
+    const headers = {
+      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      'Content-Type': 'application/json'
+    };
 
-    const rawContent = response.data?.choices?.[0]?.message?.content || '{}';
+    const basePayload = {
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      max_tokens: 900,
+      temperature: 0.4
+    };
 
-    let parsed;
+    let rawContent = null;
+    let parsed = null;
+
+    // Attempt 1: strict JSON mode (best when it works)
     try {
-      parsed = JSON.parse(rawContent);
-    } catch {
-      return res.status(500).json({ error: 'Failed to parse AI response as JSON' });
+      const r1 = await axios.post(
+        groqUrl,
+        { ...basePayload, response_format: { type: 'json_object' } },
+        { headers, timeout: 30000 }
+      );
+      rawContent = r1.data?.choices?.[0]?.message?.content || '';
+      parsed = extractFirstJsonObject(rawContent);
+    } catch (e1) {
+      const msg = e1.response?.data?.error?.message || e1.message;
+      const isJsonFormatFailure =
+        String(msg || '').toLowerCase().includes('failed to generate json') ||
+        String(msg || '').toLowerCase().includes('failed_generation');
+
+      // Attempt 2: non-strict mode + JSON extraction (handles Groq JSON-mode failures)
+      if (isJsonFormatFailure) {
+        const system2 =
+          `${systemPrompt}\n` +
+          `You MUST output valid JSON only. Do NOT include markdown or extra text.`;
+        const user2 =
+          `${userPrompt}\n\n` +
+          `IMPORTANT: Output must be a single JSON object.`;
+
+        const r2 = await axios.post(
+          groqUrl,
+          {
+            ...basePayload,
+            messages: [
+              { role: 'system', content: system2 },
+              { role: 'user', content: user2 }
+            ],
+            temperature: 0.2
+            // no response_format here on purpose
+          },
+          { headers, timeout: 30000 }
+        );
+        rawContent = r2.data?.choices?.[0]?.message?.content || '';
+        parsed = extractFirstJsonObject(rawContent);
+      } else {
+        throw e1;
+      }
+    }
+
+    // Attempt 3: ultra-strict retry (works around occasional non-JSON completions)
+    if (!parsed) {
+      const system3 =
+        `${systemPrompt}\n` +
+        `Output MUST be a SINGLE valid JSON object and nothing else.\n` +
+        `Do not wrap in markdown. Do not add comments. Do not add trailing commas.\n` +
+        `All newlines must be inside JSON string values only.`;
+      const user3 =
+        `Return ONLY a JSON object with keys headline, subheadline, body.\n` +
+        `Topic: ${topic.trim()}\n` +
+        `Category: ${safeCategory}\n` +
+        `Tone: ${safeTone}\n` +
+        `Language: ${safeLanguage}\n` +
+        `body must have 3 paragraphs separated by \\n\\n.\n` +
+        `No extra keys. No extra text.`;
+
+      const r3 = await axios.post(
+        groqUrl,
+        {
+          ...basePayload,
+          messages: [
+            { role: 'system', content: system3 },
+            { role: 'user', content: user3 }
+          ],
+          temperature: 0,
+          max_tokens: 700
+        },
+        { headers, timeout: 30000 }
+      );
+      rawContent = r3.data?.choices?.[0]?.message?.content || '';
+      parsed = extractFirstJsonObject(rawContent);
+    }
+
+    // Final fallback: deterministic template so industrial flow never 500s
+    if (!parsed) {
+      const t = topic.trim();
+      const headline = `${t}`.split(/\s+/).slice(0, 12).join(' ');
+      const subheadline = `Update in ${safeCategory}: key developments and what it means next.`;
+      const body =
+        `In a ${safeTone.toLowerCase()} update, the latest developments around "${t}" are drawing attention across ${safeCategory.toLowerCase()} circles.\n\n` +
+        `Early signals suggest a mix of opportunities and open questions, with stakeholders watching for verified details and official statements. Analysts note that context, timelines, and reliable sources will be crucial for understanding the full impact.\n\n` +
+        `Going forward, the focus will remain on confirmation of facts, practical implications for the public and industry, and the next milestones expected in the coming days.`;
+
+      const fullArticle = `${headline}\n\n${subheadline}\n\n${body}`;
+      return res.json({
+        success: true,
+        headline,
+        subheadline,
+        body,
+        fullArticle,
+        language: safeLanguage,
+        category: safeCategory,
+        tone: safeTone,
+        fallback: true,
+        fallbackReason: 'Groq returned non-JSON output; served deterministic template'
+      });
     }
 
     const headline = (parsed.headline || '').trim();

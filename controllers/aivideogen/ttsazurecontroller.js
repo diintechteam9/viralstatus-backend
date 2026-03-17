@@ -51,6 +51,11 @@ const textToSpeechAzure = async (req, res) => {
     const url = endpoint + '/cognitiveservices/v1';
     const v = (voiceName && String(voiceName).trim()) || defaultVoice;
 
+    // Derive xml:lang from voice name (e.g. "hi-IN-SwaraNeural" -> "hi-IN")
+    // Fallback to "en-US" if voice name doesn't match pattern
+    const langMatch = v.match(/^([a-z]{2,3}-[A-Z]{2,3})-/);
+    const xmlLang = langMatch ? langMatch[1] : 'en-US';
+
     // Basic SSML
     const escaped = String(text)
       .replace(/&/g, '&amp;')
@@ -61,7 +66,7 @@ const textToSpeechAzure = async (req, res) => {
 
     const ssml =
       `<?xml version="1.0" encoding="utf-8"?>` +
-      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">` +
+      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${xmlLang}">` +
       `<voice name="${v}">${escaped}</voice>` +
       `</speak>`;
 

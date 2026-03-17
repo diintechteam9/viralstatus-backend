@@ -31,10 +31,13 @@ const createAsyncVideoJob = async (req, res) => {
       });
     }
 
-    if (!imageSrt && !deepSrt) {
+    // BUG FIX #1 (backend side): imageSrt missing hone par srt ko fallback ke roop mein use karo
+    // NewsGenerator jaise tools ek hi SRT bhejte hain jo overlay aur image timing dono ke liye kaam karta hai
+    const resolvedImageSrt = imageSrt || deepSrt || srt;
+    if (!resolvedImageSrt) {
       return res.status(400).json({ 
         success: false,
-        error: 'No Deepgram SRT provided for image timing (imageSrt)' 
+        error: 'No SRT provided for image timing (imageSrt or srt required)' 
       });
     }
 
@@ -57,7 +60,7 @@ const createAsyncVideoJob = async (req, res) => {
       images,
       audio,
       srt,
-      imageSrt: imageSrt || deepSrt,
+      imageSrt: resolvedImageSrt,
       cardName,
       category,
       userId,
@@ -73,7 +76,7 @@ const createAsyncVideoJob = async (req, res) => {
       images,
       audio,
       srt,
-      imageSrt: imageSrt || deepSrt
+      imageSrt: resolvedImageSrt
     });
 
     // Return immediate response with job ID

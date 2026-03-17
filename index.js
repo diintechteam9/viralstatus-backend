@@ -61,6 +61,8 @@ const videoToSegmentsRoutes = require('./routes/videotosegments');
 const websiteAnalyzerRoutes = require('./routes/websiteAnalyzerRoutes');  // website analyzer
 const websiteRoutes = require('./routes/websiteRoutes');
 const newsGeneratorRoute = require('./routes/newsGeneratorRoute');
+const blogGeneratorRoute = require('./routes/blogGeneratorRoute');
+const qnaGeneratorRoute = require('./routes/qnaGeneratorRoute');
 
 // lead capture routes
 const cardRoutes = require('./routes/leadcapture/cardRoutes');
@@ -254,6 +256,8 @@ app.use('/api/website-analyzer', websiteAnalyzerRoutes);
 // Website Analysis Routes
 app.use('/api/website', websiteRoutes);
 app.use('/api/news', newsGeneratorRoute);
+app.use('/api/blog', blogGeneratorRoute);
+app.use('/api/qna', qnaGeneratorRoute);
 
 // Logging middleware (only in development)
 if (process.env.NODE_ENV === 'development') {
