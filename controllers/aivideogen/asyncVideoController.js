@@ -216,7 +216,7 @@ const refreshCardUrls = async (req, res) => {
     const VideoJob = require('../../models/VideoJob');
     const { GetObjectCommand } = require('@aws-sdk/client-s3');
     const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
-    const { s3, BUCKET_NAME } = require('../../config/s3');
+    const { s3, BUCKET_NAME } = require('../../config/r2');
 
     // Get all jobs for this card
     const jobs = await VideoJob.getCardJobs(cardId, 50, 0);

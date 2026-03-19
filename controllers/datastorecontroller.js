@@ -1,11 +1,4 @@
-const {
-    PutObjectCommand,
-    DeleteObjectCommand,
-    ListObjectsV2Command,
-    GetObjectCommand,
-} = require("@aws-sdk/client-s3");
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
-const { s3, BUCKET_NAME } = require("../config/s3");
+const { putobject, getobject, deleteObject } = require('../utils/r2');
 const Datastore = require("../models/datastore");
 const Category = require("../models/category");
 const Folder = require("../models/Folder");
@@ -66,24 +59,14 @@ const getUploadUrl = async (req, res) => {
         // Generate S3 key using IDs
         const key = `${userId}/${categoryId}/${subcategoryId ? subcategoryId + '/' : ''}${folderId}/${fileId}`;
         
-        const command = new PutObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: key,
-            ContentType: mimeType,
-            ACL: 'private'
-        });
-
-        const url = await getSignedUrl(s3, command, { 
-            expiresIn: 3600,
-            signableHeaders: new Set(['host', 'content-type'])
-        });
+        const url = await putobject(key, mimeType);
         
         // Create datastore entry
         const datastoreData = {
             type: type || 'Image',
             title: title || fileId,
             description: description || '',
-            fileUrl: `https://${BUCKET_NAME}.s3.amazonaws.com/${key}`,
+            fileUrl: await getobject(key),
             fileName: fileId,
             fileSize: fileSize || 0,
             mimeType: mimeType,
@@ -186,15 +169,7 @@ const getDownloadUrl = async (req, res) => {
         }
 
         const key = file.metadata.key;
-        const command = new GetObjectCommand({ 
-            Bucket: BUCKET_NAME, 
-            Key: key 
-        });
-
-        const url = await getSignedUrl(s3, command, { 
-            expiresIn: 3600,
-            signableHeaders: new Set(['host'])
-        });
+        const url = await getobject(key);
 
         res.json({ 
             url,
@@ -270,12 +245,7 @@ const deleteFile = async (req, res) => {
         const key = `${userId}/${category.slug}/${subcategory ? subcategory.slug + '/' : ''}${folderName}/${fileName}`;
         
         // First delete from S3
-        const command = new DeleteObjectCommand({ 
-            Bucket: BUCKET_NAME, 
-            Key: key 
-        });
-
-        await s3.send(command);
+        await deleteObject(key);
         
         // Then delete from MongoDB
         const deleteResult = await Datastore.findOneAndDelete({

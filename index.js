@@ -4,7 +4,7 @@ const http = require('http');
 const cors = require("cors");
 const session = require('express-session');
 const connectDB = require("./config/db");
-const { configureCors } = require("./config/s3Cors");
+const { configureCors } = require("./config/r2Cors");
 
 // lead capture
 const helmet = require('helmet');
@@ -63,6 +63,18 @@ const websiteRoutes = require('./routes/websiteRoutes');
 const newsGeneratorRoute = require('./routes/newsGeneratorRoute');
 const blogGeneratorRoute = require('./routes/blogGeneratorRoute');
 const qnaGeneratorRoute = require('./routes/qnaGeneratorRoute');
+const reelGeneratorRoute = require('./routes/reelGeneratorRoute');
+const reviewGeneratorRoute = require('./routes/reviewGeneratorRoute');
+const carouselGeneratorRoute = require('./routes/carouselGeneratorRoute');
+const infographicGeneratorRoute = require('./routes/infographicGeneratorRoute');
+const podcastGeneratorRoute = require('./routes/podcastGeneratorRoute');
+const trendGeneratorRoute = require('./routes/trendGeneratorRoute');
+const captionGeneratorRoute = require('./routes/captionGeneratorRoute');
+const productComparatorRoute = require('./routes/productComparatorRoute');
+const tripAdvisorRoute = require('./routes/tripAdvisorRoute');
+const itineraryRoute = require('./routes/itineraryRoute');
+const landingPageRoute = require('./routes/landingPageRoute');
+const agentRoute = require('./routes/agentRoute');
 
 // lead capture routes
 const cardRoutes = require('./routes/leadcapture/cardRoutes');
@@ -156,7 +168,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// Configure CORS for S3
+// Configure CORS for R2
 configureCors();
 
 const PORT = process.env.PORT || 4000;
@@ -258,6 +270,18 @@ app.use('/api/website', websiteRoutes);
 app.use('/api/news', newsGeneratorRoute);
 app.use('/api/blog', blogGeneratorRoute);
 app.use('/api/qna', qnaGeneratorRoute);
+app.use('/api/reel', reelGeneratorRoute);
+app.use('/api/review', reviewGeneratorRoute);
+app.use('/api/carousel', carouselGeneratorRoute);
+app.use('/api/infographic', infographicGeneratorRoute);
+app.use('/api/podcast', podcastGeneratorRoute);
+app.use('/api/trend', trendGeneratorRoute);
+app.use('/api/caption', captionGeneratorRoute);
+app.use('/api/product-comparator', productComparatorRoute);
+app.use('/api/trip-advisor', tripAdvisorRoute);
+app.use('/api/itinerary', itineraryRoute);
+app.use('/api/landing-page', landingPageRoute);
+app.use('/api/agent', agentRoute);
 
 // Logging middleware (only in development)
 if (process.env.NODE_ENV === 'development') {

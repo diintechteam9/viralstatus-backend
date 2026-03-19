@@ -1,7 +1,7 @@
 const ImagePool = require('../models/imagePool');
-const { putobject } = require('../utils/s3'); 
+const { putobject } = require('../utils/r2'); 
 const Image = require('../models/Image');
-const { deleteObject } = require('../utils/s3');
+const { deleteObject } = require('../utils/r2');
 const Client = require('../models/client');
 const mongoose = require('mongoose');
 

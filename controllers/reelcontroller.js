@@ -1,6 +1,6 @@
 const busboy = require('busboy');
 const { PutObjectCommand } = require('@aws-sdk/client-s3');
-const { s3Client, getobject, deleteObject } = require('../utils/s3');
+const { s3Client, getobject, deleteObject } = require('../utils/r2');
 const Reel = require('../models/Reel');
 const Pool = require('../models/pool');
 const User = require('../models/user');
@@ -55,15 +55,13 @@ exports.uploadReels = async (req, res) => {
         filename = `${campaignName}_reel${currentReelNumber}.mp4`;
       }
       const s3Key = `${poolId}/reels/${filename}`;
-      const uploadParams = {
-        Bucket: process.env.S3_BUCKET_NAME,
+      const uploadPromise = s3Client.send(new PutObjectCommand({
+        Bucket: process.env.R2_BUCKET,
         Key: s3Key,
         Body: fileBuffer,
         ContentType: mimetype || 'video/mp4',
         ContentLength: fileBuffer.length,
-      };
-
-      const uploadPromise = s3Client.send(new PutObjectCommand(uploadParams))
+      }))
         .then(async () => {
           // Generate pre-signed GET URL for access
           const s3Url = await getobject(s3Key);
@@ -432,7 +430,7 @@ exports.getSharedReelsForUser = async (req, res) => {
       return res.json({ success: true, reels: [] });
     }
     // Remove the filter for isTaskCompleted, include all reels
-    const incompleteReels = shared.reels.filter(r => !r.isTaskComplete);
+    const incompleteReels = shared.reels.filter(r => !r.isTaskComplete); // kept for future use
     const reelsToReturn = shared.reels;
 
     // Fetch userResponse for this user
@@ -443,7 +441,6 @@ exports.getSharedReelsForUser = async (req, res) => {
     const reelsWithFreshUrls = await Promise.all(reelsToReturn.map(async r => {
       // Find matching userResponse entry by reelId and userId
       const userRespEntry = userResponses.find(ur => String(ur.reelId) === String(r.reelId));
-      console.log(userRespEntry);
       return {
         reelId: r.reelId,
         s3Key: r.s3Key,
@@ -676,9 +673,8 @@ exports.updateTaskAccepted = async (req, res) => {
 };
 
 exports.updateTaskStatusAccepted = async (req, res) => {
-  const { userId, googleId } = req.params;
-  
-}
+  return res.status(501).json({ error: 'Not implemented' });
+};
 
 // Update TaskStatus to 'accepted' for a specific reel (POST)
 exports.acceptTaskStatus = async (req, res) => {

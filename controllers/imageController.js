@@ -1,6 +1,6 @@
 const busboy = require('busboy');
 const { PutObjectCommand } = require('@aws-sdk/client-s3');
-const { s3Client, getobject, deleteObject } = require('../utils/s3');
+const { s3Client, getobject, deleteObject } = require('../utils/r2');
 const Image = require('../models/Image');
 const ImagePool = require('../models/imagePool');
 
@@ -49,15 +49,13 @@ exports.uploadImages = async (req, res) => {
         filename = `${poolName}_image${currentImageNumber}.${ext}`;
       }
       const s3Key = `${imagePoolId}/images/${filename}`;
-      const uploadParams = {
-        Bucket: process.env.S3_BUCKET_NAME,
+      const uploadPromise = s3Client.send(new PutObjectCommand({
+        Bucket: process.env.R2_BUCKET,
         Key: s3Key,
         Body: fileBuffer,
         ContentType: mimetype || 'image/jpeg',
         ContentLength: fileBuffer.length,
-      };
-
-      const uploadPromise = s3Client.send(new PutObjectCommand(uploadParams))
+      }))
         .then(async () => {
           // Generate pre-signed GET URL for access
           const s3Url = await getobject(s3Key);

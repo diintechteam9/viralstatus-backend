@@ -2,24 +2,21 @@
 require('dotenv').config();
 const axios = require('axios');
 const crypto = require('crypto');
-const { s3Client, getobject } = require('../../utils/s3');
+const { s3Client, getobject } = require('../../utils/r2');
 const { PutObjectCommand } = require('@aws-sdk/client-s3');
 
 const HEYGEN_API_KEY = process.env.HEYGEN_API_KEY;
-const S3_BUCKET = process.env.S3_BUCKET_NAME;
 
 async function uploadImageToHeyGen(imageBase64) {
   try {
     const imageBuffer = Buffer.from(imageBase64, 'base64');
     const key = `heygen/images/${Date.now()}-${crypto.randomBytes(6).toString('hex')}.jpg`;
-    await s3Client.send(
-      new PutObjectCommand({
-        Bucket: S3_BUCKET,
-        Key: key,
-        Body: imageBuffer,
-        ContentType: 'image/jpeg',
-      })
-    );
+    await s3Client.send(new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET,
+      Key: key,
+      Body: imageBuffer,
+      ContentType: 'image/jpeg',
+    }));
     const presignedUrl = await getobject(key);
     console.log("S3 Image URL for HeyGen:", presignedUrl); // <-- Added for debugging
     if (!presignedUrl) {

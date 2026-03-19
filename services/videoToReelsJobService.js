@@ -3,7 +3,7 @@ const { generateReel, generateReelSegments } = require('../controllers/videoToRe
 const { generateVideoWithWordSrt } = require('../controllers/videosubtitlecontroller');
 const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
-const { s3, BUCKET_NAME } = require('../config/s3');
+const { r2Client: s3, BUCKET_NAME } = require('../config/r2');
 const fs = require('fs');
 const path = require('path');
 

@@ -7,7 +7,7 @@ const os = require('os');
 const axios = require('axios');
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
-const { s3, BUCKET_NAME } = require("../config/s3");
+const { r2Client: s3, BUCKET_NAME } = require('../config/r2');
 const Datastore = require("../models/datastore");
 
 // Set ffmpeg path

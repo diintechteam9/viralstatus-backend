@@ -2,9 +2,7 @@ const Admin = require("../models/admin");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const Client = require("../models/client");
-const { s3, BUCKET_NAME } = require("../config/s3");
-const { PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { putobject, getobject } = require("../utils/r2");
 
 // Generate JWT Token for admin
 const generateAdminToken = (id) => {
@@ -182,7 +180,7 @@ const getClients = async (req, res) => {
       // Use the provided businessLogoUrl or construct from key if needed
       let finalBusinessLogoUrl = businessLogoUrl;
       if (businessLogoKey && !businessLogoUrl) {
-        finalBusinessLogoUrl = `https://${BUCKET_NAME}.s3.amazonaws.com/${businessLogoKey}`;
+        finalBusinessLogoUrl = await getobject(businessLogoKey);
       }
 
       // Create new client
@@ -400,28 +398,12 @@ const uploadBusinessLogo = async (req, res) => {
     const timestamp = Date.now();
     const s3Key = `admin/business-logos/${timestamp}_${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
 
-    // Create presigned URL for upload with proper configuration
-    const command = new PutObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: s3Key,
-      ContentType: mimeType
-    });
-
-    const uploadUrl = await getSignedUrl(s3, command, { 
-      expiresIn: 3600,
-      unhoistableHeaders: new Set(['x-amz-acl'])
-    });
-
-    // Construct the final S3 URL
-    const fileUrl = `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`;
-
-    console.log('Generated upload URL for:', s3Key);
+    const uploadUrl = await putobject(s3Key, mimeType);
 
     res.json({
       success: true,
       uploadUrl,
       s3Key,
-      fileUrl,
       message: "Upload URL generated successfully"
     });
 
@@ -447,15 +429,7 @@ const getBusinessLogoUrl = async (req, res) => {
       });
     }
 
-    // Create presigned URL for accessing the business logo
-    const command = new GetObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: businessLogoKey
-    });
-
-    const presignedUrl = await getSignedUrl(s3, command, {
-      expiresIn: 3600 // 1 hour
-    });
+    const presignedUrl = await getobject(businessLogoKey);
 
     res.json({
       success: true,

@@ -1,7 +1,8 @@
 const Campaign = require('../models/campaign');
 const Group = require('../models/group');
 const crypto = require('crypto');
-const { putobject, getobject } = require('../utils/s3');
+const { putobject, getobject, s3Client } = require('../utils/r2');
+const { PutObjectCommand } = require('@aws-sdk/client-s3');
 const multer = require('multer');
 const RegisteredCampaign = require('../models/RegisteredCampaign');
 const userResponse = require('../models/userResponse');
@@ -134,7 +135,7 @@ exports.createCampaign = [
       if (!campaignName || !brandName || !goal || !clientId || !req.file || !description || !startDate || !endDate || !limit || !views || !credits || !location) {
         return res.status(400).json({ success: false, message: 'Missing required fields (campaignName, brandName, goal, clientId, image, description, startDate, endDate, limit, views, credits, location)' });
       }
-      // Generate campaignId for S3 key
+      // Generate campaignId for R2 key
       const campaignId = generateCampaignId(campaignName);
       // Convert the uploaded image to PNG using sharp
       const pngBuffer = await sharp(req.file.buffer).png().toBuffer();
@@ -142,12 +143,10 @@ exports.createCampaign = [
       const originalName = req.file.originalname.replace(/\s+/g, '_').replace(/\.[^/.]+$/, ".png");
       const s3Key = `${clientId}/${campaignId}/${originalName}`;
       const contentType = 'image/png';
-      console.log('Preparing to upload to S3:', s3Key, contentType);
-      // Actually upload the file to S3 using AWS SDK
-      const { s3Client } = require('../utils/s3');
-      const { PutObjectCommand } = require('@aws-sdk/client-s3');
+      console.log('Preparing to upload to R2:', s3Key, contentType);
+      // Upload the file to Cloudflare R2 (S3-compatible)
       await s3Client.send(new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
+        Bucket: process.env.R2_BUCKET,
         Key: s3Key,
         Body: pngBuffer, // Use the converted PNG buffer
         ContentType: contentType,
@@ -292,7 +291,7 @@ exports.getActiveCampaigns = async (req, res) => {
   }
 };
 
-// Upload campaign image to S3
+// Upload campaign image to R2
 exports.uploadCampaignImage = [
   upload.single('image'),
   async (req, res) => {
@@ -301,7 +300,7 @@ exports.uploadCampaignImage = [
       if (!req.file || !clientId || !campaignName) {
         return res.status(400).json({ success: false, message: 'Missing image, clientId, or campaignName' });
       }
-      // Generate campaignId for S3 key
+      // Generate campaignId for R2 key
       const campaignId = generateCampaignId(campaignName);
       const originalName = req.file.originalname.replace(/\s+/g, '_');
       const s3Key = `${clientId}/${campaignId}/${originalName}`;
@@ -311,7 +310,7 @@ exports.uploadCampaignImage = [
       res.json({ success: true, key: s3Key });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ success: false, message: 'S3 upload error' });
+      res.status(500).json({ success: false, message: 'R2 upload error' });
     }
   }
 ];
@@ -512,7 +511,6 @@ exports.setActiveParticipant = async (req, res) => {
       activeParticipants: campaign.activeParticipants,
       userIds: campaign.userIds
     });
-    console.log(res);
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error", error: err.message });
   }
@@ -762,7 +760,7 @@ exports.getUserCampaignData = async (req, res) => {
     }
     const RegisteredCampaign = require('../models/RegisteredCampaign');
     const userResponse = require('../models/userResponse');
-    const { getobject } = require('../utils/s3');
+    const { getobject } = require('../utils/r2');
 
     // Find registered campaigns for the user
     const regDoc = await RegisteredCampaign.findOne({ userId });

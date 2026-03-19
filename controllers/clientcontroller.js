@@ -172,8 +172,8 @@ const loginClient = async (req, res) => {
       // Use the provided businessLogoUrl or construct from key if needed
       let finalBusinessLogoUrl = businessLogoUrl;
       if (businessLogoKey && !businessLogoUrl) {
-        const { BUCKET_NAME } = require("../config/s3");
-        finalBusinessLogoUrl = `https://${BUCKET_NAME}.s3.amazonaws.com/${businessLogoKey}`;
+        const { getobject } = require('../utils/r2');
+        finalBusinessLogoUrl = await getobject(businessLogoKey);
       }
 
       // Create new client
