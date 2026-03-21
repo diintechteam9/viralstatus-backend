@@ -1,10 +1,10 @@
 require('dotenv').config();
 const { google } = require('googleapis');
 
-const redirectUri = `${process.env.VITE_BACKEND_URL}/auth/callback`;
+const redirectUri = process.env.REDIRECT_URI || `${process.env.BACKEND_URL}/auth/youtube/callback`;
 
 const oauth2Client = new google.auth.OAuth2(
-  process.env.CLIENT_ID,
+  process.env.GOOGLE_CLIENT_ID,
   process.env.CLIENT_SECRET,
   redirectUri
 );

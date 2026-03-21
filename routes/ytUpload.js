@@ -24,7 +24,7 @@ const upload = multer({
 // ── Helper: upload to YouTube ─────────────────────────────────────────────────
 async function uploadToYouTube({ tokens, filePath, title, description, tags, privacy, isShort }) {
   const auth = new google.auth.OAuth2(
-    process.env.CLIENT_ID,
+    process.env.GOOGLE_CLIENT_ID,
     process.env.CLIENT_SECRET
   );
   auth.setCredentials(tokens);
