@@ -1,9 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { oauth2Client } = require('../config/ytConfig');
+const { google } = require('googleapis');
+const Account = require('../models/Account');
 
-// Route to initiate YouTube OAuth
+const REDIRECT_URI = process.env.REDIRECT_URI || `${process.env.BACKEND_URL}/auth/youtube/callback`;
+
+// Initiate YouTube OAuth — userId passed as state from frontend
 router.get('/', (req, res) => {
+  const userId = req.query.userId || '';
   const authUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: [
@@ -11,25 +16,31 @@ router.get('/', (req, res) => {
       'https://www.googleapis.com/auth/youtube.readonly'
     ],
     prompt: 'consent',
+    redirect_uri: REDIRECT_URI,
+    state: userId,
   });
-
   res.redirect(authUrl);
 });
 
-// OAuth callback route with PKCE
+// OAuth callback — save tokens to DB
 router.get('/callback', async (req, res) => {
-  const { code } = req.query;
+  const { code, state: userId } = req.query;
 
   if (!code) {
-    console.error('No authorization code provided.');
     return res.redirect(`${process.env.FRONTEND_URL}/?error=no_code`);
   }
 
   try {
-    const { tokens } = await oauth2Client.getToken(code);
-
+    const { tokens } = await oauth2Client.getToken({ code, redirect_uri: REDIRECT_URI });
     oauth2Client.setCredentials(tokens);
-    req.session.tokens = tokens;
+
+    if (userId) {
+      await Account.findOneAndUpdate(
+        { userId },
+        { userId, youtubeTokens: tokens, updatedAt: new Date() },
+        { upsert: true, new: true }
+      );
+    }
 
     res.redirect(`${process.env.FRONTEND_URL}/accounts?auth=success`);
   } catch (error) {
@@ -38,51 +49,49 @@ router.get('/callback', async (req, res) => {
   }
 });
 
-// Disconnect YouTube account
+// Disconnect YouTube
 router.post('/youtube/disconnect', async (req, res) => {
   try {
-    // Get tokens from session
-    const { tokens } = req.session;
-    // Remove tokens from session
-    delete req.session.tokens;
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId required' });
 
-    if (tokens && tokens.access_token) {
-      const { google } = require('googleapis');
+    const account = await Account.findOne({ userId });
+    const tokens = account?.youtubeTokens;
+
+    if (tokens?.access_token) {
       const auth = new google.auth.OAuth2();
       auth.setCredentials(tokens);
-      try {
-        await auth.revokeCredentials();
-      } catch (err) {
-        // Log but do not throw, as the session is already cleared
-        console.error('Error revoking YouTube credentials:', err.message);
-      }
+      try { await auth.revokeCredentials(); } catch (_) {}
     }
 
+    await Account.findOneAndUpdate({ userId }, { youtubeTokens: null });
     res.json({ message: 'Successfully disconnected from YouTube' });
   } catch (error) {
-    console.error('Error disconnecting YouTube:', error);
     res.status(500).json({ error: 'Failed to disconnect from YouTube' });
   }
 });
 
-// Get YouTube user profile
+// Get YouTube profile
 router.get('/youtube/profile', async (req, res) => {
   try {
-    const { tokens } = req.session;
-    if (!tokens) {
-      return res.status(401).json({ error: 'Not authenticated' });
-    }
-    const auth = new (require('googleapis').google.auth.OAuth2)();
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+
+    const account = await Account.findOne({ userId });
+    const tokens = account?.youtubeTokens;
+
+    if (!tokens) return res.status(401).json({ error: 'Not authenticated' });
+
+    const auth = new google.auth.OAuth2(
+      process.env.YOUTUBE_CLIENT_ID,
+      process.env.YOUTUBE_CLIENT_SECRET
+    );
     auth.setCredentials(tokens);
-    const youtube = require('googleapis').google.youtube({ version: 'v3', auth });
-    const response = await youtube.channels.list({
-      part: 'snippet',
-      mine: true,
-    });
+    const youtube = google.youtube({ version: 'v3', auth });
+    const response = await youtube.channels.list({ part: 'snippet', mine: true });
     const channel = response.data.items[0];
-    if (!channel) {
-      return res.status(404).json({ error: 'YouTube channel not found' });
-    }
+    if (!channel) return res.status(404).json({ error: 'YouTube channel not found' });
+
     res.json({
       name: channel.snippet.title,
       picture: channel.snippet.thumbnails.default.url,
@@ -90,7 +99,6 @@ router.get('/youtube/profile', async (req, res) => {
       username: channel.snippet.customUrl || channel.snippet.title,
     });
   } catch (error) {
-    console.error('YouTube profile fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch YouTube profile' });
   }
 });

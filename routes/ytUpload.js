@@ -6,6 +6,7 @@ const path = require('path');
 const cron = require('node-cron');
 const router = express.Router();
 const YouTubeSchedule = require('../models/YouTubeSchedule');
+const Account = require('../models/Account');
 const { protect } = require('../middleware/auth');
 
 // ── Multer setup ──────────────────────────────────────────────────────────────
@@ -58,7 +59,9 @@ router.post('/upload', protect, (req, res) => {
     const { title, description, tags, privacy, isShort } = req.body;
     if (!title) return res.status(400).json({ error: 'Title is required' });
 
-    const tokens = req.session?.tokens;
+    const userId = (req.client?._id || req.user?._id || '').toString();
+    const account = await Account.findOne({ userId });
+    const tokens = account?.youtubeTokens;
     if (!tokens) {
       fs.unlinkSync(req.file.path);
       return res.status(401).json({ error: 'YouTube not connected. Please connect your account first.', code: 'NOT_CONNECTED' });
@@ -96,13 +99,14 @@ router.post('/schedule', protect, (req, res) => {
     if (!title)        return res.status(400).json({ error: 'Title is required' });
     if (!scheduledAt)  return res.status(400).json({ error: 'scheduledAt is required' });
 
-    const tokens = req.session?.tokens;
+    const userId = (req.client?._id || req.user?._id || '').toString();
+    const account = await Account.findOne({ userId });
+    const tokens = account?.youtubeTokens;
     if (!tokens) {
       fs.unlinkSync(req.file.path);
       return res.status(401).json({ error: 'YouTube not connected.', code: 'NOT_CONNECTED' });
     }
 
-    const userId    = req.client?._id || req.user?._id;
     const userModel = req.client ? 'Client' : 'User';
 
     const schedule = await YouTubeSchedule.create({
@@ -137,8 +141,10 @@ router.delete('/scheduled/:id', protect, async (req, res) => {
 });
 
 // ── GET /status — check if YouTube is connected ──────────────────────────────
-router.get('/status', (req, res) => {
-  res.json({ connected: !!req.session?.tokens });
+router.get('/status', protect, async (req, res) => {
+  const userId = (req.client?._id || req.user?._id || '').toString();
+  const account = await Account.findOne({ userId });
+  res.json({ connected: !!account?.youtubeTokens });
 });
 
 // ── CRON: every minute — process pending scheduled posts ─────────────────────
