@@ -2,8 +2,6 @@ const express = require('express');
 const router = express.Router();
 const { oauth2Client } = require('../config/ytConfig');
 
-const REDIRECT_URI = process.env.REDIRECT_URI || `${process.env.BACKEND_URL}/auth/youtube/callback`;
-
 // Route to initiate YouTube OAuth
 router.get('/', (req, res) => {
   const authUrl = oauth2Client.generateAuthUrl({
@@ -13,7 +11,6 @@ router.get('/', (req, res) => {
       'https://www.googleapis.com/auth/youtube.readonly'
     ],
     prompt: 'consent',
-    redirect_uri: REDIRECT_URI,
   });
 
   res.redirect(authUrl);
@@ -29,7 +26,7 @@ router.get('/callback', async (req, res) => {
   }
 
   try {
-    const { tokens } = await oauth2Client.getToken({ code, redirect_uri: REDIRECT_URI });
+    const { tokens } = await oauth2Client.getToken(code);
 
     oauth2Client.setCredentials(tokens);
     req.session.tokens = tokens;

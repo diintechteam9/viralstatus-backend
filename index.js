@@ -1,5 +1,6 @@
-const express = require("express");
 const dotenv = require("dotenv");
+dotenv.config();
+const express = require("express");
 const http = require('http');
 const cors = require("cors");
 const session = require('express-session');
@@ -85,8 +86,6 @@ const {
   startTemplateSyncScheduler,
   stopTemplateSyncScheduler,
 } = require("./services/whatsappTemplateSyncScheduler");
-
-dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
