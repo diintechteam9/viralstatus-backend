@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const YouTubeScheduleSchema = new mongoose.Schema({
-  userId:       { type: mongoose.Schema.Types.ObjectId, refPath: 'userModel' },
+  userId:       { type: String, index: true },   // stored as string for consistent querying
   userModel:    { type: String, enum: ['Client', 'User'] },
   title:        { type: String, required: true },
   description:  { type: String, default: '' },

@@ -9,7 +9,8 @@ const AccountSchema = new mongoose.Schema({
   connected: { type: Boolean, default: true },
 
   // YouTube tokens stored per user
-  userId: { type: mongoose.Schema.Types.ObjectId },
+  // Stored as String so both ObjectId.toString() and raw string queries match
+  userId: { type: String, index: true },
   youtubeTokens: { type: Object, default: null },
   updatedAt: { type: Date, default: Date.now }
 });
