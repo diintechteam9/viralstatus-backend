@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const AgentHistorySchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, refPath: 'userModel' },
+  userId: { type: String, index: true },
   userModel: { type: String, enum: ['Client', 'User'] },
   agentId: { type: String, enum: ['yo', 'vo', 'yovo'], required: true },
   task: { type: String, required: true },

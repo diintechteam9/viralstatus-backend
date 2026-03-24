@@ -119,10 +119,11 @@ app.use(cors({
             "https://viralstatus-frontend.vercel.app",
             "https://viralstatus-frontend.vercel.app/",
             "https://viralstatus-frontend-qiuf.vercel.app",
-            "http://localhost:5173",
-            "http://13.200.235.104:4000",
             "https://vs.yovoai.com",
-            "http://localhost:4000"
+            "https://vs.yovoai.com/",
+            "http://localhost:5173",
+            "http://localhost:4000",
+            "http://13.200.235.104:4000"
         ];
         
         if (allowedOrigins.indexOf(origin) !== -1) {
