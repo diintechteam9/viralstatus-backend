@@ -96,9 +96,23 @@ router.post('/disconnect', async (req, res) => {
 router.get('/profile', async (req, res) => {
   try {
     const { userId } = req.query;
-    if (!userId) return res.status(400).json({ error: 'userId is required' });
 
-    const account = await Account.findOne({ userId });
+    // Support Authorization header as fallback
+    let resolvedUserId = userId;
+    if (!resolvedUserId) {
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith('Bearer ')) {
+        try {
+          const jwt = require('jsonwebtoken');
+          const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET);
+          resolvedUserId = decoded.id;
+        } catch (_) {}
+      }
+    }
+
+    if (!resolvedUserId) return res.status(400).json({ error: 'userId is required' });
+
+    const account = await Account.findOne({ userId: resolvedUserId });
     const tokens = account?.youtubeTokens;
     if (!tokens) return res.status(401).json({ error: 'YouTube not connected', code: 'NOT_CONNECTED' });
 
@@ -114,10 +128,10 @@ router.get('/profile', async (req, res) => {
       try {
         const merged = { ...tokens, ...newTokens };
         await Account.findOneAndUpdate(
-          { userId },
+          { userId: resolvedUserId },
           { youtubeTokens: merged, updatedAt: new Date() }
         );
-        console.log(`[YT Auth] Tokens refreshed for userId: ${userId}`);
+        console.log(`[YT Auth] Tokens refreshed for userId: ${resolvedUserId}`);
       } catch (e) {
         console.error('[YT Auth] Failed to persist refreshed tokens:', e.message);
       }

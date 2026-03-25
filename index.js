@@ -197,13 +197,11 @@ app.use('/api/images', videoMergeRoutes);
 app.use('/api/video', videoOverlayRoutes);
 
 // Auth Routes for instagram and youtube
-// app.use('/api/instagram/reels', instagramReelsRoutes);
+app.use('/api/instagram/reels', instagramReelsRoutes);
 app.use('/api/youtube', ytUploadRoutes);
-// app.use('/api/webhooks', webhookRoutes);
-// app.use('/auth/instagram', instagramAuthRoutes);
+app.use('/auth/instagram', instagramAuthRoutes);
 app.use('/auth/youtube', youtubeAuthRoutes);
-// app.use('/api/instagram/api', apiInstagramRoutes);
-// app.use('/api/posts', postRoutes);
+app.use('/api/instagram', apiInstagramRoutes);
 
 // Google Authentication Routes
 app.use('/api/auth/google', googleAuthRoutes);

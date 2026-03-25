@@ -1,58 +1,36 @@
 const express = require('express');
 const InstagramAccount = require('../models/InstagramAccount');
+const { protect } = require('../middleware/auth');
 const router = express.Router();
 
-// Proper authentication middleware
-const authenticateUser = (req, res, next) => {
-  // For now, we'll use a default user ID since we don't have full auth
-  req.user = { _id: 'default_user' };
-  next();
-};
+function getUserId(req) {
+  return (req.client?.id || req.user?.id || '').toString();
+}
 
-// Get Instagram info by Instagram user ID (passed as query param)
-router.get('/instagram', authenticateUser, async (req, res) => {
+// GET /api/instagram/status
+router.get('/status', protect, async (req, res) => {
   try {
-    console.log('🔍 Fetching Instagram account for user:', req.user._id);
-    const instagramAccount = await InstagramAccount.findOne({ userId: req.user._id });
-    
-    if (!instagramAccount) {
-      console.log('❌ No Instagram account found for user:', req.user._id);
-      return res.status(404).json({ message: 'No Instagram account found' });
-    }
-    
-    console.log('✅ Found Instagram account:', instagramAccount.username);
-    res.json(instagramAccount);
-  } catch (err) {
-    console.error('❌ Error fetching Instagram account:', err);
-    res.status(500).json({ message: 'Server error' });
+    const userId = getUserId(req);
+    const account = await InstagramAccount.findOne({ userId });
+    return res.json({
+      connected: !!account,
+      username:  account?.username || null,
+      picture:   account?.profilePicture || null,
+    });
+  } catch (e) {
+    return res.status(500).json({ connected: false, error: e.message });
   }
 });
 
-// Disconnect Instagram account
-router.delete('/instagram', authenticateUser, async (req, res) => {
-  const instaUserId = req.body.instaUserId;
-  if (!instaUserId) {
-    console.log('❌ Missing Instagram User ID in disconnect request');
-    return res.status(400).json({ message: 'Missing Instagram User ID' });
-  }
-
+// DELETE /api/instagram/disconnect
+router.delete('/disconnect', protect, async (req, res) => {
   try {
-    console.log('🔄 Disconnecting Instagram account:', instaUserId);
-    const result = await InstagramAccount.deleteOne({ 
-      userId: req.user._id,
-      instagramId: instaUserId 
-    });
-    
-    if (result.deletedCount === 0) {
-      console.log('❌ No Instagram account found to disconnect');
-      return res.status(404).json({ message: 'Instagram account not found' });
-    }
-    
-    console.log('✅ Successfully disconnected Instagram account');
-    res.json({ message: 'Instagram disconnected' });
-  } catch (err) {
-    console.error('❌ Error disconnecting Instagram account:', err);
-    res.status(500).json({ message: 'Server error' });
+    const userId = getUserId(req);
+    await InstagramAccount.deleteOne({ userId });
+    console.log(`[IG] Disconnected for userId: ${userId}`);
+    return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
   }
 });
 

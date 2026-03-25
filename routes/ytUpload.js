@@ -32,7 +32,9 @@ const upload = multer({
 // auth.js sets req.user = { id, email } and req.client = { id, email }
 // Always use .id — never ._ id (that field doesn't exist on the plain object)
 function getUserId(req) {
-  return (req.client?.id || req.user?.id || '').toString();
+  const id = (req.client?.id || req.user?.id || '').toString();
+  console.log('[YT] getUserId:', id, '| client:', req.client?.id, '| user:', req.user?.id);
+  return id;
 }
 
 // ── Helper: safe file delete ──────────────────────────────────────────────────
@@ -77,21 +79,35 @@ async function uploadToYouTube({ tokens, filePath, title, description, tags, pri
 
   const finalTitle = isShort ? `${title} #Shorts` : title;
 
-  const response = await youtube.videos.insert({
-    part: 'snippet,status',
-    requestBody: {
-      snippet: {
-        title: finalTitle,
-        description: description || title,
-        tags: tags || [],
-        categoryId: '22',
+  // Fetch channel info alongside upload
+  const [uploadRes, channelRes] = await Promise.allSettled([
+    youtube.videos.insert({
+      part: 'snippet,status',
+      requestBody: {
+        snippet: {
+          title: finalTitle,
+          description: description || title,
+          tags: tags || [],
+          categoryId: '22',
+        },
+        status: { privacyStatus: privacy || 'public' },
       },
-      status: { privacyStatus: privacy || 'public' },
-    },
-    media: { body: fs.createReadStream(filePath) },
-  });
+      media: { body: fs.createReadStream(filePath) },
+    }),
+    youtube.channels.list({ part: 'snippet', mine: true }),
+  ]);
 
-  return response.data;
+  if (uploadRes.status === 'rejected') throw uploadRes.reason;
+
+  const channel = channelRes.status === 'fulfilled'
+    ? channelRes.value.data.items?.[0]
+    : null;
+
+  return {
+    ...uploadRes.value.data,
+    channelName: channel?.snippet?.title || '',
+    channelId:   channel?.id || '',
+  };
 }
 
 // ── POST /api/youtube/upload — publish immediately ────────────────────────────
@@ -115,6 +131,7 @@ router.post('/upload', protect, (req, res) => {
     let account;
     try {
       account = await Account.findOne({ userId });
+      console.log('[YT] Upload - userId:', userId, '| account found:', !!account, '| hasTokens:', !!account?.youtubeTokens);
     } catch (dbErr) {
       safeUnlink(req.file.path);
       console.error('[YT] DB error finding account:', dbErr.message);
@@ -141,12 +158,14 @@ router.post('/upload', protect, (req, res) => {
         isShort: isShort === 'true',
       });
       safeUnlink(req.file.path);
-      console.log(`[YT] Video uploaded successfully: ${data.id} by userId: ${userId}`);
+      console.log(`[YT] Video uploaded successfully: ${data.id} by userId: ${userId} on channel: ${data.channelName}`);
       return res.json({
         success: true,
         videoId: data.id,
         url: `https://youtube.com/watch?v=${data.id}`,
-        message: 'Video uploaded successfully',
+        channelName: data.channelName,
+        channelId: data.channelId,
+        message: `Video uploaded successfully to ${data.channelName || 'YouTube'}`,
       });
     } catch (e) {
       safeUnlink(req.file.path);
