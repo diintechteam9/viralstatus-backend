@@ -122,7 +122,7 @@ router.post('/upload', protect, (req, res) => {
 
       // 1. Create media container
       const containerRes = await axios.post(
-        `https://graph.facebook.com/v15.0/${account.instagramId}/media`,
+        `https://graph.facebook.com/v21.0/${account.instagramId}/media`,
         {
           media_type:    'REELS',
           video_url:     videoUrl,
@@ -138,7 +138,7 @@ router.post('/upload', protect, (req, res) => {
       let status;
       for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 5000));
-        const statusRes = await axios.get(`https://graph.facebook.com/v15.0/${containerId}`, {
+        const statusRes = await axios.get(`https://graph.facebook.com/v21.0/${containerId}`, {
           params: { fields: 'status_code,status', access_token: account.accessToken },
         });
         status = statusRes.data;
@@ -150,7 +150,7 @@ router.post('/upload', protect, (req, res) => {
 
       // 3. Publish
       const publishRes = await axios.post(
-        `https://graph.facebook.com/v15.0/${account.instagramId}/media_publish`,
+        `https://graph.facebook.com/v21.0/${account.instagramId}/media_publish`,
         { creation_id: containerId, access_token: account.accessToken }
       );
       if (!publishRes.data?.id) throw new Error('Failed to publish reel');

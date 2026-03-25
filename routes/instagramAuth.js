@@ -12,7 +12,7 @@ router.get('/callback', async (req, res) => {
 
   try {
     // Step 1: Short-lived FB token
-    const tokenRes = await axios.get('https://graph.facebook.com/v15.0/oauth/access_token', {
+    const tokenRes = await axios.get('https://graph.facebook.com/v21.0/oauth/access_token', {
       params: {
         client_id:     process.env.VITE_FB_APP_ID,
         redirect_uri:  process.env.VITE_FB_REDIRECT_URI,
@@ -23,7 +23,7 @@ router.get('/callback', async (req, res) => {
     const fbAccessToken = tokenRes.data.access_token;
 
     // Step 2: Long-lived token
-    const longRes = await axios.get('https://graph.facebook.com/v15.0/oauth/access_token', {
+    const longRes = await axios.get('https://graph.facebook.com/v21.0/oauth/access_token', {
       params: {
         grant_type:        'fb_exchange_token',
         client_id:         process.env.VITE_FB_APP_ID,
@@ -34,21 +34,21 @@ router.get('/callback', async (req, res) => {
     const longLivedToken = longRes.data.access_token;
 
     // Step 3: FB Pages
-    const pagesRes = await axios.get('https://graph.facebook.com/v15.0/me/accounts', {
+    const pagesRes = await axios.get('https://graph.facebook.com/v21.0/me/accounts', {
       params: { access_token: longLivedToken, fields: 'instagram_business_account,access_token,name' },
     });
     const page = pagesRes.data.data?.[0];
     if (!page) throw new Error('No managed Facebook pages found');
 
     // Step 4: Instagram Business Account ID
-    const igAccountRes = await axios.get(`https://graph.facebook.com/v15.0/${page.id}`, {
+    const igAccountRes = await axios.get(`https://graph.facebook.com/v21.0/${page.id}`, {
       params: { fields: 'instagram_business_account', access_token: page.access_token },
     });
     const igUserId = igAccountRes.data.instagram_business_account?.id;
     if (!igUserId) throw new Error('No Instagram Business account linked to this page');
 
     // Step 5: Instagram profile
-    const igUserRes = await axios.get(`https://graph.facebook.com/v15.0/${igUserId}`, {
+    const igUserRes = await axios.get(`https://graph.facebook.com/v21.0/${igUserId}`, {
       params: { fields: 'username,profile_picture_url', access_token: page.access_token },
     });
 
