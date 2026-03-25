@@ -4,6 +4,7 @@ const express = require("express");
 const http = require('http');
 const cors = require("cors");
 const session = require('express-session');
+const { MongoStore } = require('connect-mongo');
 const connectDB = require("./config/db");
 const { configureCors } = require("./config/r2Cors");
 
@@ -100,9 +101,10 @@ app.use(express.urlencoded({ limit: '200mb', extended: true }));
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
-  saveUninitialized: true,
+  saveUninitialized: false,
+  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI, ttl: 24 * 60 * 60 }),
   cookie: {
-    secure: true,
+    secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     sameSite: 'none',
     maxAge: 24 * 60 * 60 * 1000
