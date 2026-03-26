@@ -1,125 +1,201 @@
-const { OAuth2Client } = require('google-auth-library');
 const jwt = require('jsonwebtoken');
+const axios = require('axios');
 const Client = require('../models/client');
 
-// Initialize Google OAuth2 client
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_ANDROID_CLIENT_ID);
+// ─── Public Key Cache ────────────────────────────────────────────────────────
+
+const keyCache = {
+  firebase: { keys: {}, expiry: 0 },
+  google: { keys: {}, expiry: 0 },
+};
+
+const getFirebasePublicKeys = async () => {
+  if (Date.now() < keyCache.firebase.expiry && Object.keys(keyCache.firebase.keys).length > 0) {
+    return keyCache.firebase.keys;
+  }
+  const { data, headers } = await axios.get(
+    'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com'
+  );
+  const maxAge = parseInt((headers['cache-control'] || '').match(/max-age=(\d+)/)?.[1] || '3600');
+  keyCache.firebase.keys = data;
+  keyCache.firebase.expiry = Date.now() + maxAge * 1000;
+  return data;
+};
+
+const getGooglePublicKeys = async () => {
+  if (Date.now() < keyCache.google.expiry && Object.keys(keyCache.google.keys).length > 0) {
+    return keyCache.google.keys;
+  }
+  const { data, headers } = await axios.get(
+    'https://www.googleapis.com/oauth2/v1/certs'
+  );
+  const maxAge = parseInt((headers['cache-control'] || '').match(/max-age=(\d+)/)?.[1] || '3600');
+  keyCache.google.keys = data;
+  keyCache.google.expiry = Date.now() + maxAge * 1000;
+  return data;
+};
+
+// ─── Token Verifiers ─────────────────────────────────────────────────────────
+
+const verifyFirebaseToken = async (token) => {
+  const decoded = jwt.decode(token, { complete: true });
+  if (!decoded) throw new Error('Invalid token format');
+
+  const keys = await getFirebasePublicKeys();
+  const publicKey = keys[decoded.header.kid];
+
+  if (!publicKey) {
+    const err = new Error('Token expired or invalid — Firebase public key not found');
+    err.code = 'TOKEN_EXPIRED';
+    throw err;
+  }
+
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'yovoai';
+  try {
+    return jwt.verify(token, publicKey, {
+      algorithms: ['RS256'],
+      audience: projectId,
+      issuer: `https://securetoken.google.com/${projectId}`,
+    });
+  } catch (err) {
+    if (err.name === 'TokenExpiredError') err.code = 'TOKEN_EXPIRED';
+    throw err;
+  }
+};
+
+const verifyGoogleOAuthToken = async (token) => {
+  const decoded = jwt.decode(token, { complete: true });
+  if (!decoded) throw new Error('Invalid token format');
+
+  const keys = await getGooglePublicKeys();
+  const publicKey = keys[decoded.header.kid];
+
+  if (!publicKey) {
+    const err = new Error('Token expired or invalid — Google public key not found');
+    err.code = 'TOKEN_EXPIRED';
+    throw err;
+  }
+
+  try {
+    // No audience check — accept any Google OAuth token from any client
+    return jwt.verify(token, publicKey, {
+      algorithms: ['RS256'],
+      issuer: 'https://accounts.google.com',
+    });
+  } catch (err) {
+    if (err.name === 'TokenExpiredError') err.code = 'TOKEN_EXPIRED';
+    throw err;
+  }
+};
+
+// ─── Middleware ───────────────────────────────────────────────────────────────
 
 /**
- * Middleware to verify Google ID token
- * This middleware validates the Google ID token sent from the Flutter app
+ * Accepts both:
+ * 1. Firebase ID token  (iss: securetoken.google.com/yovoai)  — from Flutter FirebaseAuth.getIdToken()
+ * 2. Google OAuth token (iss: accounts.google.com)            — from Flutter GoogleSignIn idToken
+ *
+ * Token can be sent as:
+ * - Authorization: Bearer <token>   ← preferred
+ * - Body: { googleToken: "<token>" } ← fallback
  */
 const verifyGoogleToken = async (req, res, next) => {
-  // Log incoming request body and env for debugging
-  console.error('verifyGoogleToken: incoming body:', req.body);
-  console.error('verifyGoogleToken: GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID);
   try {
-    const { googleToken } = req.body;
+    let token;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    } else {
+      token = req.body?.googleToken;
+    }
 
-    if (!googleToken) {
-      console.error('verifyGoogleToken: googleToken missing in request body');
+    if (!token) {
       return res.status(400).json({
         success: false,
-        message: 'Google token is required'
+        message: 'Token required. Send as: Authorization: Bearer <token>',
       });
     }
 
-    // Verify the Google ID token
-    const ticket = await googleClient.verifyIdToken({
-      idToken: googleToken,
-      audience: [process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_ANDROID_CLIENT_ID].filter(Boolean),
-    });
+    const decoded = jwt.decode(token);
 
-    const payload = ticket.getPayload();
-    
-    // Add Google user info to request
-    req.googleUser = {
-      googleId: payload.sub,
-      email: payload.email,
-      name: payload.name,
-      picture: payload.picture,
-      emailVerified: payload.email_verified,
-      googleToken: googleToken
-    };
+    // Google Access Token (starts with ya29.) — verify via userinfo endpoint
+    const isAccessToken = token.startsWith('ya29.');
 
-    
+    let payload;
+
+    if (isAccessToken) {
+      const { data } = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!data.email) throw new Error('Invalid access token: no email found');
+      req.googleUser = {
+        googleId: data.sub,
+        email: data.email,
+        name: data.name,
+        picture: data.picture,
+        emailVerified: data.email_verified,
+      };
+    } else if (!decoded?.iss) {
+      return res.status(401).json({ success: false, message: 'Invalid token format' });
+    } else if (decoded.iss.startsWith('https://securetoken.google.com/')) {
+      payload = await verifyFirebaseToken(token);
+      req.googleUser = {
+        googleId: payload.user_id || payload.sub,
+        email: payload.email,
+        name: payload.name,
+        picture: payload.picture,
+        emailVerified: payload.email_verified,
+      };
+    } else {
+      payload = await verifyGoogleOAuthToken(token);
+      req.googleUser = {
+        googleId: payload.sub,
+        email: payload.email,
+        name: payload.name,
+        picture: payload.picture,
+        emailVerified: payload.email_verified,
+      };
+    }
+
     next();
   } catch (error) {
-    console.error('verifyGoogleToken error:', error && error.stack ? error.stack : error);
+    const isExpired = error.code === 'TOKEN_EXPIRED' || error.name === 'TokenExpiredError';
     return res.status(401).json({
       success: false,
-      message: 'Invalid Google token',
-      error: error && error.message ? error.message : error
+      message: isExpired ? 'Token expired. Please sign in again.' : 'Invalid token',
+      error: error.message,
     });
   }
 };
 
-/**
- * Middleware to verify JWT token and attach user to request
- */
+// ─── JWT Middleware ───────────────────────────────────────────────────────────
+
 const verifyJWTToken = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({
-        success: false,
-        message: 'Access token required'
-      });
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, message: 'Access token required' });
     }
-
-    const token = authHeader.split(' ')[1];
-    
-    // Verify JWT token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // Find user by ID
+    const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET);
     const client = await Client.findById(decoded.id).select('-password');
-    
-    if (!client) {
-      return res.status(401).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
+    if (!client) return res.status(401).json({ success: false, message: 'User not found' });
     req.user = client;
     next();
   } catch (error) {
-    console.error('JWT verification error:', error);
-    return res.status(401).json({
-      success: false,
-      message: 'Invalid or expired token'
-    });
+    return res.status(401).json({ success: false, message: 'Invalid or expired token' });
   }
 };
 
-/**
- * Optional middleware - verifies token if present, but doesn't require it
- */
 const optionalAuth = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.split(' ')[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (authHeader?.startsWith('Bearer ')) {
+      const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET);
       const client = await Client.findById(decoded.id).select('-password');
-      
-      if (client) {
-        req.user = client;
-      }
+      if (client) req.user = client;
     }
-    
-    next();
-  } catch (error) {
-    // Continue without authentication if token is invalid
-    next();
-  }
+  } catch (_) {}
+  next();
 };
 
-module.exports = {
-  verifyGoogleToken,
-  verifyJWTToken,
-  optionalAuth
-}; 
+module.exports = { verifyGoogleToken, verifyJWTToken, optionalAuth };

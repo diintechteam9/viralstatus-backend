@@ -1,6 +1,6 @@
 node_modules/
-
 node_modules
 .env
-
 temp/
+server.log
+getToken.js

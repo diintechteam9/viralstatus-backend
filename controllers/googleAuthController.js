@@ -1,10 +1,6 @@
-const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const Client = require("../models/client");
 const User = require("../models/user");
-const { OAuth2Client } = require('google-auth-library');
-const { USER_REFRESH_ACCOUNT_TYPE } = require("google-auth-library/build/src/auth/refreshclient");
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // const CreditWallet = require('../models/CreditWallet');
 const TelegramServiceController = require('./telegram/telegrambotalertcontroller');
