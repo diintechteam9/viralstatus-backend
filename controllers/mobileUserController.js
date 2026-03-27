@@ -71,12 +71,8 @@ const sendMobileOtp = async (mobile, otp, method = 'gupshup') => {
       {
         messaging_product: 'whatsapp',
         to: mobile.replace('+', ''),
-        type: 'template',
-        template: {
-          name: 'otp_verification',
-          language: { code: 'en' },
-          components: [{ type: 'body', parameters: [{ type: 'text', text: otp }] }],
-        },
+        type: 'text',
+        text: { body: message },
       },
       { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
     );
