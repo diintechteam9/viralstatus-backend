@@ -1,6 +1,6 @@
 # Mobile User API Documentation
 
-**BASE URL:** `http://localhost:4000/api/mobile/user`  
+**BASE URL:** `https://viralstatus-backend.serveminecraft.net/api/mobile/user`  
 **Content-Type:** `application/json`
 
 ---
@@ -26,7 +26,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
 {
   "email": "user@example.com",
   "password": "Test@1234",
-  "clientId": "BRAHMAKOSH"
+  "clientId": "CLI-E40OW7"
 }
 ```
 
@@ -38,7 +38,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
   "data": {
     "email": "user@example.com",
     "registrationStep": 1,
-    "clientId": "BRAHMAKOSH",
+    "clientId": "CLI-E40OW7",
     "clientName": "Brahmakosh"
   }
 }
@@ -63,7 +63,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
 {
   "email": "user@example.com",
   "otp": "123456",
-  "clientId": "BRAHMAKOSH"
+  "clientId": "CLI-E40OW7"
 }
 ```
 
@@ -77,7 +77,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
     "emailVerified": true,
     "mobileVerified": false,
     "profileCompleted": false,
-    "clientId": "BRAHMAKOSH"
+    "clientId": "CLI-E40OW7"
   }
 }
 ```
@@ -110,7 +110,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
   "email": "user@example.com",
   "mobile": "+919876543210",
   "otpMethod": "gupshup",
-  "clientId": "BRAHMAKOSH"
+  "clientId": "CLI-E40OW7"
 }
 ```
 
@@ -126,7 +126,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
     "mobile": "+919876543210",
     "otpMethod": "gupshup",
     "registrationStep": 2,
-    "clientId": "BRAHMAKOSH"
+    "clientId": "CLI-E40OW7"
   }
 }
 ```
@@ -151,7 +151,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
   "email": "user@example.com",
   "mobile": "+919876543210",
   "otp": "654321",
-  "clientId": "BRAHMAKOSH"
+  "clientId": "CLI-E40OW7"
 }
 ```
 
@@ -166,7 +166,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
     "mobileVerified": true,
     "emailVerified": true,
     "profileCompleted": false,
-    "clientId": "BRAHMAKOSH"
+    "clientId": "CLI-E40OW7"
   }
 }
 ```
@@ -181,7 +181,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
 ```json
 {
   "email": "user@example.com",
-  "clientId": "BRAHMAKOSH",
+  "clientId": "CLI-E40OW7",
   "name": "Ram Sharma",
   "dob": "1990-05-15",
   "timeOfBirth": "10:30",
@@ -215,7 +215,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
       "mobileVerified": true,
       "profileCompleted": true,
       "registrationStep": 3,
-      "clientId": "BRAHMAKOSH"
+      "clientId": "CLI-E40OW7"
     },
     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     "registrationStep": 3,
@@ -223,7 +223,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
     "emailVerified": true,
     "mobileVerified": true,
     "profileCompleted": true,
-    "clientId": "BRAHMAKOSH",
+    "clientId": "CLI-E40OW7",
     "clientName": "Brahmakosh"
   }
 }
@@ -240,7 +240,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
 {
   "email": "user@example.com",
   "password": "Test@1234",
-  "clientId": "BRAHMAKOSH"
+  "clientId": "CLI-E40OW7"
 }
 ```
 
@@ -252,7 +252,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
   "data": {
     "user": { "...userObject" },
     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "clientId": "BRAHMAKOSH",
+    "clientId": "CLI-E40OW7",
     "clientName": "Brahmakosh"
   }
 }
@@ -289,7 +289,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
 ```json
 {
   "credential": "<Google ID Token>",
-  "clientId": "BRAHMAKOSH"
+  "clientId": "CLI-E40OW7"
 }
 ```
 
@@ -304,7 +304,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
     "emailVerified": true,
     "registrationStep": 1,
     "nextStep": "mobile_verification",
-    "clientId": "BRAHMAKOSH"
+    "clientId": "CLI-E40OW7"
   }
 }
 ```
@@ -318,7 +318,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
   "data": {
     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     "user": { "...userObject" },
-    "clientId": "BRAHMAKOSH",
+    "clientId": "CLI-E40OW7",
     "clientName": "Brahmakosh"
   }
 }
@@ -334,7 +334,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
 ```json
 {
   "email": "user@example.com",
-  "clientId": "BRAHMAKOSH"
+  "clientId": "CLI-E40OW7"
 }
 ```
 
@@ -346,7 +346,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
   "data": {
     "registered": true,
     "emailVerified": true,
-    "clientId": "BRAHMAKOSH"
+    "clientId": "CLI-E40OW7"
   }
 }
 ```
@@ -360,7 +360,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
     "registered": false,
     "registrationStep": 1,
     "nextStep": "mobile_verification",
-    "clientId": "BRAHMAKOSH"
+    "clientId": "CLI-E40OW7"
   }
 }
 ```
@@ -375,7 +375,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
 ```json
 {
   "email": "user@example.com",
-  "clientId": "BRAHMAKOSH"
+  "clientId": "CLI-E40OW7"
 }
 ```
 
@@ -398,7 +398,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
 {
   "email": "user@example.com",
   "otpMethod": "gupshup",
-  "clientId": "BRAHMAKOSH"
+  "clientId": "CLI-E40OW7"
 }
 ```
 
@@ -420,7 +420,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
 ```json
 {
   "idToken": "<Firebase ID Token>",
-  "clientId": "BRAHMAKOSH"
+  "clientId": "CLI-E40OW7"
 }
 ```
 
@@ -434,7 +434,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
     "emailVerified": true,
     "registrationStep": 1,
     "nextStep": "mobile_verification",
-    "clientId": "BRAHMAKOSH"
+    "clientId": "CLI-E40OW7"
   }
 }
 ```
@@ -449,7 +449,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
 ```json
 {
   "idToken": "<Firebase ID Token>",
-  "clientId": "BRAHMAKOSH"
+  "clientId": "CLI-E40OW7"
 }
 ```
 
@@ -461,7 +461,7 @@ Step 3 → Profile complete karo → JWT Token milta hai ✅
   "data": {
     "user": { "...userObject" },
     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "clientId": "BRAHMAKOSH",
+    "clientId": "CLI-E40OW7",
     "clientName": "Brahmakosh"
   }
 }
@@ -498,7 +498,7 @@ Authorization: Bearer <JWT_TOKEN>
       "mobileVerified": true,
       "profileCompleted": true,
       "registrationStep": 3,
-      "clientId": "BRAHMAKOSH"
+      "clientId": "CLI-E40OW7"
     }
   }
 }
@@ -563,7 +563,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ## IMPORTANT NOTES
 
-1. `clientId` = `"BRAHMAKOSH"` (uppercase) — har API mein required hai
+1. `clientId` = `"CLI-E40OW7"` — har API mein required hai (Brahmakosh app ka client ID)
 2. JWT token sirf Step 3 complete hone ke baad milta hai
 3. Profile APIs mein `Authorization: Bearer <token>` header required hai
 4. OTP 10 minute mein expire ho jata hai
@@ -582,4 +582,4 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-*Last Updated: 2025 | Project: Mobile User Auth*
+*Last Updated: March 2026 | Project: Mobile User Auth | ClientId: CLI-E40OW7*

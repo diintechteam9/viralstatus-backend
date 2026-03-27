@@ -263,11 +263,18 @@ const step3CompleteProfile = async (req, res) => {
 
     const token = generateToken(user, client);
 
+    const userObj = user.toObject();
+    delete userObj.password;
+    delete userObj.emailOtp;
+    delete userObj.emailOtpExpiry;
+    delete userObj.mobileOtp;
+    delete userObj.mobileOtpExpiry;
+
     res.json({
       success: true,
       message: 'Profile completed successfully. Registration complete!',
       data: {
-        user,
+        user: userObj,
         token,
         registrationStep: 3,
         registrationComplete: true,
@@ -311,11 +318,17 @@ const loginUser = async (req, res) => {
     await user.save();
 
     const token = generateToken(user, client);
+    const userObj = user.toObject();
+    delete userObj.password;
+    delete userObj.emailOtp;
+    delete userObj.emailOtpExpiry;
+    delete userObj.mobileOtp;
+    delete userObj.mobileOtpExpiry;
 
     res.json({
       success: true,
       message: 'Login successful',
-      data: { user, token, clientId: client.clientId, clientName: client.businessName },
+      data: { user: userObj, token, clientId: client.clientId, clientName: client.businessName },
     });
   } catch (err) {
     res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
@@ -341,11 +354,17 @@ const googleAuth = async (req, res) => {
       user.lastLoginAt = new Date();
       await user.save();
       const token = generateToken(user, client);
+      const userObj = user.toObject();
+      delete userObj.password;
+      delete userObj.emailOtp;
+      delete userObj.emailOtpExpiry;
+      delete userObj.mobileOtp;
+      delete userObj.mobileOtpExpiry;
       return res.json({
         success: true,
         registrationComplete: true,
         message: 'Login successful',
-        data: { token, user, clientId: client.clientId, clientName: client.businessName },
+        data: { token, user: userObj, clientId: client.clientId, clientName: client.businessName },
       });
     }
 
@@ -531,11 +550,17 @@ const firebaseLogin = async (req, res) => {
     user.lastLoginAt = new Date();
     await user.save();
     const token = generateToken(user, client);
+    const userObj = user.toObject();
+    delete userObj.password;
+    delete userObj.emailOtp;
+    delete userObj.emailOtpExpiry;
+    delete userObj.mobileOtp;
+    delete userObj.mobileOtpExpiry;
 
     res.json({
       success: true,
       message: 'Login successful',
-      data: { user, token, clientId: client.clientId, clientName: client.businessName },
+      data: { user: userObj, token, clientId: client.clientId, clientName: client.businessName },
     });
   } catch (err) {
     res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
