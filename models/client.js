@@ -1,102 +1,33 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose');
+const { customAlphabet } = require('nanoid');
+
+const nanoid = customAlphabet('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', 6);
 
 const clientSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: [true, "Name is required"],
-  },
-  email: {
-    type: String,
-    required: [true, "Email is required"],
-    unique: true,
-  },
-  password: {
-    type: String,
-    required: function() {
-      // Password is required only if not using Google auth
-      return !this.googleId;
-    },
-  },
-  // Google Authentication fields
-  googleId: {
-    type: String,
-    unique: true,
-    sparse: true, // Allows multiple null values
-  },
-  googlePicture: {
-    type: String,
-  },
-  isGoogleUser: {
-    type: Boolean,
-    default: false,
-  },
-  emailVerified: {
-    type: Boolean,
-    default: false,
-  },
-  // Client filter/category
-  filter: {
-    type: String,
-    enum: ["all", "prime", "demo", "in-house", "testing", "rejected"],
-    default: "all",
-    index: true,
-  },
-  // Business fields (optional for Google users)
-  businessName: {
-    type: String,
-    
-  },
-  gstNo: {
-    type: String,
-    required: function() {
-      return !this.googleId;
-    },
-    unique: true,
-    sparse: true,
-  },
-  panNo: {
-    type: String,
-    required: function() {
-      return !this.googleId;
-    },
-    unique: true,
-    sparse: true,
-  },
-  city: {
-    type: String,
-    
-  },
-  pincode: {
-    type: String,
-  },
-  websiteUrl: {
-    type: String,
-  },
-  // Business logo fields
-  businessLogoKey: {
-    type: String,
-  },
-  businessLogoUrl: {
-    type: String,
-  },
-  // Profile completion status
-  isProfileCompleted: {
-    type: Boolean,
-    default: false,
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-  lastLoginAt: {
-    type: Date,
-    default: Date.now,
-  },
+  clientId: { type: String, unique: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  businessName: { type: String, required: true },
+  contactPerson: { type: String },
+  phone: { type: String },
+  isActive: { type: Boolean, default: true },
+  createdAt: { type: Date, default: Date.now },
 });
 
-// Compound index for efficient queries (email and googleId already have unique indexes)
-clientSchema.index({ email: 1, googleId: 1 });
+// Auto-generate CLI-XXXXXX before save
+clientSchema.pre('validate', async function (next) {
+  if (!this.clientId) {
+    let unique = false;
+    while (!unique) {
+      const generated = 'CLI-' + nanoid();
+      const exists = await mongoose.model('Client').findOne({ clientId: generated });
+      if (!exists) {
+        this.clientId = generated;
+        unique = true;
+      }
+    }
+  }
+  next();
+});
 
-const Client = mongoose.model("Client", clientSchema);
-
-module.exports = Client;
+module.exports = mongoose.model('Client', clientSchema);

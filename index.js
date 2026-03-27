@@ -17,6 +17,8 @@ const fs = require('fs');
 
 
 const userRoutes= require('./routes/userroutes')
+const mobileUserRoutes = require('./routes/mobileUserRoutes');
+const clientAuthRoutes = require('./routes/clientAuthRoutes');
 const clientRoutes = require("./routes/clientroutes");
 const adminRoutes = require("./routes/adminroutes");
 const superadminRoutes = require("./routes/superadminroutes");
@@ -209,6 +211,8 @@ app.use('/api/instagram', apiInstagramRoutes);
 app.use('/api/auth/google', googleAuthRoutes);
 
 app.use('/api/user', require('./routes/userroutes'));
+app.use('/api/mobile/user', mobileUserRoutes);
+app.use('/api/auth/client', clientAuthRoutes);
 app.use('/api/client', clientRoutes); 
 app.use('/api/admin', adminRoutes);
 app.use('/api/superadmin', superadminRoutes);
