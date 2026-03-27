@@ -64,21 +64,30 @@ const sendMobileOtp = async (mobile, otp, method = 'gupshup') => {
     const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     const token = process.env.WHATSAPP_ACCESS_TOKEN;
     const version = process.env.WHATSAPP_GRAPH_VERSION || 'v19.0';
-    const to = mobile.replace('+', '');
-    await axios.post(
-      `https://graph.facebook.com/${version}/${phoneId}/messages`,
-      {
-        messaging_product: 'whatsapp',
-        to,
-        type: 'template',
-        template: {
-          name: process.env.WHATSAPP_TEMPLATE_NAME || 'otp_verification',
-          language: { code: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en_US' },
-          components: [{ type: 'body', parameters: [{ type: 'text', text: otp }] }],
+    const to = mobile.replace(/\D/g, '');
+    try {
+      await axios.post(
+        `https://graph.facebook.com/${version}/${phoneId}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to,
+          type: 'template',
+          template: {
+            name: process.env.WHATSAPP_TEMPLATE_NAME || 'otp_verification',
+            language: { code: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en_US' },
+            components: [
+              { type: 'body', parameters: [{ type: 'text', text: otp }] },
+              { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: otp }] },
+            ],
+          },
         },
-      },
-      { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
-    );
+        { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
+      );
+    } catch (waErr) {
+      const waError = waErr.response?.data?.error;
+      console.error('WhatsApp API Error:', JSON.stringify(waError || waErr.message));
+      throw new Error(`WhatsApp API Error: ${waError?.message || waError?.error_data?.details || waErr.message}`);
+    }
   }
 };
 
@@ -202,7 +211,8 @@ const step2SendMobileOtp = async (req, res) => {
       data: { email, mobile, otpMethod, registrationStep: 2, clientId: client.clientId, ...(process.env.NODE_ENV !== 'production' && { otp }) },
     });
   } catch (err) {
-    res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
+    const status = err.message.includes('Client') ? 400 : err.message.includes('WhatsApp') ? 502 : 500;
+    res.status(status).json({ success: false, message: err.message });
   }
 };
 
