@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const mobileUserSchema = new mongoose.Schema({
-  email: { type: String, required: true, unique: true },
+  email: { type: String, required: true },
   password: { type: String },
   name: { type: String },
   mobile: { type: String },
@@ -39,5 +39,7 @@ const mobileUserSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
   lastLoginAt: { type: Date, default: Date.now },
 });
+
+mobileUserSchema.index({ email: 1, clientId: 1 }, { unique: true });
 
 module.exports = mongoose.model('MobileUser', mobileUserSchema);
