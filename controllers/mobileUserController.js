@@ -188,7 +188,7 @@ const step2SendMobileOtp = async (req, res) => {
     res.json({
       success: true,
       message: `OTP sent to your mobile via ${otpMethod.toUpperCase()}. Please verify to continue.`,
-      data: { email, mobile, otpMethod, registrationStep: 2, clientId: client.clientId },
+      data: { email, mobile, otpMethod, registrationStep: 2, clientId: client.clientId, ...(process.env.NODE_ENV !== 'production' && { otp }) },
     });
   } catch (err) {
     res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
