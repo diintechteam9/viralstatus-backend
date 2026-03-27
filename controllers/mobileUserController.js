@@ -144,6 +144,9 @@ const step1VerifyEmailOtp = async (req, res) => {
     const user = await MobileUser.findOne({ email, clientId: client._id });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
+    if (user.registrationStep === 3)
+      return res.status(400).json({ success: false, message: 'Email already verified. Please login.' });
+
     if (!user.emailOtp)
       return res.status(400).json({ success: false, message: 'OTP not generated. Please request a new OTP.' });
 
@@ -181,6 +184,8 @@ const step2SendMobileOtp = async (req, res) => {
 
     const user = await MobileUser.findOne({ email, clientId: client._id });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.registrationStep === 3)
+      return res.status(400).json({ success: false, message: 'Already registered. Please login.' });
     if (!user.emailVerified) return res.status(400).json({ success: false, message: 'Please verify email first (Step 1)' });
 
     const otp = generateOtp();
