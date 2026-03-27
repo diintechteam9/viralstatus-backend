@@ -66,16 +66,12 @@ const sendMobileOtp = async (mobile, otp, method = 'gupshup') => {
     const twilio = require('twilio')(process.env.TWILIO_SID, process.env.TWILIO_TOKEN);
     await twilio.messages.create({ body: message, from: process.env.TWILIO_NUMBER, to: mobile });
   } else if (method === 'whatsapp') {
-    await axios.post(
-      `https://graph.facebook.com/v19.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
-      {
-        messaging_product: 'whatsapp',
-        to: mobile.replace('+', ''),
-        type: 'text',
-        text: { body: message },
-      },
-      { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
-    );
+    const twilio = require('twilio')(process.env.TWILIO_WHATSAPP_ACCOUNT_SID, process.env.TWILIO_WHATSAPP_AUTH_TOKEN);
+    await twilio.messages.create({
+      body: message,
+      from: process.env.TWILIO_WHATSAPP_FROM,
+      to: `whatsapp:${mobile}`,
+    });
   }
 };
 
