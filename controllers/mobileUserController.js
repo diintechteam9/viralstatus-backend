@@ -456,13 +456,13 @@ const resendEmailOtp = async (req, res) => {
 
 const resendMobileOtp = async (req, res) => {
   try {
-    const { email, otpMethod = 'gupshup', clientId } = req.body;
-    if (!email || !clientId)
-      return res.status(400).json({ success: false, message: 'email and clientId required' });
+    const { mobile, otpMethod = 'gupshup', clientId } = req.body;
+    if (!mobile || !clientId)
+      return res.status(400).json({ success: false, message: 'mobile and clientId required' });
 
     const client = await validateClientId(clientId);
 
-    const user = await MobileUser.findOne({ email, clientId: client._id });
+    const user = await MobileUser.findOne({ mobile, clientId: client._id });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     if (!user.mobile) return res.status(400).json({ success: false, message: 'Mobile number not found. Please go to Step 2.' });
 
