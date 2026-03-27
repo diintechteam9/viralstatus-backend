@@ -63,8 +63,8 @@ const sendMobileOtp = async (mobile, otp, method = 'gupshup') => {
       },
     });
   } else if (method === 'twilio') {
-    const twilio = require('twilio')(process.env.TWILIO_SID, process.env.TWILIO_TOKEN);
-    await twilio.messages.create({ body: message, from: process.env.TWILIO_NUMBER, to: mobile });
+    const twilio = require('twilio')(process.env.TWILIO_WHATSAPP_ACCOUNT_SID, process.env.TWILIO_WHATSAPP_AUTH_TOKEN);
+    await twilio.messages.create({ body: message, from: process.env.TWILIO_WHATSAPP_FROM.replace('whatsapp:', ''), to: mobile });
   } else if (method === 'whatsapp') {
     const twilio = require('twilio')(process.env.TWILIO_WHATSAPP_ACCOUNT_SID, process.env.TWILIO_WHATSAPP_AUTH_TOKEN);
     await twilio.messages.create({ body: message, from: process.env.TWILIO_WHATSAPP_FROM.replace('whatsapp:', ''), to: mobile });
