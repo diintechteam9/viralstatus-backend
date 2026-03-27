@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
-const { customAlphabet } = require('nanoid');
 
-const nanoid = customAlphabet('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', 6);
+const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const nanoid = () => Array.from({length: 6}, () => CHARS[Math.floor(Math.random() * CHARS.length)]).join('');
 
 const clientSchema = new mongoose.Schema({
   clientId: { type: String, unique: true },
