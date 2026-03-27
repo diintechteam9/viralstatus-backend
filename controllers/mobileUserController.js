@@ -124,7 +124,7 @@ const step1SendEmailOtp = async (req, res) => {
     res.json({
       success: true,
       message: 'OTP sent to your email. Please verify to continue.',
-      data: { email, registrationStep: 1, clientId: client.clientId, clientName: client.businessName },
+      data: { email, registrationStep: 1, clientId: client.clientId },
     });
   } catch (err) {
     res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
@@ -288,7 +288,6 @@ const step3CompleteProfile = async (req, res) => {
         mobileVerified: true,
         profileCompleted: true,
         clientId: client.clientId,
-        clientName: client.businessName,
       },
     });
   } catch (err) {
@@ -334,7 +333,7 @@ const loginUser = async (req, res) => {
     res.json({
       success: true,
       message: 'Login successful',
-      data: { user: userObj, token, clientId: client.clientId, clientName: client.businessName },
+      data: { user: userObj, token, clientId: client.clientId },
     });
   } catch (err) {
     res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
@@ -370,7 +369,7 @@ const googleAuth = async (req, res) => {
         success: true,
         registrationComplete: true,
         message: 'Login successful',
-        data: { token, user: userObj, clientId: client.clientId, clientName: client.businessName },
+        data: { token, user: userObj, clientId: client.clientId },
       });
     }
 
@@ -566,7 +565,7 @@ const firebaseLogin = async (req, res) => {
     res.json({
       success: true,
       message: 'Login successful',
-      data: { user: userObj, token, clientId: client.clientId, clientName: client.businessName },
+      data: { user: userObj, token, clientId: client.clientId },
     });
   } catch (err) {
     res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
