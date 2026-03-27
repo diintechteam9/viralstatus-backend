@@ -238,7 +238,7 @@ const step2VerifyMobileOtp = async (req, res) => {
 
 const step3CompleteProfile = async (req, res) => {
   try {
-    const { email, clientId, name, dob, timeOfBirth, placeOfBirth, latitude, longitude, gowthra } = req.body;
+    const { email, clientId, name, mobileNumber, city, pincode, businessName, gender, ageRange, businessInterests, occupation, highestQualification, fieldOfStudy, skills, socialMedia } = req.body;
     if (!email || !clientId)
       return res.status(400).json({ success: false, message: 'email and clientId required' });
 
@@ -249,12 +249,18 @@ const step3CompleteProfile = async (req, res) => {
     if (!user.mobileVerified) return res.status(400).json({ success: false, message: 'Please verify mobile first (Step 2)' });
 
     if (name) user.name = name;
-    if (dob) user.dob = dob;
-    if (timeOfBirth) user.timeOfBirth = timeOfBirth;
-    if (placeOfBirth) user.placeOfBirth = placeOfBirth;
-    if (latitude) user.latitude = latitude;
-    if (longitude) user.longitude = longitude;
-    if (gowthra) user.gowthra = gowthra;
+    if (mobileNumber) user.mobileNumber = mobileNumber;
+    if (city) user.city = city;
+    if (pincode) user.pincode = pincode;
+    if (businessName) user.businessName = businessName;
+    if (gender) user.gender = gender;
+    if (ageRange) user.ageRange = ageRange;
+    if (businessInterests) user.businessInterests = businessInterests;
+    if (occupation) user.occupation = occupation;
+    if (highestQualification) user.highestQualification = highestQualification;
+    if (fieldOfStudy) user.fieldOfStudy = fieldOfStudy;
+    if (skills) user.skills = skills;
+    if (socialMedia) user.socialMedia = socialMedia;
 
     user.profileCompleted = true;
     user.registrationStep = 3;
