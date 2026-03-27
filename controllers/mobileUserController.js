@@ -144,6 +144,9 @@ const step1VerifyEmailOtp = async (req, res) => {
     const user = await MobileUser.findOne({ email, clientId: client._id });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
+    if (!user.emailOtp)
+      return res.status(400).json({ success: false, message: 'OTP not generated. Please request a new OTP.' });
+
     if (user.emailOtp !== otp)
       return res.status(400).json({ success: false, message: 'Invalid OTP' });
 
@@ -211,6 +214,9 @@ const step2VerifyMobileOtp = async (req, res) => {
 
     const user = await MobileUser.findOne({ email, clientId: client._id });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    if (!user.mobileOtp)
+      return res.status(400).json({ success: false, message: 'OTP not generated. Please request a new OTP.' });
 
     if (user.mobileOtp !== otp)
       return res.status(400).json({ success: false, message: 'Invalid OTP' });
@@ -588,10 +594,10 @@ const getProfile = async (req, res) => {
 
 const updateProfile = async (req, res) => {
   try {
-    const { name, dob, timeOfBirth, placeOfBirth, latitude, longitude, gowthra } = req.body;
+    const { name, mobileNumber, city, pincode, businessName, gender, ageRange, businessInterests, occupation, highestQualification, fieldOfStudy, skills, socialMedia } = req.body;
     const user = await MobileUser.findByIdAndUpdate(
       req.user.id,
-      { name, dob, timeOfBirth, placeOfBirth, latitude, longitude, gowthra },
+      { name, mobileNumber, city, pincode, businessName, gender, ageRange, businessInterests, occupation, highestQualification, fieldOfStudy, skills, socialMedia },
       { new: true }
     ).select('-password -emailOtp -mobileOtp -emailOtpExpiry -mobileOtpExpiry');
 
