@@ -67,11 +67,7 @@ const sendMobileOtp = async (mobile, otp, method = 'gupshup') => {
     await twilio.messages.create({ body: message, from: process.env.TWILIO_NUMBER, to: mobile });
   } else if (method === 'whatsapp') {
     const twilio = require('twilio')(process.env.TWILIO_WHATSAPP_ACCOUNT_SID, process.env.TWILIO_WHATSAPP_AUTH_TOKEN);
-    await twilio.messages.create({
-      body: message,
-      from: process.env.TWILIO_WHATSAPP_FROM,
-      to: `whatsapp:${mobile}`,
-    });
+    await twilio.messages.create({ body: message, from: process.env.TWILIO_WHATSAPP_FROM.replace('whatsapp:', ''), to: mobile });
   }
 };
 
@@ -168,7 +164,7 @@ const step1VerifyEmailOtp = async (req, res) => {
 
 const step2SendMobileOtp = async (req, res) => {
   try {
-    const { email, mobile, otpMethod = 'gupshup', clientId } = req.body;
+    const { email, mobile, otpMethod = 'twilio', clientId } = req.body;
     if (!email || !mobile || !clientId)
       return res.status(400).json({ success: false, message: 'email, mobile and clientId required' });
 
@@ -464,7 +460,7 @@ const resendEmailOtp = async (req, res) => {
 
 const resendMobileOtp = async (req, res) => {
   try {
-    const { mobile, otpMethod = 'gupshup', clientId } = req.body;
+    const { mobile, otpMethod = 'twilio', clientId } = req.body;
     if (!mobile || !clientId)
       return res.status(400).json({ success: false, message: 'mobile and clientId required' });
 
