@@ -44,15 +44,13 @@ const sendEmailOtp = async (email, otp) => {
 // ─── Send Mobile OTP ─────────────────────────────────────────────────────────
 
 const sendMobileOtp = async (mobile, otp, method = 'gupshup') => {
-  const message = `Your OTP is ${otp}. Valid for 10 minutes.`;
-
   if (method === 'gupshup') {
     const number = mobile.replace('+', '');
     await axios.get('https://enterprise.smsgupshup.com/GatewayAPI/rest', {
       params: {
         method: 'SendMessage',
         send_to: number,
-        msg: message,
+        msg: `Your OTP is ${otp}. Valid for 10 minutes.`,
         msg_type: 'TEXT',
         userid: process.env.GUPSHUP_USERID,
         auth_scheme: 'plain',
@@ -62,12 +60,25 @@ const sendMobileOtp = async (mobile, otp, method = 'gupshup') => {
         mask: process.env.GUPSHUP_MASK || 'MOBISL',
       },
     });
-  } else if (method === 'twilio') {
-    const twilio = require('twilio')(process.env.TWILIO_WHATSAPP_ACCOUNT_SID, process.env.TWILIO_WHATSAPP_AUTH_TOKEN);
-    await twilio.messages.create({ body: message, from: process.env.TWILIO_WHATSAPP_FROM.replace('whatsapp:', ''), to: mobile });
   } else if (method === 'whatsapp') {
-    const twilio = require('twilio')(process.env.TWILIO_WHATSAPP_ACCOUNT_SID, process.env.TWILIO_WHATSAPP_AUTH_TOKEN);
-    await twilio.messages.create({ body: message, from: process.env.TWILIO_WHATSAPP_FROM.replace('whatsapp:', ''), to: mobile });
+    const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const token = process.env.WHATSAPP_ACCESS_TOKEN;
+    const version = process.env.WHATSAPP_GRAPH_VERSION || 'v19.0';
+    const to = mobile.replace('+', '');
+    await axios.post(
+      `https://graph.facebook.com/${version}/${phoneId}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        to,
+        type: 'template',
+        template: {
+          name: process.env.WHATSAPP_TEMPLATE_NAME || 'otp_verification',
+          language: { code: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en_US' },
+          components: [{ type: 'body', parameters: [{ type: 'text', text: otp }] }],
+        },
+      },
+      { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
+    );
   }
 };
 
@@ -164,7 +175,7 @@ const step1VerifyEmailOtp = async (req, res) => {
 
 const step2SendMobileOtp = async (req, res) => {
   try {
-    const { email, mobile, otpMethod = 'twilio', clientId } = req.body;
+    const { email, mobile, otpMethod = 'whatsapp', clientId } = req.body;
     if (!email || !mobile || !clientId)
       return res.status(400).json({ success: false, message: 'email, mobile and clientId required' });
 
@@ -460,7 +471,7 @@ const resendEmailOtp = async (req, res) => {
 
 const resendMobileOtp = async (req, res) => {
   try {
-    const { mobile, otpMethod = 'twilio', clientId } = req.body;
+    const { mobile, otpMethod = 'whatsapp', clientId } = req.body;
     if (!mobile || !clientId)
       return res.status(400).json({ success: false, message: 'mobile and clientId required' });
 
