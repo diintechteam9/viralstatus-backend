@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const {
   step1SendEmailOtp,
   step1VerifyEmailOtp,
@@ -25,6 +26,17 @@ const {
 } = require('../controllers/mobileUserController');
 
 const { protect } = require('../middleware/mobileAuth');
+
+// Multer - route level pe (memory storage)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Invalid file type. Allowed: jpeg, png, webp'), false);
+  },
+});
 
 // Registration Steps
 router.post('/register/step1', step1SendEmailOtp);
@@ -55,11 +67,11 @@ router.get('/profile', protect, getProfile);
 router.put('/profile', protect, updateProfile);
 
 // Profile Image Upload - R2 (protected)
-// Route 1: Direct upload - multipart/form-data (Postman/Mobile ke liye)
-router.post('/profile/image', protect, uploadProfileImage);
-// Route 2: Get presigned URL (Web frontend ke liye)
+// Route 1: Direct upload - multipart/form-data
+router.post('/profile/image', protect, upload.single('image'), uploadProfileImage);
+// Route 2: Get presigned URL
 router.post('/profile/image/upload-url', protect, getProfileImageUploadUrl);
-// Route 3: After uploading to R2 via presigned URL, confirm key
+// Route 3: Confirm key after R2 upload
 router.post('/profile/image/confirm', protect, confirmProfileImage);
 
 // Forgot Password Flow

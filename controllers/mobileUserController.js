@@ -626,60 +626,47 @@ const updateProfile = async (req, res) => {
   }
 };
 
-// ─── UPLOAD PROFILE PICTURE (Step 4) - Direct Upload via Multer → R2 ────────
-// Flow 1 (Mobile/Postman): multipart/form-data → server → R2 → DB save
-// Flow 2 (Web): Get presigned URL → frontend directly uploads to R2 → confirm key
-
+// ─── UPLOAD PROFILE PICTURE - Direct Upload via Multer → R2 ─────────────────
 const multer = require('multer');
 const { PutObjectCommand: PutCmd } = require('@aws-sdk/client-s3');
 
-// Multer - memory storage (file buffer RAM mein rakho, disk pe nahi)
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
-  fileFilter: (req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (allowed.includes(file.mimetype)) cb(null, true);
-    else cb(new Error('Invalid file type. Allowed: jpeg, png, webp'), false);
-  },
-}).single('image'); // form-data field name = "image"
-
-// Flow 1: Direct upload (multipart/form-data) - server detects file type automatically
 const uploadProfileImage = async (req, res) => {
-  upload(req, res, async (err) => {
-    try {
-      if (err) return res.status(400).json({ success: false, message: err.message });
-      if (!req.file) return res.status(400).json({ success: false, message: 'image file is required' });
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: 'image file is required' });
 
-      const ext = req.file.mimetype.split('/')[1] === 'jpeg' ? 'jpg' : req.file.mimetype.split('/')[1];
-      const key = `profile-images/${req.user.id}/${Date.now()}.${ext}`;
+    const ext = req.file.mimetype.split('/')[1] === 'jpeg' ? 'jpg' : req.file.mimetype.split('/')[1];
+    const key = `profile-images/${req.user.id}/${Date.now()}.${ext}`;
 
-      await r2Client.send(new PutCmd({
-        Bucket: process.env.R2_BUCKET,
-        Key: key,
-        Body: req.file.buffer,
-        ContentType: req.file.mimetype,
-      }));
+    await r2Client.send(new PutCmd({
+      Bucket: process.env.R2_BUCKET,
+      Key: key,
+      Body: req.file.buffer,
+      ContentType: req.file.mimetype,
+    }));
 
-      const imageUrl = `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET}/${key}`;
+    // Signed URL generate karo - 7 din valid
+    const { GetObjectCommand } = require('@aws-sdk/client-s3');
+    const signedUrl = await getSignedUrl(r2Client, new GetObjectCommand({
+      Bucket: process.env.R2_BUCKET,
+      Key: key,
+    }), { expiresIn: 604800 });
 
-      const user = await MobileUser.findByIdAndUpdate(
-        req.user.id,
-        { profileImageKey: key, profileImageUrl: imageUrl },
-        { new: true }
-      ).select('-password -emailOtp -mobileOtp -emailOtpExpiry -mobileOtpExpiry -resetOtp -resetOtpExpiry');
+    const user = await MobileUser.findByIdAndUpdate(
+      req.user.id,
+      { profileImageKey: key, profileImageUrl: signedUrl },
+      { new: true }
+    ).select('-password -emailOtp -mobileOtp -emailOtpExpiry -mobileOtpExpiry -resetOtp -resetOtpExpiry');
 
-      if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
-      res.json({
-        success: true,
-        message: 'Profile image uploaded successfully',
-        data: { profileImageUrl: imageUrl, profileImageKey: key, user },
-      });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  });
+    res.json({
+      success: true,
+      message: 'Profile image uploaded successfully',
+      data: { profileImageUrl: signedUrl, profileImageKey: key, user },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 };
 
 // Flow 2: Get presigned URL - server detects fileType from query param (optional)
@@ -719,12 +706,16 @@ const confirmProfileImage = async (req, res) => {
     const { key } = req.body;
     if (!key) return res.status(400).json({ success: false, message: 'key is required' });
 
-    // Build public URL
-    const imageUrl = `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET}/${key}`;
+    // Signed URL generate karo - 7 din valid
+    const { GetObjectCommand } = require('@aws-sdk/client-s3');
+    const signedUrl = await getSignedUrl(r2Client, new GetObjectCommand({
+      Bucket: process.env.R2_BUCKET,
+      Key: key,
+    }), { expiresIn: 604800 });
 
     const user = await MobileUser.findByIdAndUpdate(
       req.user.id,
-      { profileImageKey: key, profileImageUrl: imageUrl },
+      { profileImageKey: key, profileImageUrl: signedUrl },
       { new: true }
     ).select('-password -emailOtp -mobileOtp -emailOtpExpiry -mobileOtpExpiry -resetOtp -resetOtpExpiry');
 
@@ -733,7 +724,7 @@ const confirmProfileImage = async (req, res) => {
     res.json({
       success: true,
       message: 'Profile image updated successfully',
-      data: { profileImageUrl: imageUrl, profileImageKey: key, user },
+      data: { profileImageUrl: signedUrl, profileImageKey: key, user },
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
