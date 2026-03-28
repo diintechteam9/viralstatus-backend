@@ -18,6 +18,7 @@ const {
   updateProfile,
   uploadProfileImage,
   getProfileImageUploadUrl,
+  getProfileImageReadUrl,
   confirmProfileImage,
   forgotPassword,
   verifyResetOtp,
@@ -69,9 +70,11 @@ router.put('/profile', protect, updateProfile);
 // Profile Image Upload - R2 (protected)
 // Route 1: Direct upload - multipart/form-data
 router.post('/profile/image', protect, upload.single('image'), uploadProfileImage);
-// Route 2: Get presigned URL
+// Route 2: Presigned PUT URL (upload only — not for viewing)
 router.post('/profile/image/upload-url', protect, getProfileImageUploadUrl);
-// Route 3: Confirm key after R2 upload
+// Route 3: Presigned GET URL for current user's stored profile image
+router.get('/profile/image/read-url', protect, getProfileImageReadUrl);
+// Route 4: Confirm key after R2 upload
 router.post('/profile/image/confirm', protect, confirmProfileImage);
 
 // Forgot Password Flow

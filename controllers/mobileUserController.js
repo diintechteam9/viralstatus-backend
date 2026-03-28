@@ -3,11 +3,30 @@ const Client = require('../models/client');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
-const { PutObjectCommand } = require('@aws-sdk/client-s3');
+const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { r2Client } = require('../config/r2');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/** Private bucket: persist profileImageKey; viewers must use a presigned GET (never the PUT upload URL). */
+const attachFreshProfileImageUrl = async (plainUser) => {
+  if (!plainUser?.profileImageKey || !process.env.R2_BUCKET) return plainUser;
+  try {
+    plainUser.profileImageUrl = await getSignedUrl(
+      r2Client,
+      new GetObjectCommand({
+        Bucket: process.env.R2_BUCKET,
+        Key: plainUser.profileImageKey,
+        ResponseContentDisposition: 'inline',
+      }),
+      { expiresIn: 604800 }
+    );
+  } catch (e) {
+    console.warn('[profileImage] Presigned GET failed:', e?.message || e);
+  }
+  return plainUser;
+};
 
 const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -300,6 +319,7 @@ const step3CompleteProfile = async (req, res) => {
     delete userObj.emailOtpExpiry;
     delete userObj.mobileOtp;
     delete userObj.mobileOtpExpiry;
+    await attachFreshProfileImageUrl(userObj);
 
     res.json({
       success: true,
@@ -354,6 +374,7 @@ const loginUser = async (req, res) => {
     delete userObj.emailOtpExpiry;
     delete userObj.mobileOtp;
     delete userObj.mobileOtpExpiry;
+    await attachFreshProfileImageUrl(userObj);
 
     res.json({
       success: true,
@@ -390,6 +411,7 @@ const googleAuth = async (req, res) => {
       delete userObj.emailOtpExpiry;
       delete userObj.mobileOtp;
       delete userObj.mobileOtpExpiry;
+      await attachFreshProfileImageUrl(userObj);
       return res.json({
         success: true,
         registrationComplete: true,
@@ -586,6 +608,7 @@ const firebaseLogin = async (req, res) => {
     delete userObj.emailOtpExpiry;
     delete userObj.mobileOtp;
     delete userObj.mobileOtpExpiry;
+    await attachFreshProfileImageUrl(userObj);
 
     res.json({
       success: true,
@@ -603,7 +626,9 @@ const getProfile = async (req, res) => {
   try {
     const user = await MobileUser.findById(req.user.id).select('-password -emailOtp -mobileOtp -emailOtpExpiry -mobileOtpExpiry');
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    res.json({ success: true, data: { user } });
+    const userObj = user.toObject();
+    await attachFreshProfileImageUrl(userObj);
+    res.json({ success: true, data: { user: userObj } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -620,15 +645,15 @@ const updateProfile = async (req, res) => {
       { new: true }
     ).select('-password -emailOtp -mobileOtp -emailOtpExpiry -mobileOtpExpiry');
 
-    res.json({ success: true, message: 'Profile updated', data: { user } });
+    const userObj = user.toObject();
+    await attachFreshProfileImageUrl(userObj);
+    res.json({ success: true, message: 'Profile updated', data: { user: userObj } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
 // ─── UPLOAD PROFILE PICTURE - Direct Upload via Multer → R2 ─────────────────
-const multer = require('multer');
-const { PutObjectCommand: PutCmd } = require('@aws-sdk/client-s3');
 
 const uploadProfileImage = async (req, res) => {
   try {
@@ -637,19 +662,24 @@ const uploadProfileImage = async (req, res) => {
     const ext = req.file.mimetype.split('/')[1] === 'jpeg' ? 'jpg' : req.file.mimetype.split('/')[1];
     const key = `profile-images/${req.user.id}/${Date.now()}.${ext}`;
 
-    await r2Client.send(new PutCmd({
-      Bucket: process.env.R2_BUCKET,
-      Key: key,
-      Body: req.file.buffer,
-      ContentType: req.file.mimetype,
-    }));
+    await r2Client.send(
+      new PutObjectCommand({
+        Bucket: process.env.R2_BUCKET,
+        Key: key,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+      })
+    );
 
-    // Signed URL generate karo - 7 din valid
-    const { GetObjectCommand } = require('@aws-sdk/client-s3');
-    const signedUrl = await getSignedUrl(r2Client, new GetObjectCommand({
-      Bucket: process.env.R2_BUCKET,
-      Key: key,
-    }), { expiresIn: 604800 });
+    const signedUrl = await getSignedUrl(
+      r2Client,
+      new GetObjectCommand({
+        Bucket: process.env.R2_BUCKET,
+        Key: key,
+        ResponseContentDisposition: 'inline',
+      }),
+      { expiresIn: 604800 }
+    );
 
     const user = await MobileUser.findByIdAndUpdate(
       req.user.id,
@@ -687,38 +717,47 @@ const getProfileImageUploadUrl = async (req, res) => {
       ContentType: fileType,
     });
 
-    const uploadUrl = await getSignedUrl(r2Client, command, {
-      expiresIn: 300,
-      unhoistableHeaders: new Set(['x-amz-checksum-crc32', 'x-amz-sdk-checksum-algorithm']),
-    });
-
-    // Remove checksum params from URL
-    const cleanUrl = uploadUrl
-      .replace(/&x-amz-checksum-crc32=[^&]*/g, '')
-      .replace(/&x-amz-sdk-checksum-algorithm=[^&]*/g, '');
+    // Do not strip query params: SigV4 covers the exact query string; editing the URL breaks verification.
+    const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 300 });
 
     res.json({
       success: true,
       message: 'Presigned URL generated.',
-      data: { uploadUrl: cleanUrl, key, expiresIn: 300 },
+      data: {
+        uploadUrl,
+        key,
+        expiresIn: 300,
+        uploadMethod: 'PUT',
+        uploadContentType: fileType,
+        usage:
+          'Perform one HTTP PUT to uploadUrl with the raw file bytes and header Content-Type exactly matching uploadContentType. Then POST /profile/image/confirm with { key }. Browsers and Image.network use GET — that will fail on this URL (SignatureDoesNotMatch). Use profileImageUrl from confirm or GET /profile/image/read-url after upload.',
+      },
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-// After frontend uploads to R2, call this to save key in DB
+// After client uploads bytes to R2 via presigned PUT, save key in DB
 const confirmProfileImage = async (req, res) => {
   try {
     const { key } = req.body;
     if (!key) return res.status(400).json({ success: false, message: 'key is required' });
 
-    // Signed URL generate karo - 7 din valid
-    const { GetObjectCommand } = require('@aws-sdk/client-s3');
-    const signedUrl = await getSignedUrl(r2Client, new GetObjectCommand({
-      Bucket: process.env.R2_BUCKET,
-      Key: key,
-    }), { expiresIn: 604800 });
+    const expectedPrefix = `profile-images/${req.user.id}/`;
+    if (!key.startsWith(expectedPrefix)) {
+      return res.status(403).json({ success: false, message: 'key does not belong to this user' });
+    }
+
+    const signedUrl = await getSignedUrl(
+      r2Client,
+      new GetObjectCommand({
+        Bucket: process.env.R2_BUCKET,
+        Key: key,
+        ResponseContentDisposition: 'inline',
+      }),
+      { expiresIn: 604800 }
+    );
 
     const user = await MobileUser.findByIdAndUpdate(
       req.user.id,
@@ -891,6 +930,34 @@ const resendResetOtp = async (req, res) => {
   }
 };
 
+/** Fresh presigned GET for the current user's avatar (private bucket). Use for Image.network / <img src>. */
+const getProfileImageReadUrl = async (req, res) => {
+  try {
+    const user = await MobileUser.findById(req.user.id).select('profileImageKey');
+    if (!user?.profileImageKey) {
+      return res.status(404).json({ success: false, message: 'No profile image set' });
+    }
+
+    const readUrl = await getSignedUrl(
+      r2Client,
+      new GetObjectCommand({
+        Bucket: process.env.R2_BUCKET,
+        Key: user.profileImageKey,
+        ResponseContentDisposition: 'inline',
+      }),
+      { expiresIn: 604800 }
+    );
+
+    res.json({
+      success: true,
+      message: 'Presigned read URL issued.',
+      data: { readUrl, profileImageKey: user.profileImageKey, expiresIn: 604800 },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 module.exports = {
   step1SendEmailOtp,
   step1VerifyEmailOtp,
@@ -908,6 +975,7 @@ module.exports = {
   updateProfile,
   uploadProfileImage,
   getProfileImageUploadUrl,
+  getProfileImageReadUrl,
   confirmProfileImage,
   forgotPassword,
   verifyResetOtp,
