@@ -672,7 +672,6 @@ const uploadProfileImage = async (req, res) => {
 // Flow 2: Get presigned URL - server detects fileType from query param (optional)
 const getProfileImageUploadUrl = async (req, res) => {
   try {
-    // fileType optional - default jpeg
     const fileType = (req.body && req.body.fileType) || req.query.fileType || 'image/jpeg';
 
     const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
@@ -688,12 +687,20 @@ const getProfileImageUploadUrl = async (req, res) => {
       ContentType: fileType,
     });
 
-    const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 300 });
+    const uploadUrl = await getSignedUrl(r2Client, command, {
+      expiresIn: 300,
+      unhoistableHeaders: new Set(['x-amz-checksum-crc32', 'x-amz-sdk-checksum-algorithm']),
+    });
+
+    // Remove checksum params from URL
+    const cleanUrl = uploadUrl
+      .replace(/&x-amz-checksum-crc32=[^&]*/g, '')
+      .replace(/&x-amz-sdk-checksum-algorithm=[^&]*/g, '');
 
     res.json({
       success: true,
       message: 'Presigned URL generated.',
-      data: { uploadUrl, key, expiresIn: 300 },
+      data: { uploadUrl: cleanUrl, key, expiresIn: 300 },
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
