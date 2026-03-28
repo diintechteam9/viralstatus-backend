@@ -15,6 +15,7 @@ const {
   firebaseLogin,
   getProfile,
   updateProfile,
+  uploadProfileImage,
   getProfileImageUploadUrl,
   confirmProfileImage,
   forgotPassword,
@@ -54,9 +55,11 @@ router.get('/profile', protect, getProfile);
 router.put('/profile', protect, updateProfile);
 
 // Profile Image Upload - R2 (protected)
-// Step 1: Get presigned URL
+// Route 1: Direct upload - multipart/form-data (Postman/Mobile ke liye)
+router.post('/profile/image', protect, uploadProfileImage);
+// Route 2: Get presigned URL (Web frontend ke liye)
 router.post('/profile/image/upload-url', protect, getProfileImageUploadUrl);
-// Step 2: After uploading to R2, confirm the key
+// Route 3: After uploading to R2 via presigned URL, confirm key
 router.post('/profile/image/confirm', protect, confirmProfileImage);
 
 // Forgot Password Flow

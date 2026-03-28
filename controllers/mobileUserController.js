@@ -626,14 +626,67 @@ const updateProfile = async (req, res) => {
   }
 };
 
-// ─── UPLOAD PROFILE PICTURE (Step 4) - R2 Presigned URL ─────────────────────
-// Flow: Frontend calls this API → gets presigned URL → uploads directly to R2
-//       → then calls /profile/image/confirm to save the key in DB
+// ─── UPLOAD PROFILE PICTURE (Step 4) - Direct Upload via Multer → R2 ────────
+// Flow 1 (Mobile/Postman): multipart/form-data → server → R2 → DB save
+// Flow 2 (Web): Get presigned URL → frontend directly uploads to R2 → confirm key
 
+const multer = require('multer');
+const { PutObjectCommand: PutCmd } = require('@aws-sdk/client-s3');
+
+// Multer - memory storage (file buffer RAM mein rakho, disk pe nahi)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  fileFilter: (req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Invalid file type. Allowed: jpeg, png, webp'), false);
+  },
+}).single('image'); // form-data field name = "image"
+
+// Flow 1: Direct upload (multipart/form-data)
+const uploadProfileImage = async (req, res) => {
+  upload(req, res, async (err) => {
+    try {
+      if (err) return res.status(400).json({ success: false, message: err.message });
+      if (!req.file) return res.status(400).json({ success: false, message: 'image file is required' });
+
+      const ext = req.file.mimetype.split('/')[1];
+      const key = `profile-images/${req.user.id}/${Date.now()}.${ext}`;
+
+      // Upload to R2
+      await r2Client.send(new PutCmd({
+        Bucket: process.env.R2_BUCKET,
+        Key: key,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+      }));
+
+      const imageUrl = `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET}/${key}`;
+
+      const user = await MobileUser.findByIdAndUpdate(
+        req.user.id,
+        { profileImageKey: key, profileImageUrl: imageUrl },
+        { new: true }
+      ).select('-password -emailOtp -mobileOtp -emailOtpExpiry -mobileOtpExpiry -resetOtp -resetOtpExpiry');
+
+      if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+      res.json({
+        success: true,
+        message: 'Profile image uploaded successfully',
+        data: { profileImageUrl: imageUrl, profileImageKey: key, user },
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+};
+
+// Flow 2: Get presigned URL (for direct frontend/mobile upload to R2)
 const getProfileImageUploadUrl = async (req, res) => {
   try {
-    const { fileType } = req.body;
-    // fileType: image/jpeg, image/png, image/webp
+    const fileType = req.body.fileType || req.query.fileType;
     if (!fileType) return res.status(400).json({ success: false, message: 'fileType is required' });
 
     const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
@@ -649,17 +702,12 @@ const getProfileImageUploadUrl = async (req, res) => {
       ContentType: fileType,
     });
 
-    const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 300 }); // 5 min expiry
+    const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 300 });
 
     res.json({
       success: true,
       message: 'Presigned URL generated. Upload image directly to this URL using PUT request.',
-      data: {
-        uploadUrl,
-        key,
-        expiresIn: 300,
-        instructions: 'PUT request to uploadUrl with file binary in body and Content-Type header',
-      },
+      data: { uploadUrl, key, expiresIn: 300 },
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -861,6 +909,7 @@ module.exports = {
   firebaseLogin,
   getProfile,
   updateProfile,
+  uploadProfileImage,
   getProfileImageUploadUrl,
   confirmProfileImage,
   forgotPassword,

@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Mobile User API Collection",
-    "description": "Complete API collection for Mobile User Registration, Login, Profile, Forgot Password and Profile Image Upload",
+    "name": "Mobile User - Complete API Collection",
+    "description": "All 22 APIs - Registration, Login, Profile, Forgot Password, Profile Image Upload, Client Auth",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -24,16 +24,22 @@
   ],
   "item": [
     {
-      "name": "Client Auth",
+      "name": "1. Client Auth",
+      "description": "Client register/login - CLI-XXXXXX auto generate hota hai",
       "item": [
         {
           "name": "Register Client",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{CLIENT_BASE_URL}}/register", "host": ["{{CLIENT_BASE_URL}}"], "path": ["register"] },
+            "url": {
+              "raw": "{{CLIENT_BASE_URL}}/register",
+              "host": ["{{CLIENT_BASE_URL}}"],
+              "path": ["register"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"email\": \"company@example.com\",\n  \"password\": \"Company@123\",\n  \"businessName\": \"My Company\",\n  \"contactPerson\": \"Anil Kumar\",\n  \"phone\": \"+919876543210\"\n}"
             }
           }
@@ -43,9 +49,14 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{CLIENT_BASE_URL}}/login", "host": ["{{CLIENT_BASE_URL}}"], "path": ["login"] },
+            "url": {
+              "raw": "{{CLIENT_BASE_URL}}/login",
+              "host": ["{{CLIENT_BASE_URL}}"],
+              "path": ["login"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"email\": \"company@example.com\",\n  \"password\": \"Company@123\"\n}"
             }
           }
@@ -55,22 +66,32 @@
           "request": {
             "method": "GET",
             "header": [{ "key": "Authorization", "value": "Bearer {{JWT_TOKEN}}" }],
-            "url": { "raw": "{{CLIENT_BASE_URL}}/me", "host": ["{{CLIENT_BASE_URL}}"], "path": ["me"] }
+            "url": {
+              "raw": "{{CLIENT_BASE_URL}}/me",
+              "host": ["{{CLIENT_BASE_URL}}"],
+              "path": ["me"]
+            }
           }
         }
       ]
     },
     {
-      "name": "Registration Flow",
+      "name": "2. Registration Flow",
+      "description": "Step 0 → Step 1 Email OTP → Step 2 Mobile OTP → Step 3 Profile Complete → JWT Token",
       "item": [
         {
           "name": "Step 1 - Send Email OTP",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/register/step1", "host": ["{{BASE_URL}}"], "path": ["register", "step1"] },
+            "url": {
+              "raw": "{{BASE_URL}}/register/step1",
+              "host": ["{{BASE_URL}}"],
+              "path": ["register", "step1"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"User@1234\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
@@ -80,9 +101,14 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/register/step1/verify", "host": ["{{BASE_URL}}"], "path": ["register", "step1", "verify"] },
+            "url": {
+              "raw": "{{BASE_URL}}/register/step1/verify",
+              "host": ["{{BASE_URL}}"],
+              "path": ["register", "step1", "verify"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"otp\": \"123456\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
@@ -92,9 +118,14 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/register/step2", "host": ["{{BASE_URL}}"], "path": ["register", "step2"] },
+            "url": {
+              "raw": "{{BASE_URL}}/register/step2",
+              "host": ["{{BASE_URL}}"],
+              "path": ["register", "step2"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"mobile\": \"+919876543210\",\n  \"otpMethod\": \"gupshup\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
@@ -104,22 +135,32 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/register/step2/verify", "host": ["{{BASE_URL}}"], "path": ["register", "step2", "verify"] },
+            "url": {
+              "raw": "{{BASE_URL}}/register/step2/verify",
+              "host": ["{{BASE_URL}}"],
+              "path": ["register", "step2", "verify"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"mobile\": \"+919876543210\",\n  \"otp\": \"654321\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
         },
         {
-          "name": "Step 3 - Complete Profile (Get JWT Token)",
+          "name": "Step 3 - Complete Profile (JWT Token Milta Hai)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/register/step3", "host": ["{{BASE_URL}}"], "path": ["register", "step3"] },
+            "url": {
+              "raw": "{{BASE_URL}}/register/step3",
+              "host": ["{{BASE_URL}}"],
+              "path": ["register", "step3"]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"user@example.com\",\n  \"clientId\": \"{{clientId}}\",\n  \"name\": \"Anil Kumar\",\n  \"dob\": \"1995-06-20\",\n  \"timeOfBirth\": \"08:30\",\n  \"placeOfBirth\": \"Delhi\",\n  \"latitude\": 28.6139,\n  \"longitude\": 77.2090,\n  \"gowthra\": \"Kashyap\"\n}"
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"clientId\": \"{{clientId}}\",\n  \"name\": \"Anil Kumar\",\n  \"city\": \"Delhi\",\n  \"pincode\": \"110001\",\n  \"businessName\": \"My Business\",\n  \"gender\": \"male\",\n  \"ageRange\": \"25-30\",\n  \"businessInterests\": [\"technology\", \"finance\"],\n  \"occupation\": \"Software Engineer\",\n  \"highestQualification\": \"B.Tech\",\n  \"fieldOfStudy\": \"Computer Science\",\n  \"skills\": [\"JavaScript\", \"Node.js\"],\n  \"socialMedia\": {\n    \"instagram\": { \"handle\": \"@anil_kumar\", \"followersCount\": \"1000\" },\n    \"youtube\": { \"channelUrl\": \"https://youtube.com/@anil\", \"subscribers\": \"500\" }\n  }\n}"
             }
           }
         },
@@ -128,9 +169,14 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/register/resend-email-otp", "host": ["{{BASE_URL}}"], "path": ["register", "resend-email-otp"] },
+            "url": {
+              "raw": "{{BASE_URL}}/register/resend-email-otp",
+              "host": ["{{BASE_URL}}"],
+              "path": ["register", "resend-email-otp"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
@@ -140,38 +186,54 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/register/resend-mobile-otp", "host": ["{{BASE_URL}}"], "path": ["register", "resend-mobile-otp"] },
+            "url": {
+              "raw": "{{BASE_URL}}/register/resend-mobile-otp",
+              "host": ["{{BASE_URL}}"],
+              "path": ["register", "resend-mobile-otp"]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"user@example.com\",\n  \"otpMethod\": \"gupshup\",\n  \"clientId\": \"{{clientId}}\"\n}"
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"mobile\": \"+919876543210\",\n  \"otpMethod\": \"gupshup\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
         }
       ]
     },
     {
-      "name": "Login",
+      "name": "3. User Login",
+      "description": "Email/Password login, Google, Firebase login flows",
       "item": [
         {
-          "name": "User Login (Email & Password)",
+          "name": "User Login - Email and Password",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/login", "host": ["{{BASE_URL}}"], "path": ["login"] },
+            "url": {
+              "raw": "{{BASE_URL}}/login",
+              "host": ["{{BASE_URL}}"],
+              "path": ["login"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"User@1234\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
         },
         {
-          "name": "Google Login / Register",
+          "name": "Google Login or Register",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/register/google", "host": ["{{BASE_URL}}"], "path": ["register", "google"] },
+            "url": {
+              "raw": "{{BASE_URL}}/register/google",
+              "host": ["{{BASE_URL}}"],
+              "path": ["register", "google"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"credential\": \"<Google ID Token>\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
@@ -181,9 +243,14 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/register/firebase", "host": ["{{BASE_URL}}"], "path": ["register", "firebase"] },
+            "url": {
+              "raw": "{{BASE_URL}}/register/firebase",
+              "host": ["{{BASE_URL}}"],
+              "path": ["register", "firebase"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"idToken\": \"<Firebase ID Token>\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
@@ -193,9 +260,14 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/login/firebase", "host": ["{{BASE_URL}}"], "path": ["login", "firebase"] },
+            "url": {
+              "raw": "{{BASE_URL}}/login/firebase",
+              "host": ["{{BASE_URL}}"],
+              "path": ["login", "firebase"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"idToken\": \"<Firebase ID Token>\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
@@ -205,9 +277,14 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/check-email", "host": ["{{BASE_URL}}"], "path": ["check-email"] },
+            "url": {
+              "raw": "{{BASE_URL}}/check-email",
+              "host": ["{{BASE_URL}}"],
+              "path": ["check-email"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
@@ -215,14 +292,19 @@
       ]
     },
     {
-      "name": "Profile",
+      "name": "4. User Profile",
+      "description": "Profile get, update - JWT Token required",
       "item": [
         {
           "name": "Get User Profile",
           "request": {
             "method": "GET",
             "header": [{ "key": "Authorization", "value": "Bearer {{JWT_TOKEN}}" }],
-            "url": { "raw": "{{BASE_URL}}/profile", "host": ["{{BASE_URL}}"], "path": ["profile"] }
+            "url": {
+              "raw": "{{BASE_URL}}/profile",
+              "host": ["{{BASE_URL}}"],
+              "path": ["profile"]
+            }
           }
         },
         {
@@ -233,39 +315,77 @@
               { "key": "Content-Type", "value": "application/json" },
               { "key": "Authorization", "value": "Bearer {{JWT_TOKEN}}" }
             ],
-            "url": { "raw": "{{BASE_URL}}/profile", "host": ["{{BASE_URL}}"], "path": ["profile"] },
+            "url": {
+              "raw": "{{BASE_URL}}/profile",
+              "host": ["{{BASE_URL}}"],
+              "path": ["profile"]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Anil Kumar Singh\",\n  \"dob\": \"1995-06-20\",\n  \"timeOfBirth\": \"08:30\",\n  \"placeOfBirth\": \"Delhi\",\n  \"latitude\": 28.6139,\n  \"longitude\": 77.2090,\n  \"gowthra\": \"Bharadwaj\"\n}"
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"name\": \"Anil Kumar Singh\",\n  \"city\": \"Mumbai\",\n  \"pincode\": \"400001\",\n  \"businessName\": \"My Updated Business\",\n  \"gender\": \"male\",\n  \"ageRange\": \"25-30\",\n  \"businessInterests\": [\"technology\", \"marketing\"],\n  \"occupation\": \"Software Engineer\",\n  \"highestQualification\": \"M.Tech\",\n  \"fieldOfStudy\": \"Computer Science\",\n  \"skills\": [\"JavaScript\", \"Node.js\", \"React\"],\n  \"socialMedia\": {\n    \"instagram\": { \"handle\": \"@anil_updated\", \"followersCount\": \"2000\" },\n    \"youtube\": { \"channelUrl\": \"https://youtube.com/@anil_updated\", \"subscribers\": \"1000\" }\n  }\n}"
             }
           }
-        },
+        }
+      ]
+    },
+    {
+      "name": "5. Profile Image Upload (R2)",
+      "description": "Step 1: Get presigned URL → Step 2: PUT image to R2 → Step 3: Confirm key in DB",
+      "item": [
         {
-          "name": "Step 4 - Get Profile Image Upload URL (R2)",
+          "name": "Step 1 - Get Profile Image Upload URL",
           "request": {
             "method": "POST",
             "header": [
               { "key": "Content-Type", "value": "application/json" },
               { "key": "Authorization", "value": "Bearer {{JWT_TOKEN}}" }
             ],
-            "url": { "raw": "{{BASE_URL}}/profile/image/upload-url", "host": ["{{BASE_URL}}"], "path": ["profile", "image", "upload-url"] },
+            "url": {
+              "raw": "{{BASE_URL}}/profile/image/upload-url",
+              "host": ["{{BASE_URL}}"],
+              "path": ["profile", "image", "upload-url"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"fileType\": \"image/jpeg\"\n}"
             }
           }
         },
         {
-          "name": "Step 4 - Confirm Profile Image After Upload",
+          "name": "Step 2 - Upload Image to R2 (PUT Request)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "image/jpeg" }
+            ],
+            "url": {
+              "raw": "<uploadUrl from Step 1 response>",
+              "host": ["<uploadUrl from Step 1 response>"]
+            },
+            "body": {
+              "mode": "file",
+              "file": {}
+            }
+          }
+        },
+        {
+          "name": "Step 3 - Confirm Profile Image After Upload",
           "request": {
             "method": "POST",
             "header": [
               { "key": "Content-Type", "value": "application/json" },
               { "key": "Authorization", "value": "Bearer {{JWT_TOKEN}}" }
             ],
-            "url": { "raw": "{{BASE_URL}}/profile/image/confirm", "host": ["{{BASE_URL}}"], "path": ["profile", "image", "confirm"] },
+            "url": {
+              "raw": "{{BASE_URL}}/profile/image/confirm",
+              "host": ["{{BASE_URL}}"],
+              "path": ["profile", "image", "confirm"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"key\": \"profile-images/USER_ID/1234567890.jpeg\"\n}"
             }
           }
@@ -273,16 +393,22 @@
       ]
     },
     {
-      "name": "Forgot Password",
+      "name": "6. Forgot Password",
+      "description": "Send OTP → Verify OTP → Reset Password. Resend OTP bhi available hai",
       "item": [
         {
           "name": "Forgot Password - Send Reset OTP",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/forgot-password", "host": ["{{BASE_URL}}"], "path": ["forgot-password"] },
+            "url": {
+              "raw": "{{BASE_URL}}/forgot-password",
+              "host": ["{{BASE_URL}}"],
+              "path": ["forgot-password"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
@@ -292,9 +418,14 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/forgot-password/verify-otp", "host": ["{{BASE_URL}}"], "path": ["forgot-password", "verify-otp"] },
+            "url": {
+              "raw": "{{BASE_URL}}/forgot-password/verify-otp",
+              "host": ["{{BASE_URL}}"],
+              "path": ["forgot-password", "verify-otp"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"otp\": \"123456\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
@@ -304,9 +435,14 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/forgot-password/reset", "host": ["{{BASE_URL}}"], "path": ["forgot-password", "reset"] },
+            "url": {
+              "raw": "{{BASE_URL}}/forgot-password/reset",
+              "host": ["{{BASE_URL}}"],
+              "path": ["forgot-password", "reset"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"newPassword\": \"NewPass@5678\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
@@ -316,9 +452,14 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{BASE_URL}}/forgot-password/resend-otp", "host": ["{{BASE_URL}}"], "path": ["forgot-password", "resend-otp"] },
+            "url": {
+              "raw": "{{BASE_URL}}/forgot-password/resend-otp",
+              "host": ["{{BASE_URL}}"],
+              "path": ["forgot-password", "resend-otp"]
+            },
             "body": {
               "mode": "raw",
+              "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"clientId\": \"{{clientId}}\"\n}"
             }
           }
