@@ -711,14 +711,18 @@ const getProfileImageUploadUrl = async (req, res) => {
     const ext = fileType.split('/')[1] === 'jpeg' ? 'jpg' : fileType.split('/')[1];
     const key = `profile-images/${req.user.id}/${Date.now()}.${ext}`;
 
+    // Presign PUT only; sign host only so the client is not forced to match extra signed headers
+    // (Content-Type is still sent on PUT for correct object metadata; it is not part of SigV4 here).
     const command = new PutObjectCommand({
       Bucket: process.env.R2_BUCKET,
       Key: key,
-      ContentType: fileType,
     });
 
     // Do not strip query params: SigV4 covers the exact query string; editing the URL breaks verification.
-    const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 300 });
+    const uploadUrl = await getSignedUrl(r2Client, command, {
+      expiresIn: 300,
+      signableHeaders: new Set(['host']),
+    });
 
     res.json({
       success: true,
@@ -730,7 +734,7 @@ const getProfileImageUploadUrl = async (req, res) => {
         uploadMethod: 'PUT',
         uploadContentType: fileType,
         usage:
-          'Perform one HTTP PUT to uploadUrl with the raw file bytes and header Content-Type exactly matching uploadContentType. Then POST /profile/image/confirm with { key }. Browsers and Image.network use GET — that will fail on this URL (SignatureDoesNotMatch). Use profileImageUrl from confirm or GET /profile/image/read-url after upload.',
+          'HTTP PUT uploadUrl with body = raw file (File/Blob/ArrayBuffer), not FormData. Optional header Content-Type: uploadContentType. Never use GET (browser address bar / <img src> / fetch without method). Then POST /profile/image/confirm with { key }.',
       },
     });
   } catch (err) {
