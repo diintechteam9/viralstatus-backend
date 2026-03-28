@@ -644,17 +644,16 @@ const upload = multer({
   },
 }).single('image'); // form-data field name = "image"
 
-// Flow 1: Direct upload (multipart/form-data)
+// Flow 1: Direct upload (multipart/form-data) - server detects file type automatically
 const uploadProfileImage = async (req, res) => {
   upload(req, res, async (err) => {
     try {
       if (err) return res.status(400).json({ success: false, message: err.message });
       if (!req.file) return res.status(400).json({ success: false, message: 'image file is required' });
 
-      const ext = req.file.mimetype.split('/')[1];
+      const ext = req.file.mimetype.split('/')[1] === 'jpeg' ? 'jpg' : req.file.mimetype.split('/')[1];
       const key = `profile-images/${req.user.id}/${Date.now()}.${ext}`;
 
-      // Upload to R2
       await r2Client.send(new PutCmd({
         Bucket: process.env.R2_BUCKET,
         Key: key,
@@ -683,17 +682,17 @@ const uploadProfileImage = async (req, res) => {
   });
 };
 
-// Flow 2: Get presigned URL (for direct frontend/mobile upload to R2)
+// Flow 2: Get presigned URL - server detects fileType from query param (optional)
 const getProfileImageUploadUrl = async (req, res) => {
   try {
-    const fileType = req.body.fileType || req.query.fileType;
-    if (!fileType) return res.status(400).json({ success: false, message: 'fileType is required' });
+    // fileType optional - default jpeg
+    const fileType = (req.body && req.body.fileType) || req.query.fileType || 'image/jpeg';
 
     const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
     if (!allowedTypes.includes(fileType))
       return res.status(400).json({ success: false, message: 'Invalid file type. Allowed: jpeg, png, webp' });
 
-    const ext = fileType.split('/')[1];
+    const ext = fileType.split('/')[1] === 'jpeg' ? 'jpg' : fileType.split('/')[1];
     const key = `profile-images/${req.user.id}/${Date.now()}.${ext}`;
 
     const command = new PutObjectCommand({
@@ -706,7 +705,7 @@ const getProfileImageUploadUrl = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Presigned URL generated. Upload image directly to this URL using PUT request.',
+      message: 'Presigned URL generated.',
       data: { uploadUrl, key, expiresIn: 300 },
     });
   } catch (err) {
