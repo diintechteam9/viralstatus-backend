@@ -14,6 +14,8 @@ const {
   getUserProfileByGoogleId
 } = require('../controllers/userProfileController');
 const { verifyToken } = require('../middleware/authmiddleware');
+const { putobject } = require('../utils/r2');
+const { v4: uuidv4 } = require('uuid');
 
 /**
  * @route   POST /api/user-profiles
@@ -52,6 +54,19 @@ const { verifyToken } = require('../middleware/authmiddleware');
  * Note: name, email, city, pincode, and businessName are auto-populated from client data and cannot be edited.
  */
 router.post('/', protect, createUserProfile);
+
+// Profile image upload presigned URL
+router.get('/image/upload-url', protect, async (req, res) => {
+  try {
+    const ext = req.query.ext || 'jpg';
+    const key = `profile-images/${uuidv4()}.${ext}`;
+    const contentType = req.query.contentType || 'image/jpeg';
+    const uploadUrl = await putobject(key, contentType);
+    res.json({ success: true, uploadUrl, key });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
 /**
  * @route   GET /api/user-profiles
