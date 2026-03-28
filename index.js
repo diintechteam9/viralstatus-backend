@@ -302,6 +302,8 @@ app.use('/api/chat',messageRoutes);
 
 // Error handling middleware
 app.use((error, req, res, next) => {
+    // Ignore multipart/form-data JSON parse errors (handled by multer)
+    if (error.type === 'entity.parse.failed' || error.message?.includes('is not valid JSON')) return next();
     if (process.env.NODE_ENV === 'development') {
         console.error('❌ Error:', error.message);
     }
