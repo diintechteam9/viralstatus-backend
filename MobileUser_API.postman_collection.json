@@ -20,6 +20,31 @@
     {
       "key": "JWT_TOKEN",
       "value": ""
+    },
+    {
+      "key": "USER_JWT",
+      "value": "",
+      "description": "Google / mobile user JWT — copy from login response or browser localStorage usertoken"
+    },
+    {
+      "key": "CLIENT_JWT",
+      "value": "",
+      "description": "Client JWT — auto-set by Login Client test script; or localStorage clienttoken"
+    },
+    {
+      "key": "API_ROOT",
+      "value": "https://viralstatus-backend.serveminecraft.net",
+      "description": "Backend origin without trailing slash"
+    },
+    {
+      "key": "CAMPAIGN_ID",
+      "value": "",
+      "description": "Mongo _id of a campaign for path params"
+    },
+    {
+      "key": "GOOGLE_USER_ID",
+      "value": "",
+      "description": "Participant id (google sub) for pools response GET"
     }
   ],
   "item": [
@@ -65,7 +90,7 @@
           "name": "Get Client Profile",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{JWT_TOKEN}}" }],
+            "header": [{ "key": "Authorization", "value": "Bearer {{CLIENT_JWT}}" }],
             "url": {
               "raw": "{{CLIENT_BASE_URL}}/me",
               "host": ["{{CLIENT_BASE_URL}}"],
@@ -149,6 +174,24 @@
         },
         {
           "name": "Step 3 - Complete Profile (JWT Token Milta Hai)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const t = j.data && j.data.token;",
+                  "  if (t) {",
+                  "    pm.collectionVariables.set('JWT_TOKEN', t);",
+                  "    pm.collectionVariables.set('USER_JWT', t);",
+                  "  }",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -206,6 +249,24 @@
       "item": [
         {
           "name": "User Login - Email and Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const t = j.data && j.data.token;",
+                  "  if (t) {",
+                  "    pm.collectionVariables.set('JWT_TOKEN', t);",
+                  "    pm.collectionVariables.set('USER_JWT', t);",
+                  "  }",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -461,6 +522,114 @@
               "mode": "raw",
               "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"clientId\": \"{{clientId}}\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Campaigns (User / Client / Admin JWT)",
+      "description": "Bearer token must be a JWT that verifyToken can resolve (User, Client, MobileUser, or Admin). /active also accepts ?clientId=CLI-XXXX. Copy tokens: browser localStorage usertoken / clienttoken, or run Login Client / User Login — tests set CLIENT_JWT / USER_JWT.",
+      "item": [
+        {
+          "name": "GET Active Campaigns (auth required)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{JWT_TOKEN}}" }],
+            "url": {
+              "raw": "{{API_ROOT}}/api/auth/user/campaign/active?clientId={{clientId}}",
+              "host": ["{{API_ROOT}}"],
+              "path": ["api", "auth", "user", "campaign", "active"],
+              "query": [{ "key": "clientId", "value": "{{clientId}}" }]
+            }
+          }
+        },
+        {
+          "name": "GET Campaigns By Client (CLI code)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{CLIENT_JWT}}" }],
+            "url": {
+              "raw": "{{API_ROOT}}/api/auth/user/campaign/client/{{clientId}}",
+              "host": ["{{API_ROOT}}"],
+              "path": ["api", "auth", "user", "campaign", "client", "{{clientId}}"]
+            }
+          }
+        },
+        {
+          "name": "GET Active Participants",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{CLIENT_JWT}}" }],
+            "url": {
+              "raw": "{{API_ROOT}}/api/auth/user/campaign/activeparticipants/{{CAMPAIGN_ID}}",
+              "host": ["{{API_ROOT}}"],
+              "path": ["api", "auth", "user", "campaign", "activeparticipants", "{{CAMPAIGN_ID}}"]
+            }
+          }
+        },
+        {
+          "name": "POST Join Campaign (active participants)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{JWT_TOKEN}}" }
+            ],
+            "url": {
+              "raw": "{{API_ROOT}}/api/auth/user/campaign/activeparticipants/{{CAMPAIGN_ID}}",
+              "host": ["{{API_ROOT}}"],
+              "path": ["api", "auth", "user", "campaign", "activeparticipants", "{{CAMPAIGN_ID}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"userId\": \"<google_sub_or_app_userId_string>\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST Register Campaign (RegisteredCampaign model)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{JWT_TOKEN}}" }
+            ],
+            "url": {
+              "raw": "{{API_ROOT}}/api/auth/user/campaign/register/{{CAMPAIGN_ID}}",
+              "host": ["{{API_ROOT}}"],
+              "path": ["api", "auth", "user", "campaign", "register", "{{CAMPAIGN_ID}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"userId\": \"<google_sub_or_app_userId_string>\"\n}"
+            }
+          }
+        },
+        {
+          "name": "GET Registered Campaigns (query)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{JWT_TOKEN}}" }],
+            "url": {
+              "raw": "{{API_ROOT}}/api/auth/user/campaign/registered?googleId={{GOOGLE_USER_ID}}",
+              "host": ["{{API_ROOT}}"],
+              "path": ["api", "auth", "user", "campaign", "registered"],
+              "query": [{ "key": "googleId", "value": "{{GOOGLE_USER_ID}}" }]
+            }
+          }
+        },
+        {
+          "name": "GET User Pool Responses",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{CLIENT_JWT}}" }],
+            "url": {
+              "raw": "{{API_ROOT}}/api/pools/user/response/get/{{GOOGLE_USER_ID}}",
+              "host": ["{{API_ROOT}}"],
+              "path": ["api", "pools", "user", "response", "get", "{{GOOGLE_USER_ID}}"]
             }
           }
         }

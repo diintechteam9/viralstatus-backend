@@ -297,6 +297,15 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
     });
   }
 
+  // Validate all reelIds are valid MongoDB ObjectIds
+  const invalidReelIds = reelIds.filter(id => !mongoose.Types.ObjectId.isValid(id));
+  if (invalidReelIds.length > 0) {
+    return res.status(400).json({
+      success: false,
+      error: `Invalid reel IDs provided: ${invalidReelIds.join(', ')}. Each reelId must be a valid MongoDB ObjectId.`
+    });
+  }
+
   const totalReelsNeeded = userIds.length * reelsPerUser;
   if (reelIds.length < totalReelsNeeded) {
     return res.status(400).json({ 

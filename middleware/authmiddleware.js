@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const Admin = require('../models/admin');
 const Client = require('../models/client');
 const User = require('../models/user');
+const MobileUser = require('../models/MobileUser');
 
 const authMiddleware = async (req, res, next) => {
   try {
@@ -59,47 +60,84 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
-// Verify user token
+/**
+ * Loose JWT guard for shared user/client routes (e.g. campaigns).
+ * Supports: GoogleUser (User), password/Google Client, MobileUser, Admin.
+ * Legacy tokens may only contain { id } — resolve by collection lookup order.
+ */
 const verifyToken = async (req, res, next) => {
   try {
-    // Get token from header
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ success: false, message: 'No token provided' });
     }
-    
+
     const token = authHeader.split(' ')[1];
-    
-    // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log(decoded)
-    // Try to find user by id
+
+    if (decoded.userType === 'admin') {
+      const admin = await Admin.findById(decoded.id).select('-password');
+      if (!admin) {
+        return res.status(401).json({ success: false, message: 'Invalid token: admin not found' });
+      }
+      req.user = {
+        id: admin._id,
+        email: admin.email,
+        googleId: null,
+        adminAccess: true,
+        userType: 'admin',
+      };
+      return next();
+    }
+
     let user = await User.findById(decoded.id).select('-password');
     if (user) {
       req.user = {
         id: user._id,
         email: user.email,
         googleId: user.googleId,
-        adminAccess: user.adminAccess
+        adminAccess: user.adminAccess,
+        userType: decoded.userType || 'user',
       };
-      console.log('req.user set in middleware:', req.user.googleId);
       return next();
     }
-    // If not a user, try to find client by id
-    let client = await Client.findById(decoded.id);
+
+    const client = await Client.findById(decoded.id).select('-password');
     if (client) {
       req.client = {
         id: client._id,
         googleId: client.googleId,
-        email: client.email
+        email: client.email,
+        clientId: client.clientId,
       };
-      console.log('req.client set in middleware:', req.client.id);
+      req.user = {
+        id: client._id,
+        email: client.email,
+        googleId: client.googleId,
+        userType: 'client',
+      };
       return next();
     }
-    // If neither user nor client found
+
+    const mobile = await MobileUser.findById(decoded.id).select('-password');
+    if (mobile) {
+      const stableUserId =
+        mobile.googleId || mobile.firebaseUid || `mobile:${mobile._id.toString()}`;
+      req.user = {
+        id: mobile._id,
+        email: mobile.email,
+        googleId: stableUserId,
+        userType: 'mobileuser',
+      };
+      return next();
+    }
+
     return res.status(401).json({ success: false, message: 'Invalid token: user/client not found' });
   } catch (error) {
-    console.error('Token verification error:', error);
+    console.error('Token verification error:', error.name || error.message);
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ success: false, message: 'Token expired. Please sign in again.' });
+    }
     return res.status(401).json({ success: false, message: 'Invalid token' });
   }
 };

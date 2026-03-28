@@ -233,38 +233,30 @@ exports.getActiveCampaigns = async (req, res) => {
       }
     }
 
-    // Fetch user or client by id from JWT, then get googleId
     let registeredCampaignIds = [];
-    let googleId;
+    let googleId = req.user?.googleId || req.client?.googleId || null;
     const id = req.user?.id || req.client?.id;
 
-    if (id) {
-      console.log('Found ID in request:', id);
-      // Try user model first
+    if (!googleId && id) {
       const User = require('../models/user');
       const userDoc = await User.findById(id);
-      console.log('userDoc:', userDoc);
       if (userDoc && userDoc.googleId) {
         googleId = userDoc.googleId;
-        console.log('Found googleId in userDoc:', googleId);
       } else {
-        // Try client model if not found in user
         const Client = require('../models/client');
         const clientDoc = await Client.findById(id);
-        console.log('clientDoc for id:', clientDoc);
         if (clientDoc && clientDoc.googleId) {
           googleId = clientDoc.googleId;
-          console.log('Found googleId in clientDoc:', googleId);
         }
       }
-      if (googleId) {
-        const RegisteredCampaign = require('../models/RegisteredCampaign');
-        const reg = await RegisteredCampaign.findOne({ userId: googleId });
-        console.log('RegisteredCampaign for googleId:', reg);
-        if (reg && reg.registeredCampaigns) {
-          registeredCampaignIds = reg.registeredCampaigns.map(c => c.campaign && c.campaign._id?.toString?.());
-          console.log('registeredCampaignIds:', registeredCampaignIds);
-        }
+    }
+    if (googleId) {
+      const RegisteredCampaign = require('../models/RegisteredCampaign');
+      const reg = await RegisteredCampaign.findOne({ userId: googleId });
+      console.log('RegisteredCampaign for googleId:', reg);
+      if (reg && reg.registeredCampaigns) {
+        registeredCampaignIds = reg.registeredCampaigns.map(c => c.campaign && c.campaign._id?.toString?.());
+        console.log('registeredCampaignIds:', registeredCampaignIds);
       }
     }
     if (registeredCampaignIds.length > 0) {
