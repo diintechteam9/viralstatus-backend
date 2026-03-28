@@ -43,6 +43,15 @@ const mobileUserSchema = new mongoose.Schema({
   mobileOtpExpiry: { type: Date },
   otpMethod: { type: String, enum: ['gupshup', 'twilio', 'whatsapp'], default: 'gupshup' },
 
+  // Password Reset OTP
+  resetOtp: { type: String },
+  resetOtpExpiry: { type: Date },
+  resetOtpVerified: { type: Boolean, default: false },
+
+  // Profile Image (R2 key)
+  profileImageKey: { type: String },
+  profileImageUrl: { type: String },
+
   clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client' },
   clientCode: { type: String },  // CLI-XXXXXX string copy
   createdAt: { type: Date, default: Date.now },

@@ -3,6 +3,9 @@ const Client = require('../models/client');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
+const { PutObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const { r2Client } = require('../config/r2');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -197,13 +200,15 @@ const step2SendMobileOtp = async (req, res) => {
     if (!user.emailVerified) return res.status(400).json({ success: false, message: 'Please verify email first (Step 1)' });
 
     const otp = generateOtp();
+
+    // Send OTP first — save only if delivery succeeds
+    await sendMobileOtp(mobile, otp, otpMethod);
+
     user.mobile = mobile;
-    user.mobileOtp = otp;
+    user.mobileOtp = String(otp);
     user.mobileOtpExpiry = otpExpiry();
     user.otpMethod = otpMethod;
     await user.save();
-
-    await sendMobileOtp(mobile, otp, otpMethod);
 
     res.json({
       success: true,
@@ -232,7 +237,7 @@ const step2VerifyMobileOtp = async (req, res) => {
     if (!user.mobileOtp)
       return res.status(400).json({ success: false, message: 'OTP not generated. Please request a new OTP.' });
 
-    if (user.mobileOtp !== otp)
+    if (String(user.mobileOtp).trim() !== String(otp).trim())
       return res.status(400).json({ success: false, message: 'Invalid OTP' });
 
     if (user.mobileOtpExpiry < new Date())
@@ -621,6 +626,226 @@ const updateProfile = async (req, res) => {
   }
 };
 
+// ─── UPLOAD PROFILE PICTURE (Step 4) - R2 Presigned URL ─────────────────────
+// Flow: Frontend calls this API → gets presigned URL → uploads directly to R2
+//       → then calls /profile/image/confirm to save the key in DB
+
+const getProfileImageUploadUrl = async (req, res) => {
+  try {
+    const { fileType } = req.body;
+    // fileType: image/jpeg, image/png, image/webp
+    if (!fileType) return res.status(400).json({ success: false, message: 'fileType is required' });
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    if (!allowedTypes.includes(fileType))
+      return res.status(400).json({ success: false, message: 'Invalid file type. Allowed: jpeg, png, webp' });
+
+    const ext = fileType.split('/')[1];
+    const key = `profile-images/${req.user.id}/${Date.now()}.${ext}`;
+
+    const command = new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET,
+      Key: key,
+      ContentType: fileType,
+    });
+
+    const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 300 }); // 5 min expiry
+
+    res.json({
+      success: true,
+      message: 'Presigned URL generated. Upload image directly to this URL using PUT request.',
+      data: {
+        uploadUrl,
+        key,
+        expiresIn: 300,
+        instructions: 'PUT request to uploadUrl with file binary in body and Content-Type header',
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// After frontend uploads to R2, call this to save key in DB
+const confirmProfileImage = async (req, res) => {
+  try {
+    const { key } = req.body;
+    if (!key) return res.status(400).json({ success: false, message: 'key is required' });
+
+    // Build public URL
+    const imageUrl = `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET}/${key}`;
+
+    const user = await MobileUser.findByIdAndUpdate(
+      req.user.id,
+      { profileImageKey: key, profileImageUrl: imageUrl },
+      { new: true }
+    ).select('-password -emailOtp -mobileOtp -emailOtpExpiry -mobileOtpExpiry -resetOtp -resetOtpExpiry');
+
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    res.json({
+      success: true,
+      message: 'Profile image updated successfully',
+      data: { profileImageUrl: imageUrl, profileImageKey: key, user },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ─── FORGOT PASSWORD — Send Reset OTP to Email ────────────────────────────────
+
+const forgotPassword = async (req, res) => {
+  try {
+    const { email, clientId } = req.body;
+    if (!email || !clientId)
+      return res.status(400).json({ success: false, message: 'email and clientId required' });
+
+    const client = await validateClientId(clientId);
+
+    const user = await MobileUser.findOne({ email, clientId: client._id });
+    // Always return success to prevent email enumeration attack
+    if (!user || user.registrationStep < 3) {
+      return res.json({ success: true, message: 'If this email is registered, an OTP has been sent.' });
+    }
+
+    const otp = generateOtp();
+    user.resetOtp = otp;
+    user.resetOtpExpiry = otpExpiry();
+    user.resetOtpVerified = false;
+    await user.save();
+
+    // Send reset OTP via email
+    await axios.post(
+      'https://api.brevo.com/v3/smtp/email',
+      {
+        sender: { name: 'App', email: process.env.BREVO_FROM_EMAIL },
+        to: [{ email }],
+        subject: 'Password Reset OTP',
+        htmlContent: `<p>Your password reset OTP is <b>${otp}</b>. It is valid for 10 minutes.</p><p>If you did not request this, please ignore this email.</p>`,
+      },
+      { headers: { 'api-key': process.env.BREVO_API_KEY, 'Content-Type': 'application/json' } }
+    );
+
+    res.json({
+      success: true,
+      message: 'If this email is registered, an OTP has been sent.',
+      data: { email, clientId: client.clientId },
+    });
+  } catch (err) {
+    res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
+  }
+};
+
+// ─── VERIFY RESET OTP ─────────────────────────────────────────────────────────
+
+const verifyResetOtp = async (req, res) => {
+  try {
+    const { email, otp, clientId } = req.body;
+    if (!email || !otp || !clientId)
+      return res.status(400).json({ success: false, message: 'email, otp and clientId required' });
+
+    const client = await validateClientId(clientId);
+
+    const user = await MobileUser.findOne({ email, clientId: client._id });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    if (!user.resetOtp)
+      return res.status(400).json({ success: false, message: 'No OTP requested. Please request a new OTP.' });
+
+    if (user.resetOtp !== otp)
+      return res.status(400).json({ success: false, message: 'Invalid OTP' });
+
+    if (user.resetOtpExpiry < new Date())
+      return res.status(400).json({ success: false, message: 'OTP expired. Please resend.' });
+
+    // Mark OTP as verified but don't clear it yet — needed for reset step
+    user.resetOtpVerified = true;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'OTP verified successfully. You can now reset your password.',
+      data: { email, otpVerified: true, clientId: client.clientId },
+    });
+  } catch (err) {
+    res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
+  }
+};
+
+// ─── RESET PASSWORD ───────────────────────────────────────────────────────────
+
+const resetPassword = async (req, res) => {
+  try {
+    const { email, newPassword, clientId } = req.body;
+    if (!email || !newPassword || !clientId)
+      return res.status(400).json({ success: false, message: 'email, newPassword and clientId required' });
+
+    if (newPassword.length < 6)
+      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+
+    const client = await validateClientId(clientId);
+
+    const user = await MobileUser.findOne({ email, clientId: client._id });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    if (!user.resetOtpVerified)
+      return res.status(400).json({ success: false, message: 'Please verify OTP first before resetting password.' });
+
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(newPassword, salt);
+    user.resetOtp = null;
+    user.resetOtpExpiry = null;
+    user.resetOtpVerified = false;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Password reset successfully. Please login with your new password.',
+      data: { email, clientId: client.clientId },
+    });
+  } catch (err) {
+    res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
+  }
+};
+
+// ─── RESEND RESET OTP ─────────────────────────────────────────────────────────
+
+const resendResetOtp = async (req, res) => {
+  try {
+    const { email, clientId } = req.body;
+    if (!email || !clientId)
+      return res.status(400).json({ success: false, message: 'email and clientId required' });
+
+    const client = await validateClientId(clientId);
+
+    const user = await MobileUser.findOne({ email, clientId: client._id });
+    if (!user || user.registrationStep < 3)
+      return res.json({ success: true, message: 'If this email is registered, an OTP has been sent.' });
+
+    const otp = generateOtp();
+    user.resetOtp = otp;
+    user.resetOtpExpiry = otpExpiry();
+    user.resetOtpVerified = false;
+    await user.save();
+
+    await axios.post(
+      'https://api.brevo.com/v3/smtp/email',
+      {
+        sender: { name: 'App', email: process.env.BREVO_FROM_EMAIL },
+        to: [{ email }],
+        subject: 'Password Reset OTP',
+        htmlContent: `<p>Your new password reset OTP is <b>${otp}</b>. It is valid for 10 minutes.</p>`,
+      },
+      { headers: { 'api-key': process.env.BREVO_API_KEY, 'Content-Type': 'application/json' } }
+    );
+
+    res.json({ success: true, message: 'OTP resent to your email.' });
+  } catch (err) {
+    res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
+  }
+};
+
 module.exports = {
   step1SendEmailOtp,
   step1VerifyEmailOtp,
@@ -636,4 +861,10 @@ module.exports = {
   firebaseLogin,
   getProfile,
   updateProfile,
+  getProfileImageUploadUrl,
+  confirmProfileImage,
+  forgotPassword,
+  verifyResetOtp,
+  resetPassword,
+  resendResetOtp,
 };

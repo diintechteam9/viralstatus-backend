@@ -15,6 +15,12 @@ const {
   firebaseLogin,
   getProfile,
   updateProfile,
+  getProfileImageUploadUrl,
+  confirmProfileImage,
+  forgotPassword,
+  verifyResetOtp,
+  resetPassword,
+  resendResetOtp,
 } = require('../controllers/mobileUserController');
 
 const { protect } = require('../middleware/mobileAuth');
@@ -46,5 +52,17 @@ router.post('/login/firebase', firebaseLogin);
 // Profile (protected)
 router.get('/profile', protect, getProfile);
 router.put('/profile', protect, updateProfile);
+
+// Profile Image Upload - R2 (protected)
+// Step 1: Get presigned URL
+router.post('/profile/image/upload-url', protect, getProfileImageUploadUrl);
+// Step 2: After uploading to R2, confirm the key
+router.post('/profile/image/confirm', protect, confirmProfileImage);
+
+// Forgot Password Flow
+router.post('/forgot-password', forgotPassword);
+router.post('/forgot-password/verify-otp', verifyResetOtp);
+router.post('/forgot-password/reset', resetPassword);
+router.post('/forgot-password/resend-otp', resendResetOtp);
 
 module.exports = router;
