@@ -9,6 +9,14 @@ const { r2Client } = require('../config/r2');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+/** Map common aliases so presigned Content-Type matches what clients send (e.g. File.type is image/jpeg). */
+const normalizeProfileImageMime = (raw) => {
+  if (!raw || typeof raw !== 'string') return 'image/jpeg';
+  const t = raw.trim().toLowerCase();
+  if (t === 'image/jpg' || t === 'jpg') return 'image/jpeg';
+  return t;
+};
+
 /** Private bucket: persist profileImageKey; viewers must use a presigned GET (never the PUT upload URL). */
 const attachFreshProfileImageUrl = async (plainUser) => {
   if (!plainUser?.profileImageKey || !process.env.R2_BUCKET) return plainUser;
@@ -699,42 +707,57 @@ const uploadProfileImage = async (req, res) => {
   }
 };
 
-// Flow 2: Get presigned URL - server detects fileType from query param (optional)
+// Flow 2: Presigned PUT URL — SigV4 binds method (PUT), path, query, expiry, and signed headers (includes Content-Type).
 const getProfileImageUploadUrl = async (req, res) => {
   try {
-    const fileType = (req.body && req.body.fileType) || req.query.fileType || 'image/jpeg';
+    const rawType = (req.body && req.body.fileType) || req.query.fileType || 'image/jpeg';
+    const fileType = normalizeProfileImageMime(rawType);
 
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
-    if (!allowedTypes.includes(fileType))
-      return res.status(400).json({ success: false, message: 'Invalid file type. Allowed: jpeg, png, webp' });
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(fileType)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid file type. Use fileType: image/jpeg | image/png | image/webp (aliases: image/jpg → jpeg).',
+      });
+    }
 
-    const ext = fileType.split('/')[1] === 'jpeg' ? 'jpg' : fileType.split('/')[1];
+    const ext = fileType === 'image/jpeg' ? 'jpg' : fileType.split('/')[1];
     const key = `profile-images/${req.user.id}/${Date.now()}.${ext}`;
 
-    // Presign PUT only; sign host only so the client is not forced to match extra signed headers
-    // (Content-Type is still sent on PUT for correct object metadata; it is not part of SigV4 here).
     const command = new PutObjectCommand({
       Bucket: process.env.R2_BUCKET,
       Key: key,
+      ContentType: fileType,
     });
 
-    // Do not strip query params: SigV4 covers the exact query string; editing the URL breaks verification.
-    const uploadUrl = await getSignedUrl(r2Client, command, {
-      expiresIn: 300,
-      signableHeaders: new Set(['host']),
-    });
+    // Do not modify uploadUrl query string after signing. Do not use this URL with GET (browser / <img> / default fetch).
+    const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 300 });
 
     res.json({
       success: true,
-      message: 'Presigned URL generated.',
+      message: 'Presigned URL generated (PUT + Content-Type locked).',
       data: {
         uploadUrl,
         key,
         expiresIn: 300,
         uploadMethod: 'PUT',
         uploadContentType: fileType,
-        usage:
-          'HTTP PUT uploadUrl with body = raw file (File/Blob/ArrayBuffer), not FormData. Optional header Content-Type: uploadContentType. Never use GET (browser address bar / <img src> / fetch without method). Then POST /profile/image/confirm with { key }.',
+        requiredRequest: {
+          method: 'PUT',
+          headers: {
+            'Content-Type': fileType,
+          },
+          body: 'Raw file bytes only (File, Blob, or ArrayBuffer). Do not use FormData or multipart.',
+        },
+        commonMistakes: {
+          signatureMismatchGET:
+            'Opening uploadUrl in a browser or fetch(uploadUrl) without method: "PUT" sends GET — fails with SignatureDoesNotMatch.',
+          contentType:
+            'Header Content-Type must exactly equal uploadContentType (no charset suffix, no multipart).',
+          body: 'body must be the file itself, not new FormData().append(...).',
+        },
+        afterUpload: 'POST /api/mobile/user/profile/image/confirm with JSON { "key": "<key from this response>" }.',
+        viewImage: 'Use profileImageUrl from confirm, GET /profile/image/read-url, or GET /profile — not uploadUrl.',
       },
     });
   } catch (err) {

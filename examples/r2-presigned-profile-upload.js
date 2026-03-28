@@ -25,14 +25,16 @@ async function uploadProfileImage(file) {
 
   if (!meta.success) throw new Error(meta.message || 'upload-url failed');
 
-  const { uploadUrl, key, uploadContentType } = meta.data;
+  const { uploadUrl, key, uploadContentType, requiredRequest } = meta.data;
 
-  // CRITICAL: method must be PUT. Default fetch is GET — that causes SignatureDoesNotMatch on R2.
+  // CRITICAL: method PUT (default fetch = GET → SignatureDoesNotMatch).
+  // Content-Type must exactly match server-signed value (use uploadContentType, no "; charset=..."
+  // and no multipart). Body = raw file only — never FormData.
   const putRes = await fetch(uploadUrl, {
-    method: 'PUT',
-    body: file, // raw File/Blob; do NOT wrap in FormData
+    method: requiredRequest?.method || 'PUT',
+    body: file,
     headers: {
-      'Content-Type': uploadContentType || fileType,
+      'Content-Type': uploadContentType,
     },
   });
 
