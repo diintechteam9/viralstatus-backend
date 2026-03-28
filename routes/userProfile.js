@@ -11,7 +11,8 @@ const {
   deleteUserProfile,
   verifyUserProfile,
   getProfileStats,
-  getUserProfileByGoogleId
+  getUserProfileByGoogleId,
+  getProfileImage
 } = require('../controllers/userProfileController');
 const { verifyToken } = require('../middleware/authmiddleware');
 const { putobject } = require('../utils/r2');
@@ -138,6 +139,9 @@ router.get('/email/:email', getUserProfileByEmail);
  * @access  Public
  */
 router.get('/google/:googleId', getUserProfileByGoogleId);
+
+// Get profile image by googleId
+router.get('/image/:googleId', getProfileImage);
 
 /**
  * @route   GET /api/user-profiles/:id

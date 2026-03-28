@@ -3,6 +3,7 @@ const Client = require("../models/client");
 const Group = require('../models/group');
 const mongoose = require('mongoose');
 const User = require("../models/user");
+const { getobject } = require('../utils/r2');
 
 /**
  * Create a new user profile
@@ -739,6 +740,20 @@ const getProfileStats = async (req, res) => {
   }
 };
 
+const getProfileImage = async (req, res) => {
+  try {
+    const { googleId } = req.params;
+    const profile = await UserProfile.findOne({ googleId }).select('profileImage');
+    if (!profile || !profile.profileImage?.key) {
+      return res.status(404).json({ success: false, message: 'Profile image not found' });
+    }
+    const url = await getobject(profile.profileImage.key);
+    res.json({ success: true, url, key: profile.profileImage.key });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   createUserProfile,
   getAllUserProfiles,
@@ -749,5 +764,6 @@ module.exports = {
   deleteUserProfile,
   verifyUserProfile,
   getProfileStats,
-  getUserProfileByGoogleId
+  getUserProfileByGoogleId,
+  getProfileImage
 }; 

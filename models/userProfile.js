@@ -261,6 +261,14 @@ const userProfileSchema = new mongoose.Schema({
     required: false,
     index: true
   },
+  profileImage: {
+    key: { type: String, default: "" },
+    url: { type: String, default: "" }
+  },
+  profileImage: {
+    key: { type: String, default: "" },
+    url: { type: String, default: "" }
+  },
   createdAt: {
     type: Date,
     default: Date.now
