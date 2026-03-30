@@ -3,7 +3,11 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 const generateToken = (client) =>
-  jwt.sign({ id: client._id, clientId: client.clientId, type: 'client' }, process.env.JWT_SECRET, { expiresIn: '30d' });
+  jwt.sign(
+    { id: client._id, clientId: client.clientId, role: 'client' },
+    process.env.JWT_SECRET,
+    { expiresIn: '30d' }
+  );
 
 // POST /api/auth/client/register
 const registerClient = async (req, res) => {

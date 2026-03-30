@@ -42,7 +42,7 @@ const otpExpiry = () => new Date(Date.now() + 10 * 60 * 1000);
 
 const generateToken = (user, client) =>
   jwt.sign(
-    { id: user._id, email: user.email, clientId: client.clientId, clientObjectId: client._id, userType: 'mobileuser' },
+    { id: user._id, email: user.email, clientId: client.clientId, clientObjectId: client._id, role: 'mobileuser' },
     process.env.JWT_SECRET,
     { expiresIn: '7d' }
   );
@@ -516,27 +516,30 @@ const resendEmailOtp = async (req, res) => {
 
 const resendMobileOtp = async (req, res) => {
   try {
-    const { mobile, otpMethod = 'whatsapp', clientId } = req.body;
-    if (!mobile || !clientId)
-      return res.status(400).json({ success: false, message: 'mobile and clientId required' });
+    const { email, mobile, otpMethod = 'whatsapp', clientId } = req.body;
+    if (!email || !mobile || !clientId)
+      return res.status(400).json({ success: false, message: 'email, mobile and clientId required' });
 
     const client = await validateClientId(clientId);
 
-    const user = await MobileUser.findOne({ mobile, clientId: client._id });
+    // email se user dhundho — mobile se nahi (format mismatch hota hai)
+    const user = await MobileUser.findOne({ email, clientId: client._id });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    if (!user.mobile) return res.status(400).json({ success: false, message: 'Mobile number not found. Please go to Step 2.' });
 
     const otp = generateOtp();
-    user.mobileOtp = otp;
+    // mobile update karo agar naya number aaya ho
+    user.mobile = mobile;
+    user.mobileOtp = String(otp);
     user.mobileOtpExpiry = otpExpiry();
     user.otpMethod = otpMethod;
     await user.save();
 
-    await sendMobileOtp(user.mobile, otp, otpMethod);
+    await sendMobileOtp(mobile, otp, otpMethod);
 
     res.json({ success: true, message: `OTP resent to your mobile via ${otpMethod.toUpperCase()}.` });
   } catch (err) {
-    res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
+    const status = err.message.includes('Client') ? 400 : err.message.includes('WhatsApp') ? 502 : 500;
+    res.status(status).json({ success: false, message: err.message });
   }
 };
 
@@ -632,6 +635,21 @@ const firebaseLogin = async (req, res) => {
 
 const getProfile = async (req, res) => {
   try {
+    // If role is client and no MobileUser was found, return empty profile
+    if (req.user.role === 'client') {
+      return res.json({
+        success: true,
+        data: {
+          user: {
+            _id: req.user.id,
+            email: req.user.email,
+            name: '',
+            profileImageUrl: null,
+            socialMedia: { instagram: {}, youtube: {} },
+          }
+        }
+      });
+    }
     const user = await MobileUser.findById(req.user.id).select('-password -emailOtp -mobileOtp -emailOtpExpiry -mobileOtpExpiry');
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     const userObj = user.toObject();

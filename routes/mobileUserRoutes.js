@@ -77,6 +77,129 @@ router.get('/profile/image/read-url', protect, getProfileImageReadUrl);
 // Route 4: Confirm key after R2 upload
 router.post('/profile/image/confirm', protect, confirmProfileImage);
 
+// Social Media Real Stats
+router.get('/profile/social-stats', protect, async (req, res) => {
+  try {
+    const MobileUser = require('../models/MobileUser');
+    const axios = require('axios');
+
+    const user = await MobileUser.findById(req.user.id).select('socialMedia');
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const result = { instagram: null, youtube: null };
+
+    // ── YouTube real subscribers ──────────────────────────────────────────────
+    const channelUrl = user.socialMedia?.youtube?.channelUrl;
+    if (channelUrl && process.env.YOUTUBE_API_KEY) {
+      try {
+        let channelId = null;
+        const handleMatch = channelUrl.match(/youtube\.com\/@([\w-]+)/);
+        const channelIdMatch = channelUrl.match(/youtube\.com\/channel\/(UC[\w-]+)/);
+        const customMatch = channelUrl.match(/youtube\.com\/c\/([\w-]+)/);
+
+        if (channelIdMatch) {
+          channelId = channelIdMatch[1];
+        } else if (handleMatch || customMatch) {
+          const handle = handleMatch ? handleMatch[1] : customMatch[1];
+          const searchRes = await axios.get('https://www.googleapis.com/youtube/v3/channels', {
+            params: { part: 'statistics,snippet', forHandle: handle, key: process.env.YOUTUBE_API_KEY },
+          });
+          const item = searchRes.data.items?.[0];
+          if (item) {
+            result.youtube = {
+              subscribers: parseInt(item.statistics?.subscriberCount || 0),
+              videoCount: parseInt(item.statistics?.videoCount || 0),
+              viewCount: parseInt(item.statistics?.viewCount || 0),
+              channelName: item.snippet?.title || '',
+              thumbnail: item.snippet?.thumbnails?.default?.url || '',
+            };
+          }
+        }
+
+        if (channelId && !result.youtube) {
+          const statsRes = await axios.get('https://www.googleapis.com/youtube/v3/channels', {
+            params: { part: 'statistics,snippet', id: channelId, key: process.env.YOUTUBE_API_KEY },
+          });
+          const item = statsRes.data.items?.[0];
+          if (item) {
+            result.youtube = {
+              subscribers: parseInt(item.statistics?.subscriberCount || 0),
+              videoCount: parseInt(item.statistics?.videoCount || 0),
+              viewCount: parseInt(item.statistics?.viewCount || 0),
+              channelName: item.snippet?.title || '',
+              thumbnail: item.snippet?.thumbnails?.default?.url || '',
+            };
+          }
+        }
+      } catch (ytErr) {
+        console.error('YouTube stats fetch error:', ytErr.message);
+      }
+    }
+
+    // ── Instagram: scrape public profile page ────────────────────────────────
+    const igHandle = user.socialMedia?.instagram?.handle?.replace('@', '').trim();
+    if (igHandle) {
+      try {
+        // Method 1: Instagram i/api/v1 endpoint (works for public profiles)
+        const igRes = await axios.get(
+          `https://www.instagram.com/api/v1/users/web_profile_info/?username=${igHandle}`,
+          {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': '*/*',
+              'Accept-Language': 'en-US,en;q=0.9',
+              'X-IG-App-ID': '936619743392459',
+              'X-Requested-With': 'XMLHttpRequest',
+              'Referer': `https://www.instagram.com/${igHandle}/`,
+              'Origin': 'https://www.instagram.com',
+            },
+            timeout: 8000,
+          }
+        );
+        const igUser = igRes.data?.data?.user;
+        if (igUser) {
+          result.instagram = {
+            followers: igUser.edge_followed_by?.count ?? null,
+            following: igUser.edge_follow?.count ?? null,
+            posts: igUser.edge_owner_to_timeline_media?.count ?? null,
+            fullName: igUser.full_name || '',
+            profilePic: igUser.profile_pic_url || '',
+            isVerified: igUser.is_verified || false,
+            biography: igUser.biography || '',
+            live: true,
+          };
+          // Save fresh followers to DB
+          if (result.instagram.followers !== null) {
+            await MobileUser.findByIdAndUpdate(req.user.id, {
+              'socialMedia.instagram.followersCount': String(result.instagram.followers),
+            });
+          }
+        }
+      } catch (igErr) {
+        console.error('Instagram fetch error:', igErr.message);
+        // Fallback: return stored value
+        result.instagram = {
+          followers: user.socialMedia?.instagram?.followersCount || null,
+          live: false,
+        };
+      }
+    } else {
+      result.instagram = { followers: user.socialMedia?.instagram?.followersCount || null, live: false };
+    }
+
+    // Save fresh YouTube subscribers back to DB if fetched
+    if (result.youtube?.subscribers !== undefined) {
+      await MobileUser.findByIdAndUpdate(req.user.id, {
+        'socialMedia.youtube.subscribers': String(result.youtube.subscribers),
+      });
+    }
+
+    res.json({ success: true, stats: result });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Forgot Password Flow
 router.post('/forgot-password', forgotPassword);
 router.post('/forgot-password/verify-otp', verifyResetOtp);

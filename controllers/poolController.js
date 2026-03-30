@@ -3,31 +3,37 @@ const { putobject } = require('../utils/r2');
 const Reel = require('../models/Reel');
 const { deleteObject } = require('../utils/r2');
 const Client = require('../models/client');
+const MobileUser = require('../models/MobileUser');
 const mongoose = require('mongoose');
 
-// Resolve client by either Mongo _id (clientId) or googleId provided
+// Resolve owner by clientId or googleId — supports Client and MobileUser
 async function resolveClient(req) {
   const { clientId, googleId } = { ...req.body, ...req.query, ...req.params };
   if (!clientId && !googleId) {
     return { error: 'clientId or googleId is required' };
   }
-  let query;
-  // Prefer explicit googleId if provided
+
   if (googleId) {
-    query = { googleId };
-  } else if (clientId) {
-    // If clientId looks like a Mongo ObjectId, treat it as _id; otherwise treat it as googleId
-    if (mongoose.Types.ObjectId.isValid(clientId)) {
-      query = { _id: clientId };
-    } else {
-      query = { googleId: clientId };
+    // Check Client first, then MobileUser
+    let client = await Client.findOne({ googleId }).lean();
+    if (client) return { client };
+    const mobileUser = await MobileUser.findOne({
+      $or: [{ googleId }, { firebaseUid: googleId }]
+    }).lean();
+    if (mobileUser) {
+      // Use the linked clientId if available, otherwise fallback to mobileUser._id
+      const resolvedId = mobileUser.clientId || mobileUser._id;
+      return { client: { _id: resolvedId, googleId: mobileUser.googleId } };
     }
+    return { error: 'User not found for provided googleId' };
   }
-  const client = await Client.findOne(query).lean();
-  if (!client) {
-    return { error: 'Client not found' };
+
+  if (clientId) {
+    const query = mongoose.Types.ObjectId.isValid(clientId) ? { _id: clientId } : { googleId: clientId };
+    const client = await Client.findOne(query).lean();
+    if (!client) return { error: 'Client not found' };
+    return { client };
   }
-  return { client };
 }
 
 

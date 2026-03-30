@@ -35,7 +35,6 @@ const youtubeAuthRoutes = require('./routes/youtubeAuth');
 const apiInstagramRoutes = require('./routes/apiInstagram');
 const postRoutes = require('./routes/postRoutes');
 const googleAuthRoutes = require('./routes/googleAuth');
-const userProfileRoutes = require('./routes/userProfile');
 const groupRoutes = require('./routes/grouproutes');
 const campaignRoutes = require('./routes/campaignRoutes');
 const poolRoutes = require('./routes/poolRoutes');
@@ -216,9 +215,6 @@ app.use('/api/auth/client', clientAuthRoutes);
 app.use('/api/client', clientRoutes); 
 app.use('/api/admin', adminRoutes);
 app.use('/api/superadmin', superadminRoutes);
-
-// User Profile Routes
-app.use('/api/auth/user/profiles', userProfileRoutes);
 
 // Group Routes
 // app.use('/api/auth/user/group', groupRoutes);

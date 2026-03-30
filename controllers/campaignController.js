@@ -220,17 +220,9 @@ exports.getActiveCampaigns = async (req, res) => {
     const { clientId } = req.query;
     console.log('clientId from query:', clientId);
     const filter = { isActive: true };
-    const Client = require('../models/client');
-    if (clientId) {
-      // If clientId is a MongoDB _id, fetch the client document and use its clientId field
-      const clientDoc = await Client.findById(clientId);
-      console.log('clientDoc found for clientId:', clientDoc);
-      if (clientDoc) {
-        filter.clientId = clientDoc.clientId || clientDoc._id;
-      } else {
-        // If not found, fallback to using the provided clientId directly
-        filter.clientId = clientId;
-      }
+    const userType = req.user?.userType;
+    if (clientId && (userType === 'client' || userType === 'admin')) {
+      filter.clientId = clientId;
     }
 
     let registeredCampaignIds = [];

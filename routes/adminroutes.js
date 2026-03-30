@@ -11,35 +11,21 @@ const {
   uploadBusinessLogo,
   getBusinessLogoUrl
 } = require("../controllers/admincontroller");
-const { authMiddleware } = require("../middleware/authmiddleware");
+const { authenticate, authorize } = require('../middleware/authenticate');
 const router = express.Router();
 
-router.get("/", (req, res) => {
-    res.send("Hello admin");
-});
-
+// Public routes — no auth needed
 router.post("/register", registerAdmin);
-
 router.post("/login", loginAdmin);
 
-router.get("/getclients", getClients);
-
-router.get("/getclientbyid/:id", getClientById);
-
-router.post('/registerclient', registerclient);
-
-router.delete('/deleteclient/:id', deleteclient);
-
-// Update client (set filter, etc)
-router.put('/updateclient/:id', authMiddleware, updateClient);
-
-// Get client token for admin access
-router.get('/get-client-token/:clientId', authMiddleware, getClientToken);
-
-// Upload business logo
-router.post('/upload-business-logo', authMiddleware, uploadBusinessLogo);
-
-// Get presigned URL for business logo
-router.post('/get-business-logo-url', authMiddleware, getBusinessLogoUrl);
+// Protected routes — admin only
+router.get("/getclients", authenticate, authorize('admin', 'super_admin'), getClients);
+router.get("/getclientbyid/:id", authenticate, authorize('admin', 'super_admin'), getClientById);
+router.post('/registerclient', authenticate, authorize('admin', 'super_admin'), registerclient);
+router.delete('/deleteclient/:id', authenticate, authorize('admin', 'super_admin'), deleteclient);
+router.put('/updateclient/:id', authenticate, authorize('admin', 'super_admin'), updateClient);
+router.get('/get-client-token/:clientId', authenticate, authorize('admin', 'super_admin'), getClientToken);
+router.post('/upload-business-logo', authenticate, authorize('admin', 'super_admin'), uploadBusinessLogo);
+router.post('/get-business-logo-url', authenticate, authorize('admin', 'super_admin'), getBusinessLogoUrl);
 
 module.exports = router;

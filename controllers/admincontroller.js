@@ -5,13 +5,12 @@ const Client = require("../models/client");
 const { putobject, getobject } = require("../utils/r2");
 
 // Generate JWT Token for admin
-const generateAdminToken = (id) => {
-  return jwt.sign({ 
-    id,
-    userType: 'admin'  // Add userType to the token
-  }, process.env.JWT_SECRET, {
-    expiresIn: "7d",
-  });
+const generateAdminToken = (admin) => {
+  return jwt.sign({
+    id: admin._id,
+    email: admin.email,
+    role: admin.role || 'admin',
+  }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
 const registerAdmin = async (req, res) => {
@@ -31,9 +30,9 @@ const registerAdmin = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashpassword = await bcrypt.hash(password, salt);
 
-    const admin = await Admin.create({ name, email, password: hashpassword });
+    const admin = await Admin.create({ name, email, password: hashpassword, role: 'admin' });
 
-    const token = generateAdminToken(admin._id);
+    const token = generateAdminToken(admin);
 
     res.status(201).json({
       success: true,
@@ -63,13 +62,13 @@ const loginAdmin = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { 
+      {
         id: admin._id,
         email: admin.email,
-        userType: 'admin'
-      }, 
+        role: admin.role || 'admin',
+      },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: '7d' }
     );
 
     res.status(200).json({
@@ -325,8 +324,7 @@ const getClientToken = async (req, res) => {
     });
 
     // Verify admin exists and is authenticated
-    if (req.user.userType !== 'admin') {
-      console.log('Invalid user type:', req.user.userType);
+    if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
       return res.status(401).json({ message: 'Only admins can access client tokens' });
     }
 
@@ -347,11 +345,11 @@ const getClientToken = async (req, res) => {
 
     // Generate token for client with admin access flag
     const token = jwt.sign(
-      { 
+      {
         id: client._id,
         email: client.email,
-        userType: 'client',
-        adminAccess: true // Flag to indicate this is admin-accessed client session
+        role: 'client',
+        adminAccess: true
       },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }

@@ -1,67 +1,54 @@
 const express = require('express');
 const router = express.Router();
 const campaignController = require('../controllers/campaignController');
-const {verifyToken} = require('../middleware/authmiddleware');
+const { authenticate, authorize } = require('../middleware/authenticate');
+const { verifyToken } = require('../middleware/authmiddleware');
 
+// Create campaign — client only
+router.post('/', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.createCampaign);
 
-// Create a new campaign
-router.post('/', campaignController.createCampaign);
+// Upload campaign image
+router.post('/upload', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.uploadCampaignImage);
 
-// Upload campaign image to S3
-router.post('/upload', campaignController.uploadCampaignImage);
-
-// Get all active campaigns
+// Get all active campaigns — all logged in users
 router.get('/active', verifyToken, campaignController.getActiveCampaigns);
 
-// Update a campaign by campaignId
-router.put('/:campaignId', campaignController.updateCampaign);
+// Update campaign
+router.put('/:campaignId', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.updateCampaign);
 
-// Delete a campaign by campaignId
-router.delete('/:campaignId', campaignController.deleteCampaign);
+// Delete campaign
+router.delete('/:campaignId', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.deleteCampaign);
 
-//registered user
+// Register user for campaign
 router.post('/register/:campaignId', campaignController.registeredCampaign);
 
-// Get a user's registered campaigns
+// Get user registered campaigns
 router.get('/registered', campaignController.getUserRegisteredCampaigns);
 
-// Get active participants (googleIds) for a campaign
+// Get/Set active participants
 router.get('/activeparticipants/:campaignId', campaignController.getActiveParticipants);
-
-// Set active participants (googleIds) for a campaign
 router.post('/activeparticipants/:campaignId', campaignController.setActiveParticipant);
 
-// Get all campaigns for a client by clientId
+// Get campaigns by clientId
 router.get('/client/:clientId', campaignController.getCampaignsByClientId);
 
-// Get campaign data (totals) by campaignId
+// Get campaign data
 router.get('/data/:campaignId', campaignController.getCamapignData);
-
-// Get all responded URLs and createdAt for a campaign
 router.get('/videos/:campaignId', campaignController.getCampaignResponseUrls);
-
-//Get all the client campaign's Data
 router.get('/client/data/:clientId', campaignController.getAllClientsCampaignData);
-
-//Get user Dashboard Data
 router.get('/response/data/:userId', campaignController.getUserDashboardStats);
-
-//Get user Dashboard campaign data
 router.get('/response/campaign/data/:userId', campaignController.getUserCampaignData);
 
-// Get campaign details by campaignId
+// Get campaign by ID
 router.get('/:campaignId', async (req, res) => {
   try {
     const Campaign = require('../models/campaign');
     const campaign = await Campaign.findOne({ _id: req.params.campaignId });
-    if (!campaign) {
-      return res.status(404).json({ success: false, message: 'Campaign not found' });
-    }  
+    if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
     res.json({ success: true, campaign });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ success: false, message: 'Server error' });
-  }  
-});  
+  }
+});
 
-module.exports = router; 
+module.exports = router;

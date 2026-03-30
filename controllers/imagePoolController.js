@@ -16,11 +16,10 @@ async function resolveClient(req) {
   if (googleId) {
     query = { googleId };
   } else if (clientId) {
-    // If clientId looks like a Mongo ObjectId, treat it as _id; otherwise treat it as googleId
     if (mongoose.Types.ObjectId.isValid(clientId)) {
       query = { _id: clientId };
     } else {
-      query = { googleId: clientId };
+      query = { clientId };
     }
   }
   const client = await Client.findOne(query).lean();

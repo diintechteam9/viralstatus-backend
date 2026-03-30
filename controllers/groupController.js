@@ -1,5 +1,4 @@
 const Group = require('../models/group');
-const UserProfile = require('../models/userProfile');
 
 // Helper to generate groupId
 function generateGroupId(interest, number) {
