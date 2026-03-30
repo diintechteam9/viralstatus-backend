@@ -753,29 +753,12 @@ const getProfileImageUploadUrl = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Presigned URL generated (PUT + Content-Type locked).',
+      message: 'Presigned upload URL generated.',
       data: {
         uploadUrl,
         key,
         expiresIn: 300,
-        uploadMethod: 'PUT',
-        uploadContentType: fileType,
-        requiredRequest: {
-          method: 'PUT',
-          headers: {
-            'Content-Type': fileType,
-          },
-          body: 'Raw file bytes only (File, Blob, or ArrayBuffer). Do not use FormData or multipart.',
-        },
-        commonMistakes: {
-          signatureMismatchGET:
-            'Opening uploadUrl in a browser or fetch(uploadUrl) without method: "PUT" sends GET — fails with SignatureDoesNotMatch.',
-          contentType:
-            'Header Content-Type must exactly equal uploadContentType (no charset suffix, no multipart).',
-          body: 'body must be the file itself, not new FormData().append(...).',
-        },
-        afterUpload: 'POST /api/mobile/user/profile/image/confirm with JSON { "key": "<key from this response>" }.',
-        viewImage: 'Use profileImageUrl from confirm, GET /profile/image/read-url, or GET /profile — not uploadUrl.',
+        contentType: fileType,
       },
     });
   } catch (err) {
