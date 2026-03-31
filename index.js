@@ -37,6 +37,7 @@ const postRoutes = require('./routes/postRoutes');
 const googleAuthRoutes = require('./routes/googleAuth');
 const groupRoutes = require('./routes/grouproutes');
 const campaignRoutes = require('./routes/campaignRoutes');
+const aiRoutes = require('./routes/aiRoutes');
 const poolRoutes = require('./routes/poolRoutes');
 const imagePoolRoutes = require('./routes/imagePoolRoutes');
 const ta1000seriesRoutes = require('./routes/ta1000series');
@@ -221,6 +222,7 @@ app.use('/api/superadmin', superadminRoutes);
 
 // Campaign Routes
 app.use('/api/auth/user/campaign', campaignRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Pool Routes and Reel Routes (for uploading and managing reels)
 app.use('/api/pools', poolRoutes);

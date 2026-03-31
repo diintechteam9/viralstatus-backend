@@ -10,8 +10,8 @@ router.post('/', authenticate, authorize('client', 'admin', 'super_admin'), camp
 // Upload campaign image
 router.post('/upload', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.uploadCampaignImage);
 
-// Get all active campaigns — all logged in users
-router.get('/active', verifyToken, campaignController.getActiveCampaigns);
+// Get all active campaigns — public route
+router.get('/active', campaignController.getActiveCampaigns);
 
 // Update campaign
 router.put('/:campaignId', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.updateCampaign);
