@@ -155,6 +155,10 @@ app.use(cors({
 
 // Additional CORS middleware for all routes
 app.use((req, res, next) => {
+    // Remove COOP header so Google OAuth popup (window.postMessage) works
+    res.removeHeader('Cross-Origin-Opener-Policy');
+    res.removeHeader('Cross-Origin-Embedder-Policy');
+
     // Handle preflight requests
     if (req.method === 'OPTIONS') {
         res.header('Access-Control-Allow-Origin', req.headers.origin || 'https://viralstatus-frontend.vercel.app' || 'https://client.yovoai.com');
@@ -231,6 +235,7 @@ app.use('/api/pools', poolRoutes);
 app.use('/api/image-pools', imagePoolRoutes);
 
 //credit Routes
+app.use('/api/user/creditwallet', creditWalletRoutes);
 app.use('/api/user/creditWallet', creditWalletRoutes);
 
 

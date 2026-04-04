@@ -396,6 +396,9 @@ const loginUser = async (req, res) => {
 
 // ─── GOOGLE LOGIN / REGISTER ──────────────────────────────────────────────────
 
+const { OAuth2Client } = require('google-auth-library');
+const googleOAuthClient = new OAuth2Client();
+
 const googleAuth = async (req, res) => {
   try {
     const { credential, clientId } = req.body;
@@ -404,29 +407,24 @@ const googleAuth = async (req, res) => {
 
     const client = await validateClientId(clientId);
 
-    const payload = JSON.parse(Buffer.from(credential.split('.')[1], 'base64').toString());
+    // Verify Google ID token properly
+    let payload;
+    try {
+      const ticket = await googleOAuthClient.verifyIdToken({
+        idToken: credential,
+        audience: [
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_ANDROID_CLIENT_ID,
+        ].filter(Boolean),
+      });
+      payload = ticket.getPayload();
+    } catch (verifyErr) {
+      return res.status(401).json({ success: false, message: 'Invalid Google token' });
+    }
+
     const { email, name, picture, sub: googleId } = payload;
 
     let user = await MobileUser.findOne({ email, clientId: client._id });
-
-    if (user && user.registrationStep === 3) {
-      user.lastLoginAt = new Date();
-      await user.save();
-      const token = generateToken(user, client);
-      const userObj = user.toObject();
-      delete userObj.password;
-      delete userObj.emailOtp;
-      delete userObj.emailOtpExpiry;
-      delete userObj.mobileOtp;
-      delete userObj.mobileOtpExpiry;
-      await attachFreshProfileImageUrl(userObj);
-      return res.json({
-        success: true,
-        registrationComplete: true,
-        message: 'Login successful',
-        data: { token, user: userObj, clientId: client.clientId },
-      });
-    }
 
     if (!user) {
       user = await MobileUser.create({
@@ -434,22 +432,40 @@ const googleAuth = async (req, res) => {
         googlePicture: picture,
         isGoogleUser: true,
         emailVerified: true,
-        registrationStep: 1,
+        mobileVerified: true,
+        profileCompleted: true,
+        registrationStep: 3,
         clientId: client._id,
         clientCode: client.clientId,
       });
     } else {
       user.emailVerified = true;
-      user.registrationStep = Math.max(user.registrationStep, 1);
       user.googleId = googleId;
+      user.googlePicture = picture;
+      // Google users ko directly complete mark karo
+      if (user.registrationStep < 3) {
+        user.mobileVerified = true;
+        user.profileCompleted = true;
+        user.registrationStep = 3;
+      }
+      user.lastLoginAt = new Date();
       await user.save();
     }
 
+    const token = generateToken(user, client);
+    const userObj = user.toObject();
+    delete userObj.password;
+    delete userObj.emailOtp;
+    delete userObj.emailOtpExpiry;
+    delete userObj.mobileOtp;
+    delete userObj.mobileOtpExpiry;
+    await attachFreshProfileImageUrl(userObj);
+
     res.json({
       success: true,
-      registrationComplete: false,
-      message: 'Email verified with Google. Please continue with mobile verification (Step 2).',
-      data: { email, emailVerified: true, registrationStep: 1, nextStep: 'mobile_verification', clientId: client.clientId },
+      registrationComplete: true,
+      message: 'Login successful',
+      data: { token, user: userObj, clientId: client.clientId },
     });
   } catch (err) {
     res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
