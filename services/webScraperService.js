@@ -37,7 +37,7 @@ class WebScraperService {
       }
 
       const browser = await puppeteer.launch({
-        headless: true,
+        headless: "new",
         devtools: false,
         executablePath: '/usr/bin/google-chrome-stable',
         args: [

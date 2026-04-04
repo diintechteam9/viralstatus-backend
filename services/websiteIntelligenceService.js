@@ -474,12 +474,15 @@ Respond with exactly this JSON structure (use empty arrays [] or "N/A" where no 
             if (jsonStart !== -1 && jsonEnd !== -1) {
               cleanContent = cleanContent.substring(jsonStart, jsonEnd + 1);
             }
-            
+            // Remove control characters that break JSON.parse
+            cleanContent = cleanContent.replace(/[\x00-\x1F\x7F]/g, (c) =>
+              c === '\n' || c === '\r' || c === '\t' ? c : ''
+            );
             analysis = JSON.parse(cleanContent);
             console.log('[Intelligence] ✅ AI analysis completed (Groq)');
           }
         } catch (error) {
-          console.error('[Intelligence] ⚠️ Groq API error:', error.response?.data || error.message);
+          console.error('[Intelligence] ⚠️ Groq API error:', error.response?.data?.error?.message || error.message);
         }
       } else {
         console.log('[Intelligence] ⚠️ Groq API key not configured');
@@ -516,12 +519,14 @@ Respond with exactly this JSON structure (use empty arrays [] or "N/A" where no 
             if (jsonStart !== -1 && jsonEnd !== -1) {
               cleanContent = cleanContent.substring(jsonStart, jsonEnd + 1);
             }
-            
+            cleanContent = cleanContent.replace(/[\x00-\x1F\x7F]/g, (c) =>
+              c === '\n' || c === '\r' || c === '\t' ? c : ''
+            );
             analysis = JSON.parse(cleanContent);
             console.log('[Intelligence] ✅ AI analysis completed (OpenRouter)');
           }
         } catch (error) {
-          console.error('[Intelligence] ⚠️ OpenRouter API error:', error.response?.data || error.message);
+          console.error('[Intelligence] ⚠️ OpenRouter API error:', error.response?.data?.error?.message || error.message);
         }
       }
       
