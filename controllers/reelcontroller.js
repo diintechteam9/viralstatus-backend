@@ -1,6 +1,8 @@
 const busboy = require('busboy');
 const { PutObjectCommand } = require('@aws-sdk/client-s3');
 const { s3Client, getobject, deleteObject } = require('../utils/r2');
+const mongoose = require('mongoose');
+const crypto = require('crypto');
 const Reel = require('../models/Reel');
 const Pool = require('../models/pool');
 const User = require('../models/user');
@@ -316,18 +318,11 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
 
   try {
     // Fetch campaign to get image key
-    const Campaign = require('../models/campaign');
     const campaign = await Campaign.findById(campaignId);
-    const campaignImageKey = campaign && campaign.image && campaign.image.key ? campaign.image.key : null;
-
-    // Fetch users by googleId
-    const users = await User.find({ googleId: { $in: userIds } });
-    if (users.length !== userIds.length) {
-      return res.status(400).json({ 
-        success: false,
-        error: "Some users not found. Please check the userIds." 
-      });
+    if (!campaign) {
+      return res.status(404).json({ success: false, error: 'Campaign not found' });
     }
+    const campaignImageKey = campaign?.image?.key || null;
 
     // Fetch reels by IDs
     const reels = await Reel.find({ _id: { $in: reelIds } });
@@ -347,13 +342,13 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
     const duplicateReelsByUser = {};
 
     for (let i = 0; i < userIds.length; i++) {
-      const userId = userIds[i];
+      const userId = userIds[i]; // googleId
       const userReels = [];
       const duplicateReels = [];
 
       // Fetch user's existing SharedReels document
       const shared = await SharedReels.findOne({ googleId: userId });
-      const existingReelIds = shared ? shared.reels.map(r => r.reelId) : [];
+      const existingReelIds = shared ? shared.reels.map(r => r.reelId?.toString()) : [];
       const campaignName = campaign.campaignName;
       const campaignCredits = campaign.credits;
 
@@ -378,11 +373,12 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
           isTaskComplete: false,
           isTaskAccepted: false,
           TaskStatus: 'assigned',
+          taskCode: `YV-${crypto.randomBytes(4).toString('hex').toUpperCase()}`,
           createdAt: new Date()
         });
         assignedCount++;
       }
-      // Upsert: add all new reels to the user's document, or create if not exists
+
       if (userReels.length > 0) {
         await SharedReels.findOneAndUpdate(
           { googleId: userId },
@@ -394,7 +390,7 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
         userId,
         assignedReels: userReels.map(r => r.reelId),
         duplicateReels,
-        reels: userReels // include full reel info in response
+        reels: userReels
       });
       duplicateReelsByUser[userId] = duplicateReels;
     }
@@ -460,7 +456,8 @@ exports.getSharedReelsForUser = async (req, res) => {
         title: r.title || '',
         campaignImageKey: r.campaignImageKey || '',
         campaignImageUrl: r.campaignImageKey ? await getobject(r.campaignImageKey) : '',
-        TaskStatus: r.TaskStatus || 'assigned',   
+        TaskStatus: r.TaskStatus || 'assigned',
+        taskCode: r.taskCode || '',
         _id: r._id,
         status: userRespEntry ? userRespEntry.status : 'pending',
         createdAt: r.createdAt,
@@ -475,29 +472,65 @@ exports.getSharedReelsForUser = async (req, res) => {
 // Add or update a user's response URL
 exports.addUserResponseUrl = async (req, res) => {
   const { userId } = req.params;
-  const { url, campaignId, reelId } = req.body; // Accept reelId from body
+  const { url, campaignId, reelId } = req.body;
   if (!userId || !url || !campaignId) {
     return res.status(400).json({ error: 'userId (param) and url, campaignId (body) are required.' });
   }
   try {
-    // Find the campaign and get its credits value
     const campaign = await Campaign.findById(campaignId);
-    if (!campaign) {
-      return res.status(404).json({ error: 'Campaign not found' });
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    // Verify taskCode in YouTube video title/description
+    const sharedDoc = await SharedReels.findOne({ googleId: userId });
+    const assignedReel = sharedDoc?.reels?.find(r =>
+      String(r.reelId) === String(reelId) && String(r.campaignId) === String(campaignId)
+    );
+    const taskCode = assignedReel?.taskCode || '';
+
+    if (taskCode) {
+      // Extract YouTube video ID
+      const extractYtId = (u) => {
+        if (!u) return null;
+        let m = u.match(/youtu\.be\/([\w-]{11})/);
+        if (m) return m[1];
+        m = u.match(/[?&]v=([\w-]{11})/);
+        if (m) return m[1];
+        m = u.match(/youtube\.com\/shorts\/([\w-]{11})/);
+        if (m) return m[1];
+        return null;
+      };
+      const videoId = extractYtId(url);
+      if (videoId && process.env.YOUTUBE_API_KEY) {
+        try {
+          const axios = require('axios');
+          const ytRes = await axios.get(
+            `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${process.env.YOUTUBE_API_KEY}`
+          );
+          const snippet = ytRes.data?.items?.[0]?.snippet;
+          if (snippet) {
+            const titleDesc = `${snippet.title || ''} ${snippet.description || ''}`.toLowerCase();
+            if (!titleDesc.includes(taskCode.toLowerCase())) {
+              return res.status(400).json({
+                error: `Task code "${taskCode}" not found in video title or description. Please add it and resubmit.`
+              });
+            }
+          }
+        } catch (ytErr) {
+          console.warn('[TaskVerify] YouTube check failed (non-fatal):', ytErr.message);
+          // Non-fatal — allow submission if YouTube API fails
+        }
+      }
     }
+
     const creditAmount = campaign.credits || 0;
     const cutoff = campaign.cutoff || 0;
-
     let userResponse = await UserResponse.findOne({ googleId: userId });
     const responseEntry = {
-      urls: url,
-      campaignId,
-      reelId, // Add reelId to the response entry
+      urls: url, campaignId, reelId,
       isTaskCompleted: false,
-      views: 0,
-      cutoff: cutoff,
+      views: 0, cutoff,
       isCreditAccepted: false,
-      creditAmount: creditAmount,
+      creditAmount,
       status: 'pending'
     };
     if (!userResponse) {

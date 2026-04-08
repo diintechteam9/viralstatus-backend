@@ -50,6 +50,10 @@ const sharedReelsSchema = new mongoose.Schema({
         type: String,
         default: 'assigned'
       },
+      taskCode: {
+        type: String,
+        default: ''
+      },
       createdAt:{
         type: Date,
         default: Date.now

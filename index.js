@@ -90,6 +90,62 @@ const {
   stopTemplateSyncScheduler,
 } = require("./services/whatsappTemplateSyncScheduler");
 
+// ─── Auto Stats Cron ─────────────────────────────────────────────────────────
+const cron = require('node-cron');
+const getYoutubeStats = require('./utils/getYoutubeStats');
+const UserResponse = require('./models/userResponse');
+const Campaign = require('./models/campaign');
+
+function extractYoutubeId(url) {
+  if (!url) return null;
+  let m = url.match(/youtu\.be\/([\w-]{11})/);
+  if (m) return m[1];
+  m = url.match(/[?&]v=([\w-]{11})/);
+  if (m) return m[1];
+  m = url.match(/youtube\.com\/shorts\/([\w-]{11})/);
+  if (m) return m[1];
+  m = url.match(/youtube\.com\/embed\/([\w-]{11})/);
+  if (m) return m[1];
+  return null;
+}
+
+// Run every 6 hours — update views/likes/comments + auto-approve credits
+cron.schedule('0 */6 * * *', async () => {
+  try {
+    console.log('[AutoStats] Starting stats update...');
+    const responses = await UserResponse.find({ 'response.urls': { $exists: true, $ne: '' } });
+    let updated = 0;
+    for (const doc of responses) {
+      let changed = false;
+      for (const entry of doc.response) {
+        if (!entry.urls) continue;
+        const videoId = extractYoutubeId(entry.urls);
+        if (!videoId) continue;
+        try {
+          const stats = await getYoutubeStats(videoId);
+          const views = parseInt(stats.views || '0', 10);
+          const likes = parseInt(stats.likes || '0', 10);
+          const comments = parseInt(stats.comments || '0', 10);
+          entry.views = views;
+          entry.likes = likes;
+          entry.comments = comments;
+          // Auto-approve credits if views >= cutoff
+          if (!entry.isCreditAccepted && views >= (entry.cutoff || 0) && entry.cutoff > 0) {
+            entry.isCreditAccepted = true;
+            entry.status = 'approved';
+          }
+          changed = true;
+        } catch {}
+      }
+      if (changed) { await doc.save(); updated++; }
+    }
+    console.log(`[AutoStats] Done — updated ${updated} user responses`);
+  } catch (err) {
+    console.error('[AutoStats] Cron error:', err.message);
+  }
+});
+
+
 const app = express();
 const server = http.createServer(app);
 const { Server } = require('socket.io');

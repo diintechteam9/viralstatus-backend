@@ -1,3 +1,4 @@
+const Client = require('../models/client');
 const Campaign = require('../models/campaign');
 const Group = require('../models/group');
 const crypto = require('crypto');
@@ -11,6 +12,19 @@ const campaign = require('../models/campaign');
 const TelegramServiceController = require('./telegram/telegrambotalertcontroller');
 const telegramService = new TelegramServiceController();
 const TelegramSettings = require('../models/Settings');
+
+/** Normalize client id for Campaign.clientId (MongoDB Client _id as string, or legacy). */
+async function resolveCampaignClientStorageId(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s || s === 'undefined' || s === 'null') return null;
+  if (/^[a-f0-9]{24}$/i.test(s)) return s;
+  if (/^CLI-/i.test(s)) {
+    const client = await Client.findOne({ clientId: s.toUpperCase() }).lean();
+    return client ? String(client._id) : null;
+  }
+  return null;
+}
 
 function escapeHtml(value) {
   if (value === null || value === undefined) return '';
@@ -104,7 +118,10 @@ const imageFileFilter = (req, file, cb) => {
   }
   cb(null, true);
 };
-const upload = multer({ fileFilter: imageFileFilter });
+const upload = multer({
+  fileFilter: imageFileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
 // Create a new campaign and auto-add groups of the same interest
 exports.createCampaign = [
@@ -132,7 +149,18 @@ exports.createCampaign = [
         members,
         cutoff
       } = req.body;
-      if (!campaignName || !brandName || !goal || !clientId || !req.file || !description || !startDate || !endDate || !limit || !views || !credits || !location) {
+
+      const resolvedFromAuth =
+        req.user?.role === 'client' && req.user?.id
+          ? String(req.user.id)
+          : null;
+      let rawClientId = clientId;
+      if (!rawClientId || rawClientId === 'undefined' || rawClientId === 'null') {
+        rawClientId = resolvedFromAuth;
+      }
+      const normalizedClientId = await resolveCampaignClientStorageId(rawClientId);
+
+      if (!campaignName || !brandName || !goal || !normalizedClientId || !req.file || !description || !startDate || !endDate || !limit || !views || !credits || !location) {
         return res.status(400).json({ success: false, message: 'Missing required fields (campaignName, brandName, goal, clientId, image, description, startDate, endDate, limit, views, credits, location)' });
       }
       // Generate campaignId for R2 key
@@ -141,7 +169,7 @@ exports.createCampaign = [
       const pngBuffer = await sharp(req.file.buffer).png().toBuffer();
       // Change the file extension to .png
       const originalName = req.file.originalname.replace(/\s+/g, '_').replace(/\.[^/.]+$/, ".png");
-      const s3Key = `${clientId}/${campaignId}/${originalName}`;
+      const s3Key = `${normalizedClientId}/${campaignId}/${originalName}`;
       const contentType = 'image/png';
       console.log('Preparing to upload to R2:', s3Key, contentType);
       // Upload the file to Cloudflare R2 (S3-compatible)
@@ -171,7 +199,7 @@ exports.createCampaign = [
         campaignName,
         brandName,
         goal,
-        clientId,
+        clientId: normalizedClientId,
         groupIds: groupIds ? Array.isArray(groupIds) ? groupIds : groupIds.split(',') : [],
         tags: tags ? Array.isArray(tags) ? tags : tags.split(',') : [],
         credits,
@@ -210,65 +238,54 @@ exports.createCampaign = [
   }
 ];
 
-// Get all active campaigns (isActive: true) user/client specific
 exports.getActiveCampaigns = async (req, res) => {
-  console.log('getActiveCampaigns called');
   try {
-    // Ensure isActive reflects current time window before querying
     await activateCurrentCampaigns();
     await deactivateExpiredCampaigns();
-    const { clientId } = req.query;
-    console.log('clientId from query:', clientId);
-    const filter = { isActive: true };
-    const userType = req.user?.userType;
-    if (clientId && (userType === 'client' || userType === 'admin')) {
-      filter.clientId = clientId;
+    const { clientId: clientIdQuery } = req.query;
+    const now = new Date();
+
+    // Show campaigns that are within date range and not Inactive
+    // (regardless of isActive flag — recompute on the fly)
+    const filter = {
+      status: { $ne: 'Inactive' },
+      startDate: { $lte: now },
+      endDate: { $gte: now },
+    };
+
+    if (clientIdQuery) {
+      const resolved = await resolveCampaignClientStorageId(clientIdQuery);
+      if (resolved) filter.clientId = resolved;
     }
 
     let registeredCampaignIds = [];
-    let googleId = req.user?.googleId || req.client?.googleId || null;
-    const id = req.user?.id || req.client?.id;
-
+    let googleId = req.user?.googleId || null;
+    const id = req.user?.id;
     if (!googleId && id) {
-      const User = require('../models/user');
-      const userDoc = await User.findById(id);
-      if (userDoc && userDoc.googleId) {
-        googleId = userDoc.googleId;
-      } else {
-        const Client = require('../models/client');
-        const clientDoc = await Client.findById(id);
-        if (clientDoc && clientDoc.googleId) {
-          googleId = clientDoc.googleId;
-        }
-      }
+      const MobileUser = require('../models/MobileUser');
+      const userDoc = await MobileUser.findById(id).lean();
+      if (userDoc?.googleId) googleId = userDoc.googleId;
     }
     if (googleId) {
-      const RegisteredCampaign = require('../models/RegisteredCampaign');
-      const reg = await RegisteredCampaign.findOne({ userId: googleId });
-      console.log('RegisteredCampaign for googleId:', reg);
-      if (reg && reg.registeredCampaigns) {
-        registeredCampaignIds = reg.registeredCampaigns.map(c => c.campaign && c.campaign._id?.toString?.());
-        console.log('registeredCampaignIds:', registeredCampaignIds);
+      const reg = await RegisteredCampaign.findOne({ userId: googleId }).lean();
+      if (reg?.registeredCampaigns) {
+        registeredCampaignIds = reg.registeredCampaigns
+          .map(c => c.campaign?._id?.toString())
+          .filter(Boolean);
       }
     }
     if (registeredCampaignIds.length > 0) {
       filter._id = { $nin: registeredCampaignIds };
-      console.log('Filter after excluding registeredCampaignIds:', filter);
     }
 
-    const Campaign = require('../models/campaign');
     const campaigns = await Campaign.find(filter).lean();
-    console.log('Campaigns found:', campaigns.length);
 
-    // Generate fresh presigned GET URLs for each campaign image
     for (const campaign of campaigns) {
-      if (campaign.image && campaign.image.key) {
-        campaign.image.url = await getobject(campaign.image.key);
-        console.log('Generated presigned URL for campaign:', campaign._id);
+      if (campaign.image?.key) {
+        try { campaign.image.url = await getobject(campaign.image.key); } catch {}
       }
     }
     res.json({ success: true, campaigns });
-    console.log('Response sent with campaigns');
   } catch (err) {
     console.error('Error in getActiveCampaigns:', err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -280,7 +297,8 @@ exports.uploadCampaignImage = [
   upload.single('image'),
   async (req, res) => {
     try {
-      const { clientId, campaignName } = req.body;
+      const { clientId: rawCid, campaignName } = req.body;
+      const clientId = await resolveCampaignClientStorageId(rawCid);
       if (!req.file || !clientId || !campaignName) {
         return res.status(400).json({ success: false, message: 'Missing image, clientId, or campaignName' });
       }
@@ -522,10 +540,11 @@ exports.getActiveParticipants = async (req, res) => {
 // Get all campaigns for a client by clientId
 exports.getCampaignsByClientId = async (req, res) => {
   try {
-    const { clientId } = req.params;
-    if (!clientId) {
+    const { clientId: raw } = req.params;
+    if (!raw) {
       return res.status(400).json({ success: false, message: 'Missing clientId' });
     }
+    const clientId = (await resolveCampaignClientStorageId(raw)) || raw;
     const campaigns = await Campaign.find({ clientId }).lean();
 
     // Generate fresh presigned GET URLs for each campaign image

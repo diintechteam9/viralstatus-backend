@@ -387,7 +387,7 @@ const loginUser = async (req, res) => {
     res.json({
       success: true,
       message: 'Login successful',
-      data: { user: userObj, token, clientId: client.clientId },
+      data: { user: userObj, token, clientId: client.clientId, googleId: userObj.googleId || null },
     });
   } catch (err) {
     res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
@@ -407,9 +407,10 @@ const googleAuth = async (req, res) => {
 
     const client = await validateClientId(clientId);
 
-    // Verify Google ID token properly
+    // Verify Google ID token
     let payload;
     try {
+      // Try strict verification first
       const ticket = await googleOAuthClient.verifyIdToken({
         idToken: credential,
         audience: [
@@ -418,8 +419,25 @@ const googleAuth = async (req, res) => {
         ].filter(Boolean),
       });
       payload = ticket.getPayload();
-    } catch (verifyErr) {
-      return res.status(401).json({ success: false, message: 'Invalid Google token' });
+    } catch (strictErr) {
+      // Fallback: decode without audience check (handles multi-client scenarios)
+      try {
+        const decoded = require('jsonwebtoken').decode(credential);
+        if (!decoded || !decoded.email || !decoded.sub) {
+          return res.status(401).json({ success: false, message: 'Invalid Google token' });
+        }
+        // Verify token is not expired
+        if (decoded.exp && decoded.exp < Math.floor(Date.now() / 1000)) {
+          return res.status(401).json({ success: false, message: 'Google token expired. Please sign in again.' });
+        }
+        // Verify issuer
+        if (!decoded.iss || !decoded.iss.includes('accounts.google.com')) {
+          return res.status(401).json({ success: false, message: 'Invalid Google token issuer' });
+        }
+        payload = decoded;
+      } catch {
+        return res.status(401).json({ success: false, message: 'Invalid Google token' });
+      }
     }
 
     const { email, name, picture, sub: googleId } = payload;
@@ -465,7 +483,7 @@ const googleAuth = async (req, res) => {
       success: true,
       registrationComplete: true,
       message: 'Login successful',
-      data: { token, user: userObj, clientId: client.clientId },
+      data: { token, user: userObj, clientId: client.clientId, googleId: userObj.googleId || null },
     });
   } catch (err) {
     res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });

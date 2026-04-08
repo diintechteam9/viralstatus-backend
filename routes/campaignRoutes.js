@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const campaignController = require('../controllers/campaignController');
 const { authenticate, authorize } = require('../middleware/authenticate');
-const { verifyToken } = require('../middleware/authmiddleware');
 
 // Create campaign — client only
 router.post('/', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.createCampaign);
@@ -12,12 +11,6 @@ router.post('/upload', authenticate, authorize('client', 'admin', 'super_admin')
 
 // Get all active campaigns — public route
 router.get('/active', campaignController.getActiveCampaigns);
-
-// Update campaign
-router.put('/:campaignId', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.updateCampaign);
-
-// Delete campaign
-router.delete('/:campaignId', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.deleteCampaign);
 
 // Register user for campaign
 router.post('/register/:campaignId', campaignController.registeredCampaign);
@@ -29,13 +22,21 @@ router.get('/registered', campaignController.getUserRegisteredCampaigns);
 router.get('/activeparticipants/:campaignId', campaignController.getActiveParticipants);
 router.post('/activeparticipants/:campaignId', campaignController.setActiveParticipant);
 
-// Get campaigns by clientId
+// MUST be before /client/:clientId — otherwise "data" is captured as clientId
+router.get('/client/data/:clientId', campaignController.getAllClientsCampaignData);
+
+// Get campaigns by clientId (MongoDB Client _id)
 router.get('/client/:clientId', campaignController.getCampaignsByClientId);
 
 // Get campaign data
 router.get('/data/:campaignId', campaignController.getCamapignData);
 router.get('/videos/:campaignId', campaignController.getCampaignResponseUrls);
-router.get('/client/data/:clientId', campaignController.getAllClientsCampaignData);
+
+// Update campaign (after static path segments above)
+router.put('/:campaignId', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.updateCampaign);
+
+// Delete campaign
+router.delete('/:campaignId', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.deleteCampaign);
 router.get('/response/data/:userId', campaignController.getUserDashboardStats);
 router.get('/response/campaign/data/:userId', campaignController.getUserCampaignData);
 

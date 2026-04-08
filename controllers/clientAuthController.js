@@ -67,8 +67,10 @@ const loginClient = async (req, res) => {
       success: true,
       message: 'Login successful',
       data: {
+        _id: client._id,
         clientId: client.clientId,
         email: client.email,
+        name: client.contactPerson || client.businessName,
         businessName: client.businessName,
         isActive: client.isActive,
         token,
