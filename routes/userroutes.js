@@ -8,23 +8,39 @@ router.post('/login', loginUser);
 
 router.post('/register', registerUser);
 
-// GET /api/user/by-googleid/:googleId — web User first, then MobileUser (campaign participants)
+// GET /api/user/by-googleid/:googleId — googleId OR MongoDB _id se dhundho
 router.get('/by-googleid/:googleId', async (req, res) => {
   try {
     const { googleId } = req.params;
-    const webUser = await User.findOne({ googleId });
-    if (webUser) {
-      return res.json({
-        success: true,
-        user: { name: webUser.name, googleId: webUser.googleId, email: webUser.email },
-      });
-    }
-    const mobile = await MobileUser.findOne({ googleId }).select(
+    const mongoose = require('mongoose');
+
+    // Try googleId first
+    let mobile = await MobileUser.findOne({ googleId }).select(
       '-password -emailOtp -emailOtpExpiry -mobileOtp -mobileOtpExpiry -resetOtp -resetOtpExpiry'
     );
+
+    // Fallback: try MongoDB _id
+    if (!mobile && mongoose.Types.ObjectId.isValid(googleId)) {
+      mobile = await MobileUser.findById(googleId).select(
+        '-password -emailOtp -emailOtpExpiry -mobileOtp -mobileOtpExpiry -resetOtp -resetOtpExpiry'
+      );
+    }
+
+    // Try web User
+    if (!mobile) {
+      const webUser = await User.findOne({ googleId });
+      if (webUser) {
+        return res.json({
+          success: true,
+          user: { name: webUser.name, googleId: webUser.googleId, email: webUser.email },
+        });
+      }
+    }
+
     if (!mobile) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
+
     const u = mobile.toObject();
     res.json({ success: true, user: { ...u, mobileNumber: u.mobileNumber || u.mobile } });
   } catch (err) {
