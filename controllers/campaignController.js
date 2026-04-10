@@ -245,37 +245,15 @@ exports.getActiveCampaigns = async (req, res) => {
     const { clientId: clientIdQuery } = req.query;
     const now = new Date();
 
-    // Show campaigns that are within date range and not Inactive
-    // (regardless of isActive flag — recompute on the fly)
+    // Show all campaigns that are not expired and not Inactive
     const filter = {
       status: { $ne: 'Inactive' },
-      startDate: { $lte: now },
       endDate: { $gte: now },
     };
 
     if (clientIdQuery) {
       const resolved = await resolveCampaignClientStorageId(clientIdQuery);
       if (resolved) filter.clientId = resolved;
-    }
-
-    let registeredCampaignIds = [];
-    let googleId = req.user?.googleId || null;
-    const id = req.user?.id;
-    if (!googleId && id) {
-      const MobileUser = require('../models/MobileUser');
-      const userDoc = await MobileUser.findById(id).lean();
-      if (userDoc?.googleId) googleId = userDoc.googleId;
-    }
-    if (googleId) {
-      const reg = await RegisteredCampaign.findOne({ userId: googleId }).lean();
-      if (reg?.registeredCampaigns) {
-        registeredCampaignIds = reg.registeredCampaigns
-          .map(c => c.campaign?._id?.toString())
-          .filter(Boolean);
-      }
-    }
-    if (registeredCampaignIds.length > 0) {
-      filter._id = { $nin: registeredCampaignIds };
     }
 
     const campaigns = await Campaign.find(filter).lean();
@@ -318,39 +296,51 @@ exports.uploadCampaignImage = [
 ];
 
 // Update a campaign by campaignId
-exports.updateCampaign = async (req, res) => {
+exports.updateCampaign = [
+  upload.single('image'),
+  async (req, res) => {
   try {
     const { campaignId } = req.params;
-    console.log('campaignId param:', campaignId); // Should print the ObjectId string
-    const updateData = req.body;
-    if (updateData.cutoff !== undefined) {
-      updateData.cutoff = Number(updateData.cutoff);
-    }
+    console.log('campaignId param:', campaignId);
+    const updateData = { ...req.body };
+    if (updateData.cutoff !== undefined) updateData.cutoff = Number(updateData.cutoff);
     console.log('Update data received:', updateData);
-    // Fetch existing to compute next isActive from dates/status
+
     const existing = await Campaign.findById(campaignId);
-    if (!existing) {
-      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    if (!existing) return res.status(404).json({ success: false, message: 'Campaign not found' });
+
+    // If new image uploaded, upload to R2
+    if (req.file) {
+      const pngBuffer = await sharp(req.file.buffer).png().toBuffer();
+      const originalName = req.file.originalname.replace(/\s+/g, '_').replace(/\.[^/.]+$/, '.png');
+      const s3Key = `${existing.clientId}/${campaignId}/${originalName}`;
+      await s3Client.send(new PutObjectCommand({
+        Bucket: process.env.R2_BUCKET,
+        Key: s3Key,
+        Body: pngBuffer,
+        ContentType: 'image/png',
+      }));
+      const imageUrl = await getobject(s3Key);
+      updateData.image = { key: s3Key, url: imageUrl };
     }
 
-    // Determine effective dates/status
     const effectiveStart = updateData.startDate ? new Date(updateData.startDate) : existing.startDate;
     const effectiveEnd = updateData.endDate ? new Date(updateData.endDate) : existing.endDate;
     const effectiveStatus = updateData.status !== undefined ? updateData.status : existing.status;
-
-    // Recalculate isActive: Active if now within [start, end] and status not 'Inactive'
     const now = new Date();
-    const computedIsActive = (
-      effectiveStatus !== 'Inactive' &&
-      effectiveStart instanceof Date && !isNaN(effectiveStart) &&
-      effectiveEnd instanceof Date && !isNaN(effectiveEnd) &&
-      effectiveStart <= now && now <= effectiveEnd
-    );
 
-    updateData.isActive = computedIsActive;
+    if (updateData.isActive !== undefined) {
+      updateData.isActive = effectiveStatus === 'Inactive' ? false : Boolean(updateData.isActive);
+    } else {
+      updateData.isActive = (
+        effectiveStatus !== 'Inactive' &&
+        effectiveStart instanceof Date && !isNaN(effectiveStart) &&
+        effectiveEnd instanceof Date && !isNaN(effectiveEnd) &&
+        effectiveStart <= now && now <= effectiveEnd
+      );
+    }
 
-    // If it transitions to active, send alert based on settings
-    if (computedIsActive && existing.isActive !== true) {
+    if (updateData.isActive && existing.isActive !== true) {
       try {
         const settings = await TelegramSettings.findOne();
         const allow = !settings || settings.telegramAlertsEnabledOnCampaignStart !== false;
@@ -364,20 +354,14 @@ exports.updateCampaign = async (req, res) => {
       }
     }
 
-    const updatedCampaign = await Campaign.findOneAndUpdate(
-      { _id: campaignId },
-      updateData,
-      { new: true }
-    );
-    if (!updatedCampaign) {
-      return res.status(404).json({ success: false, message: 'Campaign not found' });
-    }
+    const updatedCampaign = await Campaign.findOneAndUpdate({ _id: campaignId }, updateData, { new: true });
+    if (!updatedCampaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
     res.json({ success: true, campaign: updatedCampaign });
   } catch (err) {
     console.error('Update campaign error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
-};
+}];
 
 // Delete a campaign by campaignId
 exports.deleteCampaign = async (req, res) => {
@@ -497,20 +481,18 @@ exports.setActiveParticipant = async (req, res) => {
     if (!userId || typeof userId !== 'string') {
       return res.status(400).json({ success: false, message: "userId must be provided as a string" });
     }
-    const campaign = await Campaign.findById(campaignId);
+    // $addToSet ensures no duplicates at DB level
+    const campaign = await Campaign.findByIdAndUpdate(
+      campaignId,
+      { $addToSet: { userIds: userId } },
+      { new: true }
+    );
     if (!campaign) {
       return res.status(404).json({ success: false, message: "Campaign not found" });
     }
-    // Only add if not already present
-    if (!campaign.userIds.includes(userId)) {
-      campaign.userIds.push(userId);  
-      // Increment activeParticipants by 1 only if user is new
-      campaign.activeParticipants = (campaign.activeParticipants || 0) + 1;
-      await campaign.save();
-    }
     res.json({
       success: true,
-      activeParticipants: campaign.activeParticipants,
+      activeParticipants: campaign.userIds.length,
       userIds: campaign.userIds
     });
   } catch (err) {

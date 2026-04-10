@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Groq = require('groq-sdk');
+const axios = require('axios');
 
 router.post('/campaign-fill', async (req, res) => {
   const { topic } = req.body;
@@ -28,6 +29,7 @@ Return ONLY a valid JSON object with no markdown or explanation:
   "goal": "campaign goal in one line",
   "description": "2-3 sentence campaign description",
   "tags": "tag1,tag2,tag3,tag4",
+  "category": "one of: Fashion & Lifestyle, Beauty & Cosmetics, Health & Wellness, Travel & Tourism, Food & Beverages, Tech & Gadgets, Finance & Investing, Education & EdTech, Gaming & eSports, Fitness & Sports, Music & Entertainment, Startups & Entrepreneurship, Home Decor & Interiors, Non-Profit & Social Causes — pick the most relevant one",
   "credits": 50,
   "location": "India",
   "limit": 100,
@@ -49,6 +51,13 @@ Return ONLY a valid JSON object with no markdown or explanation:
     if (!jsonMatch) return res.status(500).json({ success: false, message: 'AI response parse failed' });
 
     const data = JSON.parse(jsonMatch[0]);
+
+    // Generate campaign image using Pollinations.ai (free, no key needed)
+    const imagePrompt = encodeURIComponent(
+      `professional marketing campaign banner for ${data.campaignName}, ${data.category}, vibrant colors, modern design, no text`
+    );
+    data.imageUrl = `https://image.pollinations.ai/prompt/${imagePrompt}?width=800&height=450&nologo=true&seed=${Date.now()}`;
+
     res.json({ success: true, data });
   } catch (err) {
     console.error('AI campaign fill error:', err.message);

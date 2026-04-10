@@ -31,7 +31,13 @@ const campaignSchema = new mongoose.Schema({
   userIds: {
     type: [String],
     required: false,
-    default: []
+    default: [],
+    validate: {
+      validator: function(arr) {
+        return arr.length === new Set(arr).size;
+      },
+      message: 'Duplicate userIds not allowed'
+    }
   },
   image: {
     key: { type: String, required: true },
@@ -84,6 +90,10 @@ const campaignSchema = new mongoose.Schema({
   cutoff:{
     type: Number,
     required: true
+  },
+  category: {
+    type: String,
+    default: ''
   }
 }, { timestamps: true });
 
