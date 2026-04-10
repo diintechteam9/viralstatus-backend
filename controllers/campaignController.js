@@ -123,71 +123,72 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 
+const uploadMultiple = multer({
+  fileFilter: imageFileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 },
+}).fields([
+  { name: 'image', maxCount: 1 },
+  { name: 'categoryImage', maxCount: 1 },
+  { name: 'brandImage', maxCount: 1 },
+]);
+
 // Create a new campaign and auto-add groups of the same interest
 exports.createCampaign = [
-  upload.single('image'),
+  uploadMultiple,
   async (req, res) => {
     try {
       console.log('BODY:', req.body);
-      console.log('FILE:', req.file);
+      console.log('FILES:', req.files);
       const {
-        campaignName,
-        brandName,
-        goal,
-        clientId,
-        groupIds,
-        tags,
-        credits,
-        location,
-        tNc,
-        description,
-        startDate,
-        endDate,
-        limit,
-        views,
-        status,
-        members,
-        cutoff
+        campaignName, brandName, goal, clientId, groupIds, tags,
+        credits, location, tNc, description, startDate, endDate,
+        limit, views, status, members, cutoff
       } = req.body;
 
-      const resolvedFromAuth =
-        req.user?.role === 'client' && req.user?.id
-          ? String(req.user.id)
-          : null;
+      const resolvedFromAuth = req.user?.role === 'client' && req.user?.id ? String(req.user.id) : null;
       let rawClientId = clientId;
-      if (!rawClientId || rawClientId === 'undefined' || rawClientId === 'null') {
-        rawClientId = resolvedFromAuth;
-      }
+      if (!rawClientId || rawClientId === 'undefined' || rawClientId === 'null') rawClientId = resolvedFromAuth;
       const normalizedClientId = await resolveCampaignClientStorageId(rawClientId);
 
-      if (!campaignName || !brandName || !goal || !normalizedClientId || !req.file || !description || !startDate || !endDate || !limit || !views || !credits || !location) {
-        return res.status(400).json({ success: false, message: 'Missing required fields (campaignName, brandName, goal, clientId, image, description, startDate, endDate, limit, views, credits, location)' });
+      const mainImageFile = req.files?.image?.[0];
+      if (!campaignName || !brandName || !goal || !normalizedClientId || !mainImageFile || !description || !startDate || !endDate || !limit || !views || !credits || !location) {
+        return res.status(400).json({ success: false, message: 'Missing required fields' });
       }
-      // Generate campaignId for R2 key
+
       const campaignId = generateCampaignId(campaignName);
-      // Convert the uploaded image to PNG using sharp
-      const pngBuffer = await sharp(req.file.buffer).png().toBuffer();
-      // Change the file extension to .png
-      const originalName = req.file.originalname.replace(/\s+/g, '_').replace(/\.[^/.]+$/, ".png");
+
+      // Upload main campaign image
+      const pngBuffer = await sharp(mainImageFile.buffer).png().toBuffer();
+      const originalName = mainImageFile.originalname.replace(/\s+/g, '_').replace(/\.[^/.]+$/, '.png');
       const s3Key = `${normalizedClientId}/${campaignId}/${originalName}`;
-      const contentType = 'image/png';
-      console.log('Preparing to upload to R2:', s3Key, contentType);
-      // Upload the file to Cloudflare R2 (S3-compatible)
-      await s3Client.send(new PutObjectCommand({
-        Bucket: process.env.R2_BUCKET,
-        Key: s3Key,
-        Body: pngBuffer, // Use the converted PNG buffer
-        ContentType: contentType,
-      }));
-      // Generate presigned GET URL for the uploaded image
+      await s3Client.send(new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key: s3Key, Body: pngBuffer, ContentType: 'image/png' }));
       const imageUrl = await getobject(s3Key);
-      // Compose image object for DB
       const image = { key: s3Key, url: imageUrl };
-      // Determine isActive at creation based on dates and status
+
+      // Upload category image (optional)
+      let categoryImage = { key: '', url: '' };
+      const categoryImageFile = req.files?.categoryImage?.[0];
+      if (categoryImageFile) {
+        const catBuf = await sharp(categoryImageFile.buffer).png().toBuffer();
+        const catKey = `${normalizedClientId}/${campaignId}/category_${categoryImageFile.originalname.replace(/\s+/g, '_').replace(/\.[^/.]+$/, '.png')}`;
+        await s3Client.send(new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key: catKey, Body: catBuf, ContentType: 'image/png' }));
+        categoryImage = { key: catKey, url: await getobject(catKey) };
+      }
+
+      // Upload brand image (optional)
+      let brandImage = { key: '', url: '' };
+      const brandImageFile = req.files?.brandImage?.[0];
+      if (brandImageFile) {
+        const brandBuf = await sharp(brandImageFile.buffer).png().toBuffer();
+        const brandKey = `${normalizedClientId}/${campaignId}/brand_${brandImageFile.originalname.replace(/\s+/g, '_').replace(/\.[^/.]+$/, '.png')}`;
+        await s3Client.send(new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key: brandKey, Body: brandBuf, ContentType: 'image/png' }));
+        brandImage = { key: brandKey, url: await getobject(brandKey) };
+      }
+
       const now = new Date();
       const startAt = new Date(startDate);
       const endAt = new Date(endDate);
-      const statusValue = status || "Active";
+      const statusValue = status || 'Active';
       const computedIsActive = (
         statusValue !== 'Inactive' &&
         startAt instanceof Date && !isNaN(startAt) &&
@@ -196,40 +197,22 @@ exports.createCampaign = [
       );
 
       const campaign = new Campaign({
-        campaignName,
-        brandName,
-        goal,
+        campaignName, brandName, goal,
         clientId: normalizedClientId,
         groupIds: groupIds ? Array.isArray(groupIds) ? groupIds : groupIds.split(',') : [],
         tags: tags ? Array.isArray(tags) ? tags : tags.split(',') : [],
-        credits,
-        location,
-        tNc,
-        image,
-        description,
-        startDate,
-        endDate,
-        limit,
-        views,
-        status: statusValue,
-        isActive: computedIsActive,
+        credits, location, tNc, image, categoryImage, brandImage,
+        description, startDate, endDate, limit, views,
+        status: statusValue, isActive: computedIsActive,
         cutoff: cutoff !== undefined ? Number(cutoff) : undefined,
-        // members should be an array of googleId strings
         userIds: members ? (Array.isArray(members) ? members : members.split(',')) : [],
       });
       const savedCampaign = await campaign.save();
-      // Send Telegram alert after campaign is stored
       try {
         const settings = await TelegramSettings.findOne();
         const allow = !settings || settings.telegramAlertsEnabledOnCampaignStart !== false;
-        if (allow) {
-          const campaignData = savedCampaign.toObject();
-          const text = formatCampaignStartMessage(campaignData);
-          await telegramService.sendTextMessage(text);
-        }
-      } catch (alertErr) {
-        console.error('Failed to send Telegram creation alert:', alertErr);
-      }
+        if (allow) await telegramService.sendTextMessage(formatCampaignStartMessage(savedCampaign.toObject()));
+      } catch (alertErr) { console.error('Telegram alert error:', alertErr); }
       res.json({ success: true, campaign: savedCampaign });
     } catch (err) {
       console.error('Campaign creation error:', err);
@@ -256,11 +239,15 @@ exports.getActiveCampaigns = async (req, res) => {
       if (resolved) filter.clientId = resolved;
     }
 
-    const campaigns = await Campaign.find(filter).lean();
-
     for (const campaign of campaigns) {
       if (campaign.image?.key) {
         try { campaign.image.url = await getobject(campaign.image.key); } catch {}
+      }
+      if (campaign.categoryImage?.key) {
+        try { campaign.categoryImage.url = await getobject(campaign.categoryImage.key); } catch {}
+      }
+      if (campaign.brandImage?.key) {
+        try { campaign.brandImage.url = await getobject(campaign.brandImage.key); } catch {}
       }
     }
     res.json({ success: true, campaigns });
@@ -297,31 +284,42 @@ exports.uploadCampaignImage = [
 
 // Update a campaign by campaignId
 exports.updateCampaign = [
-  upload.single('image'),
+  uploadMultiple,
   async (req, res) => {
   try {
     const { campaignId } = req.params;
-    console.log('campaignId param:', campaignId);
     const updateData = { ...req.body };
     if (updateData.cutoff !== undefined) updateData.cutoff = Number(updateData.cutoff);
-    console.log('Update data received:', updateData);
 
     const existing = await Campaign.findById(campaignId);
     if (!existing) return res.status(404).json({ success: false, message: 'Campaign not found' });
 
-    // If new image uploaded, upload to R2
-    if (req.file) {
-      const pngBuffer = await sharp(req.file.buffer).png().toBuffer();
-      const originalName = req.file.originalname.replace(/\s+/g, '_').replace(/\.[^/.]+$/, '.png');
+    // Upload main image if provided
+    const mainImageFile = req.files?.image?.[0];
+    if (mainImageFile) {
+      const pngBuffer = await sharp(mainImageFile.buffer).png().toBuffer();
+      const originalName = mainImageFile.originalname.replace(/\s+/g, '_').replace(/\.[^/.]+$/, '.png');
       const s3Key = `${existing.clientId}/${campaignId}/${originalName}`;
-      await s3Client.send(new PutObjectCommand({
-        Bucket: process.env.R2_BUCKET,
-        Key: s3Key,
-        Body: pngBuffer,
-        ContentType: 'image/png',
-      }));
-      const imageUrl = await getobject(s3Key);
-      updateData.image = { key: s3Key, url: imageUrl };
+      await s3Client.send(new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key: s3Key, Body: pngBuffer, ContentType: 'image/png' }));
+      updateData.image = { key: s3Key, url: await getobject(s3Key) };
+    }
+
+    // Upload category image if provided
+    const categoryImageFile = req.files?.categoryImage?.[0];
+    if (categoryImageFile) {
+      const catBuf = await sharp(categoryImageFile.buffer).png().toBuffer();
+      const catKey = `${existing.clientId}/${campaignId}/category_${categoryImageFile.originalname.replace(/\s+/g, '_').replace(/\.[^/.]+$/, '.png')}`;
+      await s3Client.send(new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key: catKey, Body: catBuf, ContentType: 'image/png' }));
+      updateData.categoryImage = { key: catKey, url: await getobject(catKey) };
+    }
+
+    // Upload brand image if provided
+    const brandImageFile = req.files?.brandImage?.[0];
+    if (brandImageFile) {
+      const brandBuf = await sharp(brandImageFile.buffer).png().toBuffer();
+      const brandKey = `${existing.clientId}/${campaignId}/brand_${brandImageFile.originalname.replace(/\s+/g, '_').replace(/\.[^/.]+$/, '.png')}`;
+      await s3Client.send(new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key: brandKey, Body: brandBuf, ContentType: 'image/png' }));
+      updateData.brandImage = { key: brandKey, url: await getobject(brandKey) };
     }
 
     const effectiveStart = updateData.startDate ? new Date(updateData.startDate) : existing.startDate;
@@ -533,6 +531,12 @@ exports.getCampaignsByClientId = async (req, res) => {
     for (const campaign of campaigns) {
       if (campaign.image && campaign.image.key) {
         campaign.image.url = await getobject(campaign.image.key);
+      }
+      if (campaign.categoryImage?.key) {
+        try { campaign.categoryImage.url = await getobject(campaign.categoryImage.key); } catch {}
+      }
+      if (campaign.brandImage?.key) {
+        try { campaign.brandImage.url = await getobject(campaign.brandImage.key); } catch {}
       }
     }
 

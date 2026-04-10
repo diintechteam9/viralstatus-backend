@@ -43,6 +43,14 @@ const campaignSchema = new mongoose.Schema({
     key: { type: String, required: true },
     url: { type: String }
   },
+  categoryImage: {
+    key: { type: String, default: '' },
+    url: { type: String, default: '' }
+  },
+  brandImage: {
+    key: { type: String, default: '' },
+    url: { type: String, default: '' }
+  },
   description: {
     type: String,
     required: true
