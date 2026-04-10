@@ -142,7 +142,7 @@ exports.createCampaign = [
       const {
         campaignName, brandName, goal, clientId, groupIds, tags,
         credits, location, tNc, description, startDate, endDate,
-        limit, views, status, members, cutoff
+        limit, views, status, members, cutoff, category
       } = req.body;
 
       const resolvedFromAuth = req.user?.role === 'client' && req.user?.id ? String(req.user.id) : null;
@@ -205,6 +205,7 @@ exports.createCampaign = [
         description, startDate, endDate, limit, views,
         status: statusValue, isActive: computedIsActive,
         cutoff: cutoff !== undefined ? Number(cutoff) : undefined,
+        category: category || '',
         userIds: members ? (Array.isArray(members) ? members : members.split(',')) : [],
       });
       const savedCampaign = await campaign.save();
@@ -238,6 +239,8 @@ exports.getActiveCampaigns = async (req, res) => {
       const resolved = await resolveCampaignClientStorageId(clientIdQuery);
       if (resolved) filter.clientId = resolved;
     }
+
+    const campaigns = await Campaign.find(filter).lean();
 
     for (const campaign of campaigns) {
       if (campaign.image?.key) {
