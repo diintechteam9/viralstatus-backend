@@ -3,79 +3,62 @@ const router = express.Router();
 const poolController = require('../controllers/poolController');
 const reelController = require('../controllers/reelcontroller');
 
-//-----------Reels controls-----------
-//upload reel 
-router.post('/:poolId/upload', reelController.uploadReels);
+// ─── Static / specific routes FIRST (before any /:param routes) ───────────────
 
-// RESTful route for fetching reels by poolId
-router.get('/:poolId/reels', reelController.getReelsByPoolId);
+// Pool CRUD
+router.post('/', poolController.createPool);
+router.get('/', poolController.getPools);
+router.put('/:id', poolController.updatePool);
+router.delete('/:id', poolController.deletePool);
 
-// Delete a single reel
-router.delete('/reels/:reelId', reelController.deleteReel);
-
-// Delete multiple reels
-router.delete('/reels', reelController.deleteMultipleReels);
-
-// Delete all reels from a pool
-router.delete('/:poolId/reels', reelController.deleteAllReelsFromPool);
-
-//approved credits
-router.post('/reels/approved/:campaignId', reelController.approveCreditsForUser);
-
-// Route to get YouTube video stats
+// YouTube stats
 router.get('/stats', reelController.getYoutubeVideoStats);
 
-//share reel algo
+// Shared reels
 router.post('/shared', reelController.assignReelsToUsersWithCount);
-
-// Fetch all shared reels for a user (by googleId)
 router.get('/shared/:userId', reelController.getSharedReelsForUser);
-
-// Route to update task completed status
 router.post('/shared/complete/:userId/:reelId', reelController.updateTaskCompleted);
-
-// Route to update task accepted status
 router.post('/shared/accepted/:userId/:reelId', reelController.updateTaskAccepted);
-
-// Route to update TaskStatus to accept
 router.post('/shared/task-accepted/:userId/:reelId', reelController.acceptTaskStatus);
-
-// Route to update TaskStatus to accept
 router.post('/shared/task-completed/:userId/:reelId', reelController.completeTaskStatus);
 
-// Add user response URL
+// User response
 router.post('/user/response/:userId', reelController.addUserResponseUrl);
-
-//Get user response url
 router.get('/user/response/get/:userId', reelController.getAddUserResponseUrl);
 
-// ------------pool controls--------------
+// Reel delete (static paths before /:poolId)
+router.delete('/reels/:reelId', reelController.deleteReel);
+router.delete('/reels', reelController.deleteMultipleReels);
 
-// Create a new pool
-router.post('/', poolController.createPool);
+// Approved credits
+router.post('/reels/approved/:campaignId', reelController.approveCreditsForUser);
 
-// Get all pools
-router.get('/', poolController.getPools);
+// ─── Dynamic /:poolId routes ──────────────────────────────────────────────────
 
-// Get pool by id (must come before /:id to avoid conflicts)
+// Old upload (busboy - server side)
+router.post('/:poolId/upload', reelController.uploadReels);
+
+// Fast multi upload: Step 1 - get presigned PUT URLs
+router.post('/:poolId/presigned-urls', reelController.getPresignedUrls);
+
+// Fast multi upload: Step 2 - save metadata after direct R2 upload
+router.post('/:poolId/save-reels', reelController.saveReelMetadata);
+
+// Get reels by pool
+router.get('/:poolId/reels', reelController.getReelsByPoolId);
+
+// Delete all reels from pool
+router.delete('/:poolId/reels', reelController.deleteAllReelsFromPool);
+
+// Get single pool by id
 router.get('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const pool = await require('../models/pool').findById(id);
-    if (!pool) {
-      return res.status(404).json({ error: 'Pool not found' });
-    }
+    const pool = await require('../models/pool').findById(req.params.id);
+    if (!pool) return res.status(404).json({ error: 'Pool not found' });
     res.json({ pool });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch pool', details: err.message });
   }
 });
 
-// Update pool by id
-router.put('/:id', poolController.updatePool);
-
-// Delete pool by id
-router.delete('/:id', poolController.deletePool);
-
-
-module.exports = router; 
+module.exports = router;

@@ -1,6 +1,6 @@
 const busboy = require('busboy');
 const { PutObjectCommand } = require('@aws-sdk/client-s3');
-const { s3Client, getobject, deleteObject } = require('../utils/r2');
+const { s3Client, getobject, deleteObject, putobject } = require('../utils/r2');
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 const Reel = require('../models/Reel');
@@ -11,6 +11,70 @@ const UserResponse = require('../models/userResponse');
 const userResponse = require('../models/userResponse');
 const Campaign = require('../models/campaign'); // Add this import at the top if not present
 const getYoutubeStats = require('../utils/getYoutubeStats'); // You need to implement this backend utility or mock it for now
+
+// ─── Fast Multi Upload: Step 1 — Get batch presigned PUT URLs ───────────────
+exports.getPresignedUrls = async (req, res) => {
+  try {
+    const { poolId } = req.params;
+    const { files } = req.body; // [{ name, type, size }]
+
+    if (!poolId || !Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ success: false, error: 'poolId and files array required' });
+    }
+
+    const pool = await Pool.findById(poolId);
+    if (!pool) return res.status(404).json({ success: false, error: 'Pool not found' });
+
+    const campaignName = (pool.name || 'reel').replace(/\s+/g, '_');
+    let reelCount = await Reel.countDocuments({ poolId });
+
+    const results = await Promise.all(
+      files.map(async (file, i) => {
+        const reelNumber = reelCount + i + 1;
+        const ext = (file.name || 'video.mp4').split('.').pop().toLowerCase() || 'mp4';
+        const s3Key = `${poolId}/reels/${campaignName}_reel${reelNumber}_${Date.now()}_${i}.${ext}`;
+        const uploadUrl = await putobject(s3Key, file.type || 'video/mp4');
+        return { s3Key, uploadUrl, originalName: file.name, index: i };
+      })
+    );
+
+    res.json({ success: true, files: results });
+  } catch (err) {
+    console.error('Error generating presigned URLs:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─── Fast Multi Upload: Step 2 — Save metadata after direct R2 upload ────────
+exports.saveReelMetadata = async (req, res) => {
+  try {
+    const { poolId } = req.params;
+    const { reels } = req.body; // [{ s3Key, title }]
+
+    if (!poolId || !Array.isArray(reels) || reels.length === 0) {
+      return res.status(400).json({ success: false, error: 'poolId and reels array required' });
+    }
+
+    const pool = await Pool.findById(poolId);
+    if (!pool) return res.status(404).json({ success: false, error: 'Pool not found' });
+
+    const savedReels = await Promise.all(
+      reels.map(async (r) => {
+        const s3Url = await getobject(r.s3Key);
+        return Reel.create({ poolId, s3Key: r.s3Key, s3Url, title: r.title || '' });
+      })
+    );
+
+    await Pool.findByIdAndUpdate(poolId, { $inc: { reelCount: savedReels.length } });
+
+    res.json({ success: true, reels: savedReels, count: savedReels.length });
+  } catch (err) {
+    console.error('Error saving reel metadata:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 exports.uploadReels = async (req, res) => {
   //   const clientId = req.user.id
