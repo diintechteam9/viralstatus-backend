@@ -9,7 +9,7 @@ const putobject = async (key, contentType) => {
   return getSignedUrl(r2Client, command, { expiresIn: 3600 });
 };
 
-const getobject = async (key) => {
+const getobject = async (key) => { 
   const command = new GetObjectCommand({ Bucket: BUCKET, Key: key, ResponseContentDisposition: 'inline' });
   return getSignedUrl(r2Client, command, { expiresIn: 604800 });
 };
