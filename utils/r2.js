@@ -6,7 +6,7 @@ const BUCKET = process.env.R2_BUCKET;
 
 const putobject = async (key, contentType) => {
   const command = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: contentType });
-  return getSignedUrl(r2Client, command, { expiresIn: 604800 });
+  return getSignedUrl(r2Client, command, { expiresIn: 3600 });
 };
 
 const getobject = async (key) => {
