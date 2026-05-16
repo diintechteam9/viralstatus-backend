@@ -1,10 +1,32 @@
-const { execFile } = require("child_process");
+const { execFile, exec } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
 
-const YT_DLP = path.join(__dirname, "..", "yt-dlp.exe");
-const FFMPEG_DIR = path.join(__dirname, "..", "ffmpeg-8.1.1-essentials_build", "bin");
+// Resolve yt-dlp binary: prefer local file, fallback to system PATH
+const LOCAL_YT_DLP = process.platform === "win32"
+  ? path.join(__dirname, "..", "yt-dlp.exe")
+  : path.join(__dirname, "..", "yt-dlp");
+
+// On Linux production, yt-dlp is typically installed via pip or apt
+// System PATH locations: /usr/local/bin/yt-dlp, /usr/bin/yt-dlp
+const SYSTEM_YT_DLP_PATHS = ["/usr/local/bin/yt-dlp", "/usr/bin/yt-dlp", "/home/ubuntu/.local/bin/yt-dlp"];
+
+function resolveYtDlp() {
+  if (fs.existsSync(LOCAL_YT_DLP)) return LOCAL_YT_DLP;
+  if (process.platform !== "win32") {
+    for (const p of SYSTEM_YT_DLP_PATHS) {
+      if (fs.existsSync(p)) return p;
+    }
+  }
+  return null; // will be resolved via PATH at runtime
+}
+
+const YT_DLP = resolveYtDlp() || (process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp");
+
+const FFMPEG_DIR = process.platform === "win32"
+  ? path.join(__dirname, "..", "ffmpeg-8.1.1-essentials_build", "bin")
+  : "/usr/bin";
 
 // In-memory thumbnail cache (token → temp file path)
 const thumbCache = new Map();
@@ -46,10 +68,6 @@ exports.getReelInfo = (req, res) => {
     return res.status(400).json({ error: "Invalid Instagram Reel URL. Use format: https://www.instagram.com/reel/XXXXX/" });
   }
 
-  if (!fs.existsSync(YT_DLP)) {
-    return res.status(500).json({ error: "yt-dlp.exe not found on server. Please contact admin." });
-  }
-
   const token = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const thumbBase = path.join(os.tmpdir(), `insta_thumb_${token}`);
   const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
@@ -68,14 +86,18 @@ exports.getReelInfo = (req, res) => {
 
   execFile(YT_DLP, args, { timeout: 35000 }, (err, stdout, stderr) => {
     if (err) {
-      const msg = (stderr || "").toLowerCase();
+      const msg = (stderr || err.message || "").toLowerCase();
+      if (msg.includes("enoent") || msg.includes("not found") && msg.includes("yt-dlp")) {
+        console.error("[InstaReels] yt-dlp binary not found. Install with: pip install yt-dlp");
+        return res.status(500).json({ error: "yt-dlp not installed on server. Please contact admin." });
+      }
       if (msg.includes("private") || msg.includes("login required")) {
         return res.status(403).json({ error: "Private account. Only public Instagram Reels are supported." });
       }
       if (msg.includes("not found") || msg.includes("does not exist")) {
         return res.status(404).json({ error: "Reel not found. Please check the URL." });
       }
-      console.error("[InstaReels] yt-dlp error:", stderr);
+      console.error("[InstaReels] yt-dlp error:", stderr || err.message);
       return res.status(500).json({ error: "Failed to fetch reel info. The reel may be unavailable." });
     }
 
@@ -146,23 +168,20 @@ exports.downloadReel = (req, res) => {
     return res.status(400).json({ error: "Invalid Instagram URL." });
   }
 
-  if (!fs.existsSync(YT_DLP)) {
-    return res.status(500).json({ error: "yt-dlp.exe not found on server." });
-  }
-
   const safeName = (title || "instagram_reel")
     .replace(/[^a-z0-9]/gi, "_")
     .substring(0, 80);
   const outPath = path.join(os.tmpdir(), `insta_${Date.now()}_${safeName}.mp4`);
 
-  const ffmpegAvailable = fs.existsSync(path.join(FFMPEG_DIR, "ffmpeg.exe"));
+  const ffmpegBin = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+  const ffmpegAvailable = fs.existsSync(path.join(FFMPEG_DIR, ffmpegBin)) || fs.existsSync("/usr/bin/ffmpeg") || fs.existsSync("/usr/local/bin/ffmpeg");
 
   const args = [
     "--no-playlist",
     ...YT_DLP_ARGS,
     ...(ffmpegAvailable
       ? [
-          "--ffmpeg-location", FFMPEG_DIR,
+          "--ffmpeg-location", fs.existsSync(path.join(FFMPEG_DIR, ffmpegBin)) ? FFMPEG_DIR : "/usr/bin",
           "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best",
           "--merge-output-format", "mp4",
         ]
@@ -173,7 +192,7 @@ exports.downloadReel = (req, res) => {
 
   execFile(YT_DLP, args, { timeout: 120000 }, (err, stdout, stderr) => {
     if (err) {
-      console.error("[InstaReels] Download error:", stderr);
+      console.error("[InstaReels] Download error:", stderr || err.message);
       // Cleanup partial file
       if (fs.existsSync(outPath)) fs.unlink(outPath, () => {});
       return res.status(500).json({ error: "Download failed. Please try again." });
