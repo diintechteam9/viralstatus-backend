@@ -2,41 +2,57 @@ const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const https = require('https');
 const PoolFolder = require('../models/PoolFolder');
 const Reel = require('../models/Reel');
 const Pool = require('../models/pool');
-const { putobject, getobject } = require('../utils/r2');
+const { getobject } = require('../utils/r2');
 const { PutObjectCommand } = require('@aws-sdk/client-s3');
 const { s3Client } = require('../utils/r2');
 
-// Resolve yt-dlp binary (same logic as instaReelsDownloaderController)
-const LOCAL_YT_DLP = process.platform === 'win32'
-  ? path.join(__dirname, '..', 'yt-dlp.exe')
-  : path.join(__dirname, '..', 'yt-dlp');
-const SYSTEM_YT_DLP_PATHS = ['/usr/local/bin/yt-dlp', '/usr/bin/yt-dlp', '/home/ubuntu/.local/bin/yt-dlp'];
-function resolveYtDlp() {
-  if (fs.existsSync(LOCAL_YT_DLP)) return LOCAL_YT_DLP;
-  if (process.platform !== 'win32') {
-    for (const p of SYSTEM_YT_DLP_PATHS) {
-      if (fs.existsSync(p)) return p;
-    }
-  }
-  return null;
+// ── RapidAPI fetch + download helpers (shared) ────────────────────────────────
+function fetchFromRapidAPI(reelUrl) {
+  return new Promise((resolve, reject) => {
+    const encoded = encodeURIComponent(reelUrl);
+    const options = {
+      method: 'GET',
+      hostname: 'instagram-reels-downloader-api.p.rapidapi.com',
+      path: `/download?url=${encoded}`,
+      headers: {
+        'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+        'x-rapidapi-host': 'instagram-reels-downloader-api.p.rapidapi.com',
+      },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('Failed to parse API response')); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(30000, () => { req.destroy(); reject(new Error('Request timeout')); });
+    req.end();
+  });
 }
-const YT_DLP = resolveYtDlp() || (process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
 
-const FFMPEG_DIR = process.platform === 'win32'
-  ? path.join(__dirname, '..', 'ffmpeg-8.1.1-essentials_build', 'bin')
-  : '/usr/bin';
-
-const COOKIES_PATH = path.join(__dirname, '..', 'cookies.txt');
-
-const YT_DLP_ARGS = [
-  '--no-check-certificates',
-  '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  '--add-header', 'Accept-Language:en-US,en;q=0.9',
-  ...(fs.existsSync(COOKIES_PATH) ? ['--cookies', COOKIES_PATH] : []),
-];
+function downloadFile(url, destPath) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destPath);
+    const get = (urlStr) => {
+      const mod = urlStr.startsWith('https') ? require('https') : require('http');
+      mod.get(urlStr, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) return get(res.headers.location);
+        if (res.statusCode !== 200) return reject(new Error(`Download failed: ${res.statusCode}`));
+        res.pipe(file);
+        file.on('finish', () => file.close(resolve));
+        file.on('error', reject);
+      }).on('error', reject);
+    };
+    get(url);
+  });
+}
 
 // ── Create Folder ─────────────────────────────────────────────────────────────
 exports.createFolder = async (req, res) => {
@@ -132,72 +148,46 @@ exports.downloadReelToPool = async (req, res) => {
     const pool = await Pool.findById(poolId);
     if (!pool) return res.status(404).json({ error: 'Pool not found' });
 
+    const result = await fetchFromRapidAPI(url);
+    if (!result.success || result.data?.error) {
+      return res.status(403).json({ error: 'Reel unavailable or private.' });
+    }
+
+    const videoMedia = result.data?.medias?.find(m => m.type === 'video');
+    if (!videoMedia?.url) return res.status(404).json({ error: 'No video found in this reel.' });
+
     const safeName = `insta_${Date.now()}`;
     const outPath = path.join(os.tmpdir(), `${safeName}.mp4`);
+    await downloadFile(videoMedia.url, outPath);
 
-    const ffmpegBin = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
-    const ffmpegAvailable = fs.existsSync(path.join(FFMPEG_DIR, ffmpegBin))
-      || fs.existsSync('/usr/bin/ffmpeg')
-      || fs.existsSync('/usr/local/bin/ffmpeg');
+    if (!fs.existsSync(outPath)) return res.status(500).json({ error: 'Downloaded file not found.' });
 
-    const args = [
-      '--no-playlist',
-      ...YT_DLP_ARGS,
-      ...(ffmpegAvailable
-        ? [
-            '--ffmpeg-location', fs.existsSync(path.join(FFMPEG_DIR, ffmpegBin)) ? FFMPEG_DIR : '/usr/bin',
-            '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best',
-            '--merge-output-format', 'mp4',
-          ]
-        : ['-f', 'best[ext=mp4]/best']),
-      '-o', outPath,
-      url,
-    ];
+    const fileBuffer = fs.readFileSync(outPath);
+    const s3Key = `${poolId}/reels/${safeName}.mp4`;
 
-    execFile(YT_DLP, args, { timeout: 120000 }, async (err, stdout, stderr) => {
-      if (err) {
-        console.error('[PoolDownload] yt-dlp error:', stderr || err.message);
-        if (fs.existsSync(outPath)) fs.unlink(outPath, () => {});
-        return res.status(500).json({ error: 'Failed to download reel. The reel may be private or unavailable.' });
-      }
+    await s3Client.send(new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET,
+      Key: s3Key,
+      Body: fileBuffer,
+      ContentType: 'video/mp4',
+      ContentLength: fileBuffer.length,
+    }));
 
-      if (!fs.existsSync(outPath)) {
-        return res.status(500).json({ error: 'Downloaded file not found.' });
-      }
+    fs.unlink(outPath, () => {});
 
-      try {
-        const fileBuffer = fs.readFileSync(outPath);
-        const s3Key = `${poolId}/reels/${safeName}.mp4`;
-
-        await s3Client.send(new PutObjectCommand({
-          Bucket: process.env.R2_BUCKET,
-          Key: s3Key,
-          Body: fileBuffer,
-          ContentType: 'video/mp4',
-          ContentLength: fileBuffer.length,
-        }));
-
-        fs.unlink(outPath, () => {});
-
-        const s3Url = await getobject(s3Key);
-        const reel = await Reel.create({
-          poolId,
-          s3Key,
-          s3Url,
-          title: `Instagram Reel - ${new Date().toLocaleDateString()}`,
-        });
-
-        await Pool.findByIdAndUpdate(poolId, { $inc: { reelCount: 1 } });
-        res.status(201).json({ success: true, reel: { ...reel.toObject(), s3Url } });
-      } catch (uploadErr) {
-        if (fs.existsSync(outPath)) fs.unlink(outPath, () => {});
-        console.error('[PoolDownload] Upload error:', uploadErr.message);
-        res.status(500).json({ error: 'Failed to upload reel to storage.', details: uploadErr.message });
-      }
+    const s3Url = await getobject(s3Key);
+    const reel = await Reel.create({
+      poolId,
+      s3Key,
+      s3Url,
+      title: result.data.title || `Instagram Reel - ${new Date().toLocaleDateString()}`,
     });
+
+    await Pool.findByIdAndUpdate(poolId, { $inc: { reelCount: 1 } });
+    res.status(201).json({ success: true, reel: { ...reel.toObject(), s3Url } });
   } catch (err) {
-    console.error('[PoolDownload] Unexpected error:', err.message);
-    res.status(500).json({ error: 'Unexpected server error.', details: err.message });
+    console.error('[PoolDownload] Error:', err.message);
+    res.status(500).json({ error: 'Failed to save reel.', details: err.message });
   }
 };
 
@@ -214,74 +204,48 @@ exports.downloadReelToFolder = async (req, res) => {
     if (!folder) return res.status(404).json({ error: 'Folder not found' });
 
     const poolId = folder.poolId._id || folder.poolId;
+
+    const result = await fetchFromRapidAPI(url);
+    if (!result.success || result.data?.error) {
+      return res.status(403).json({ error: 'Reel unavailable or private.' });
+    }
+
+    const videoMedia = result.data?.medias?.find(m => m.type === 'video');
+    if (!videoMedia?.url) return res.status(404).json({ error: 'No video found in this reel.' });
+
     const safeName = `insta_${Date.now()}`;
     const outPath = path.join(os.tmpdir(), `${safeName}.mp4`);
+    await downloadFile(videoMedia.url, outPath);
 
-    const ffmpegBin = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
-    const ffmpegAvailable = fs.existsSync(path.join(FFMPEG_DIR, ffmpegBin))
-      || fs.existsSync('/usr/bin/ffmpeg')
-      || fs.existsSync('/usr/local/bin/ffmpeg');
+    if (!fs.existsSync(outPath)) return res.status(500).json({ error: 'Downloaded file not found.' });
 
-    const args = [
-      '--no-playlist',
-      ...YT_DLP_ARGS,
-      ...(ffmpegAvailable
-        ? [
-            '--ffmpeg-location', fs.existsSync(path.join(FFMPEG_DIR, ffmpegBin)) ? FFMPEG_DIR : '/usr/bin',
-            '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best',
-            '--merge-output-format', 'mp4',
-          ]
-        : ['-f', 'best[ext=mp4]/best']),
-      '-o', outPath,
-      url,
-    ];
+    const fileBuffer = fs.readFileSync(outPath);
+    const s3Key = `${poolId}/folders/${folderId}/${safeName}.mp4`;
 
-    execFile(YT_DLP, args, { timeout: 120000 }, async (err, stdout, stderr) => {
-      if (err) {
-        console.error('[FolderDownload] yt-dlp error:', stderr || err.message);
-        if (fs.existsSync(outPath)) fs.unlink(outPath, () => {});
-        return res.status(500).json({ error: 'Failed to download reel. The reel may be private or unavailable.' });
-      }
+    await s3Client.send(new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET,
+      Key: s3Key,
+      Body: fileBuffer,
+      ContentType: 'video/mp4',
+      ContentLength: fileBuffer.length,
+    }));
 
-      if (!fs.existsSync(outPath)) {
-        return res.status(500).json({ error: 'Downloaded file not found.' });
-      }
+    fs.unlink(outPath, () => {});
 
-      try {
-        const fileBuffer = fs.readFileSync(outPath);
-        const s3Key = `${poolId}/folders/${folderId}/${safeName}.mp4`;
-
-        await s3Client.send(new PutObjectCommand({
-          Bucket: process.env.R2_BUCKET,
-          Key: s3Key,
-          Body: fileBuffer,
-          ContentType: 'video/mp4',
-          ContentLength: fileBuffer.length,
-        }));
-
-        fs.unlink(outPath, () => {});
-
-        const s3Url = await getobject(s3Key);
-        const reel = await Reel.create({
-          poolId,
-          folderId,
-          s3Key,
-          s3Url,
-          title: `Instagram Reel - ${new Date().toLocaleDateString()}`,
-        });
-
-        await PoolFolder.findByIdAndUpdate(folderId, { $inc: { reelCount: 1 } });
-        await Pool.findByIdAndUpdate(poolId, { $inc: { reelCount: 1 } });
-
-        res.status(201).json({ success: true, reel: { ...reel.toObject(), s3Url } });
-      } catch (uploadErr) {
-        if (fs.existsSync(outPath)) fs.unlink(outPath, () => {});
-        console.error('[FolderDownload] Upload error:', uploadErr.message);
-        res.status(500).json({ error: 'Failed to upload reel to storage.', details: uploadErr.message });
-      }
+    const s3Url = await getobject(s3Key);
+    const reel = await Reel.create({
+      poolId,
+      folderId,
+      s3Key,
+      s3Url,
+      title: result.data.title || `Instagram Reel - ${new Date().toLocaleDateString()}`,
     });
+
+    await PoolFolder.findByIdAndUpdate(folderId, { $inc: { reelCount: 1 } });
+    await Pool.findByIdAndUpdate(poolId, { $inc: { reelCount: 1 } });
+    res.status(201).json({ success: true, reel: { ...reel.toObject(), s3Url } });
   } catch (err) {
-    console.error('[FolderDownload] Unexpected error:', err.message);
-    res.status(500).json({ error: 'Unexpected server error.', details: err.message });
+    console.error('[FolderDownload] Error:', err.message);
+    res.status(500).json({ error: 'Failed to save reel.', details: err.message });
   }
 };

@@ -1,208 +1,176 @@
-const { execFile, exec } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+const https = require("https");
 
-// Resolve yt-dlp binary: prefer local file, fallback to system PATH
-const LOCAL_YT_DLP = process.platform === "win32"
-  ? path.join(__dirname, "..", "yt-dlp.exe")
-  : path.join(__dirname, "..", "yt-dlp");
-
-// On Linux production, yt-dlp is typically installed via pip or apt
-// System PATH locations: /usr/local/bin/yt-dlp, /usr/bin/yt-dlp
-const SYSTEM_YT_DLP_PATHS = ["/usr/local/bin/yt-dlp", "/usr/bin/yt-dlp", "/home/ubuntu/.local/bin/yt-dlp"];
-
-function resolveYtDlp() {
-  if (fs.existsSync(LOCAL_YT_DLP)) return LOCAL_YT_DLP;
-  if (process.platform !== "win32") {
-    for (const p of SYSTEM_YT_DLP_PATHS) {
-      if (fs.existsSync(p)) return p;
-    }
-  }
-  return null; // will be resolved via PATH at runtime
-}
-
-const YT_DLP = resolveYtDlp() || (process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp");
-
-const FFMPEG_DIR = process.platform === "win32"
-  ? path.join(__dirname, "..", "ffmpeg-8.1.1-essentials_build", "bin")
-  : "/usr/bin";
-
-// In-memory thumbnail cache (token → temp file path)
+// In-memory thumbnail cache (token → url)
 const thumbCache = new Map();
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── RapidAPI call ─────────────────────────────────────────────────────────────
+function fetchFromRapidAPI(reelUrl) {
+  return new Promise((resolve, reject) => {
+    const encoded = encodeURIComponent(reelUrl);
+    const options = {
+      method: "GET",
+      hostname: "instagram-reels-downloader-api.p.rapidapi.com",
+      path: `/download?url=${encoded}`,
+      headers: {
+        "x-rapidapi-key": process.env.RAPIDAPI_KEY,
+        "x-rapidapi-host": "instagram-reels-downloader-api.p.rapidapi.com",
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (e) {
+          reject(new Error("Failed to parse API response"));
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.setTimeout(30000, () => { req.destroy(); reject(new Error("Request timeout")); });
+    req.end();
+  });
+}
+
+// ── Download video from URL to temp file ─────────────────────────────────────
+function downloadFile(url, destPath) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destPath);
+    const get = (urlStr) => {
+      const mod = urlStr.startsWith("https") ? require("https") : require("http");
+      mod.get(urlStr, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return get(res.headers.location);
+        }
+        if (res.statusCode !== 200) {
+          return reject(new Error(`Download failed with status ${res.statusCode}`));
+        }
+        res.pipe(file);
+        file.on("finish", () => file.close(resolve));
+        file.on("error", reject);
+      }).on("error", reject);
+    };
+    get(url);
+  });
+}
 
 const isValidInstagramUrl = (url) => {
   try {
     const parsed = new URL(url);
-    return (
-      parsed.hostname === "www.instagram.com" ||
-      parsed.hostname === "instagram.com"
-    );
-  } catch {
-    return false;
-  }
+    return parsed.hostname === "www.instagram.com" || parsed.hostname === "instagram.com";
+  } catch { return false; }
 };
-
-const parseJsonFromStdout = (stdout) => {
-  const lines = stdout.split("\n").filter((l) => l.trim().startsWith("{"));
-  if (lines.length === 0) throw new Error("No JSON found in yt-dlp output");
-  return lines.map((l) => JSON.parse(l));
-};
-
-const COOKIES_PATH = path.join(__dirname, "..", "cookies.txt");
-
-const YT_DLP_ARGS = [
-  "--no-check-certificates",
-  "--user-agent",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "--add-header",
-  "Accept-Language:en-US,en;q=0.9",
-  ...(fs.existsSync(COOKIES_PATH) ? ["--cookies", COOKIES_PATH] : []),
-];
 
 // ── Controller: GET INFO ──────────────────────────────────────────────────────
-
-exports.getReelInfo = (req, res) => {
+exports.getReelInfo = async (req, res) => {
   const { url } = req.body;
 
   if (!url || !isValidInstagramUrl(url) || !url.includes("/reel/")) {
-    return res.status(400).json({ error: "Invalid Instagram Reel URL. Use format: https://www.instagram.com/reel/XXXXX/" });
+    return res.status(400).json({ error: "Invalid Instagram Reel URL." });
   }
 
-  const token = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const thumbBase = path.join(os.tmpdir(), `insta_thumb_${token}`);
-  const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
+  if (!process.env.RAPIDAPI_KEY) {
+    return res.status(500).json({ error: "RapidAPI key not configured on server." });
+  }
 
-  // Single yt-dlp call: dump JSON + write thumbnail + skip video download
-  const args = [
-    "--dump-json",
-    "--no-playlist",
-    "--write-thumbnail",
-    "--skip-download",
-    "--convert-thumbnails", "jpg",
-    "-o", thumbBase,
-    ...YT_DLP_ARGS,
-    url,
-  ];
+  try {
+    const result = await fetchFromRapidAPI(url);
 
-  execFile(YT_DLP, args, { timeout: 35000 }, (err, stdout, stderr) => {
-    if (err) {
-      const msg = (stderr || err.message || "").toLowerCase();
-      if (msg.includes("enoent") || msg.includes("not found") && msg.includes("yt-dlp")) {
-        console.error("[InstaReels] yt-dlp binary not found. Install with: pip install yt-dlp");
-        return res.status(500).json({ error: "yt-dlp not installed on server. Please contact admin." });
-      }
-      if (msg.includes("private") || msg.includes("login required")) {
-        return res.status(403).json({ error: "Private account. Only public Instagram Reels are supported." });
-      }
-      if (msg.includes("not found") || msg.includes("does not exist")) {
-        return res.status(404).json({ error: "Reel not found. Please check the URL." });
-      }
-      console.error("[InstaReels] yt-dlp error:", stderr || err.message);
-      return res.status(500).json({ error: "Failed to fetch reel info. The reel may be unavailable." });
+    if (!result.success || result.data?.error) {
+      return res.status(403).json({ error: "Failed to fetch reel. It may be private or unavailable." });
     }
 
-    try {
-      const infos = parseJsonFromStdout(stdout);
-      const info = infos[0];
+    const data = result.data;
+    const token = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-      // Find the downloaded thumbnail file (.jpg or .webp)
-      let thumbFilePath = null;
-      for (const ext of [".jpg", ".jpeg", ".webp", ".png"]) {
-        const candidate = `${thumbBase}${ext}`;
-        if (fs.existsSync(candidate)) { thumbFilePath = candidate; break; }
-      }
-
-      let thumbnailServeUrl = null;
-      if (thumbFilePath) {
-        thumbCache.set(token, thumbFilePath);
-        // Auto-delete after 10 minutes
-        setTimeout(() => {
-          const p = thumbCache.get(token);
-          if (p && fs.existsSync(p)) fs.unlink(p, () => {});
-          thumbCache.delete(token);
-        }, 10 * 60 * 1000);
-        thumbnailServeUrl = `${backendUrl}/api/insta-reels/thumbnail?token=${token}`;
-      }
-
-      res.json({
-        title: info.title || "Instagram Reel",
-        thumbnail: thumbnailServeUrl,
-        duration: info.duration || null,
-        uploader: info.uploader || info.channel || null,
-        viewCount: info.view_count || null,
-        likeCount: info.like_count || null,
-        uploadDate: info.upload_date || null,
-        type: "video",
-        originalUrl: url,
-      });
-    } catch (e) {
-      console.error("[InstaReels] JSON parse error:", e.message);
-      res.status(500).json({ error: "Failed to parse reel data." });
+    // Cache thumbnail URL directly (no need to download)
+    if (data.thumbnail) {
+      thumbCache.set(token, { type: "url", url: data.thumbnail });
+      setTimeout(() => thumbCache.delete(token), 10 * 60 * 1000);
     }
-  });
+
+    const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
+
+    res.json({
+      title: data.title || "Instagram Reel",
+      thumbnail: data.thumbnail ? `${backendUrl}/api/insta-reels/thumbnail?token=${token}` : null,
+      duration: data.duration || null,
+      uploader: data.owner?.username || data.author || null,
+      viewCount: data.view_count || null,
+      likeCount: data.like_count || null,
+      uploadDate: null,
+      type: "video",
+      originalUrl: url,
+      // Pass video URL for direct download
+      _videoUrl: data.medias?.find(m => m.type === "video")?.url || null,
+    });
+  } catch (e) {
+    console.error("[InstaReels] RapidAPI error:", e.message);
+    res.status(500).json({ error: "Failed to fetch reel info. Please try again." });
+  }
 };
 
-// ── Controller: THUMBNAIL SERVE (from temp file) ─────────────────────────────
-
+// ── Controller: THUMBNAIL PROXY ───────────────────────────────────────────────
 exports.thumbnailProxy = (req, res) => {
   const { token } = req.query;
   if (!token) return res.status(400).end();
 
-  const filePath = thumbCache.get(token);
-  if (!filePath || !fs.existsSync(filePath)) {
-    return res.status(404).end();
+  const cached = thumbCache.get(token);
+  if (!cached) return res.status(404).end();
+
+  // Proxy the thumbnail URL
+  if (cached.type === "url") {
+    const mod = cached.url.startsWith("https") ? require("https") : require("http");
+    mod.get(cached.url, (imgRes) => {
+      res.setHeader("Content-Type", imgRes.headers["content-type"] || "image/jpeg");
+      res.setHeader("Cache-Control", "public, max-age=600");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      imgRes.pipe(res);
+    }).on("error", () => res.status(500).end());
+    return;
   }
 
+  // File-based (legacy)
+  if (!fs.existsSync(cached)) return res.status(404).end();
   res.setHeader("Content-Type", "image/jpeg");
   res.setHeader("Cache-Control", "public, max-age=600");
   res.setHeader("Access-Control-Allow-Origin", "*");
-  fs.createReadStream(filePath).pipe(res);
+  fs.createReadStream(cached).pipe(res);
 };
 
 // ── Controller: DOWNLOAD ──────────────────────────────────────────────────────
-
-exports.downloadReel = (req, res) => {
+exports.downloadReel = async (req, res) => {
   const { url, title } = req.query;
 
   if (!url || !isValidInstagramUrl(url)) {
     return res.status(400).json({ error: "Invalid Instagram URL." });
   }
 
-  const safeName = (title || "instagram_reel")
-    .replace(/[^a-z0-9]/gi, "_")
-    .substring(0, 80);
-  const outPath = path.join(os.tmpdir(), `insta_${Date.now()}_${safeName}.mp4`);
+  try {
+    const result = await fetchFromRapidAPI(url);
 
-  const ffmpegBin = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
-  const ffmpegAvailable = fs.existsSync(path.join(FFMPEG_DIR, ffmpegBin)) || fs.existsSync("/usr/bin/ffmpeg") || fs.existsSync("/usr/local/bin/ffmpeg");
-
-  const args = [
-    "--no-playlist",
-    ...YT_DLP_ARGS,
-    ...(ffmpegAvailable
-      ? [
-          "--ffmpeg-location", fs.existsSync(path.join(FFMPEG_DIR, ffmpegBin)) ? FFMPEG_DIR : "/usr/bin",
-          "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best",
-          "--merge-output-format", "mp4",
-        ]
-      : ["-f", "best[ext=mp4]/best"]),
-    "-o", outPath,
-    url,
-  ];
-
-  execFile(YT_DLP, args, { timeout: 120000 }, (err, stdout, stderr) => {
-    if (err) {
-      console.error("[InstaReels] Download error:", stderr || err.message);
-      // Cleanup partial file
-      if (fs.existsSync(outPath)) fs.unlink(outPath, () => {});
-      return res.status(500).json({ error: "Download failed. Please try again." });
+    if (!result.success || result.data?.error) {
+      return res.status(403).json({ error: "Reel unavailable or private." });
     }
 
+    const videoMedia = result.data?.medias?.find(m => m.type === "video");
+    if (!videoMedia?.url) {
+      return res.status(404).json({ error: "No video found in this reel." });
+    }
+
+    const safeName = (title || "instagram_reel").replace(/[^a-z0-9]/gi, "_").substring(0, 80);
+    const outPath = path.join(os.tmpdir(), `insta_${Date.now()}_${safeName}.mp4`);
+
+    await downloadFile(videoMedia.url, outPath);
+
     if (!fs.existsSync(outPath)) {
-      return res.status(500).json({ error: "File was not created. Download may have failed." });
+      return res.status(500).json({ error: "File was not created." });
     }
 
     const stat = fs.statSync(outPath);
@@ -217,5 +185,8 @@ exports.downloadReel = (req, res) => {
       if (fs.existsSync(outPath)) fs.unlink(outPath, () => {});
       if (!res.headersSent) res.status(500).json({ error: "Stream error." });
     });
-  });
+  } catch (e) {
+    console.error("[InstaReels] Download error:", e.message);
+    res.status(500).json({ error: "Download failed. Please try again." });
+  }
 };
