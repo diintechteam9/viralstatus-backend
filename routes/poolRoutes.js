@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const poolController = require('../controllers/poolController');
 const reelController = require('../controllers/reelcontroller');
+const folderController = require('../controllers/poolFolderController');
 
 // ─── Static / specific routes FIRST (before any /:param routes) ───────────────
 
@@ -49,6 +50,15 @@ router.get('/:poolId/reels', reelController.getReelsByPoolId);
 
 // Delete all reels from pool
 router.delete('/:poolId/reels', reelController.deleteAllReelsFromPool);
+
+// ─── Folder routes ────────────────────────────────────────────────────────────
+router.post('/:poolId/folders', folderController.createFolder);
+router.get('/:poolId/folders', folderController.getFolders);
+router.put('/folders/:folderId', folderController.renameFolder);
+router.delete('/folders/:folderId', folderController.deleteFolder);
+router.get('/folders/:folderId/reels', folderController.getReelsInFolder);
+router.post('/folders/:folderId/download', folderController.downloadReelToFolder);
+router.post('/:poolId/download-reel', folderController.downloadReelToPool);
 
 // Get single pool by id
 router.get('/:id', async (req, res) => {

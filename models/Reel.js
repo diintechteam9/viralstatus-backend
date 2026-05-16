@@ -15,6 +15,11 @@ const reelSchema = mongoose.Schema({
     title: {
         type: String,
         default: ''
+    },
+    folderId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'PoolFolder',
+        default: null
     }
 },
 {
