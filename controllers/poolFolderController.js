@@ -29,10 +29,13 @@ const FFMPEG_DIR = process.platform === 'win32'
   ? path.join(__dirname, '..', 'ffmpeg-8.1.1-essentials_build', 'bin')
   : '/usr/bin';
 
+const COOKIES_PATH = path.join(__dirname, '..', 'cookies.txt');
+
 const YT_DLP_ARGS = [
   '--no-check-certificates',
   '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   '--add-header', 'Accept-Language:en-US,en;q=0.9',
+  ...(fs.existsSync(COOKIES_PATH) ? ['--cookies', COOKIES_PATH] : []),
 ];
 
 // ── Create Folder ─────────────────────────────────────────────────────────────
