@@ -80,6 +80,7 @@ const itineraryRoute = require('./routes/itineraryRoute');
 const landingPageRoute = require('./routes/landingPageRoute');
 const agentRoute = require('./routes/agentRoute');
 const driveRoutes = require('./routes/driveRoutes');
+const instaReelsDownloaderRoutes = require('./routes/instaReelsDownloader');
 
 // lead capture routes
 const cardRoutes = require('./routes/leadcapture/cardRoutes');
@@ -347,6 +348,7 @@ app.use('/api/itinerary', itineraryRoute);
 app.use('/api/landing-page', landingPageRoute);
 app.use('/api/agent', agentRoute);
 app.use('/api/drive', driveRoutes);
+app.use('/api/insta-reels', instaReelsDownloaderRoutes);
 
 // Logging middleware (only in development)
 if (process.env.NODE_ENV === 'development') {
