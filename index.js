@@ -80,6 +80,7 @@ const itineraryRoute = require('./routes/itineraryRoute');
 const landingPageRoute = require('./routes/landingPageRoute');
 const agentRoute = require('./routes/agentRoute');
 const driveRoutes = require('./routes/driveRoutes');
+const socialSensingRoutes = require('./routes/socialSensingRoute');
 const instaReelsDownloaderRoutes = require('./routes/instaReelsDownloader');
 
 // lead capture routes
@@ -203,7 +204,8 @@ app.use(cors({
         "Accept",
         "Origin",
         "Access-Control-Request-Method",
-        "Access-Control-Request-Headers"
+        "Access-Control-Request-Headers",
+        "x-client-id"
     ],
     exposedHeaders: ["Content-Range", "X-Content-Range"],
     maxAge: 86400, // 24 hours
@@ -221,7 +223,7 @@ app.use((req, res, next) => {
     if (req.method === 'OPTIONS') {
         res.header('Access-Control-Allow-Origin', req.headers.origin || 'https://viralstatus-frontend.vercel.app' || 'https://client.yovoai.com');
         res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, x-client-id');
         res.header('Access-Control-Allow-Credentials', 'true');
         res.status(200).end();
         return;
@@ -348,6 +350,7 @@ app.use('/api/itinerary', itineraryRoute);
 app.use('/api/landing-page', landingPageRoute);
 app.use('/api/agent', agentRoute);
 app.use('/api/drive', driveRoutes);
+app.use('/api/social-sensing', socialSensingRoutes);
 app.use('/api/insta-reels', instaReelsDownloaderRoutes);
 
 // Logging middleware (only in development)
