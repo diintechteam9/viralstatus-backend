@@ -84,14 +84,54 @@ const loginAdmin = async (req, res) => {
   }
 };
 
+const FILTER_VALUES = ['all', 'new', 'prime', 'demo', 'in-house', 'testing', 'rejected'];
+
+const normalizeFilter = (value) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  const v = String(value).trim().toLowerCase();
+  const map = {
+    all: 'all', new: 'new', prime: 'prime', demo: 'demo',
+    'in-house': 'in-house', testing: 'testing', rejected: 'rejected',
+  };
+  if (map[v]) return map[v];
+  return FILTER_VALUES.includes(v) ? v : undefined;
+};
+
+const enrichClient = async (doc) => {
+  const client = doc.toObject ? doc.toObject() : { ...doc };
+  client.logoUrl = null;
+  if (client.businessLogoKey) {
+    try {
+      client.logoUrl = await getobject(client.businessLogoKey);
+    } catch (err) {
+      console.error(`[client] logo presign failed for ${client._id}:`, err.message);
+    }
+  }
+  if (!client.logoUrl && client.businessLogoUrl) {
+    client.logoUrl = client.businessLogoUrl;
+  }
+  if (!client.name && client.contactPerson) {
+    client.name = client.contactPerson;
+  }
+  if (client.filter) {
+    client.filter = normalizeFilter(client.filter) || client.filter;
+  }
+  return client;
+};
+
+const attachLogoUrls = async (clients) => {
+  return Promise.all(clients.map((doc) => enrichClient(doc)));
+};
+
 const getClients = async (req, res) => {
     try {
-      const clients = await Client.find().select('-password');
-      
+      const clients = await Client.find().select('-password').sort({ createdAt: -1 });
+      const data = await attachLogoUrls(clients);
+
       res.status(200).json({
         success: true,
-        count: clients.length,
-        data: clients
+        count: data.length,
+        data,
       });
     } catch (error) {
       res.status(500).json({
@@ -259,7 +299,7 @@ const getClients = async (req, res) => {
     }
   }
 
-  // Update client (e.g., set filter and editable fields)
+  // Update client (editable fields + optional password)
   const updateClient = async (req, res) => {
     try {
       const { id } = req.params;
@@ -267,26 +307,47 @@ const getClients = async (req, res) => {
         return res.status(400).json({ success: false, message: "Client ID is required" });
       }
 
+      const existing = await Client.findById(id);
+      if (!existing) {
+        return res.status(404).json({ success: false, message: "Client not found" });
+      }
+
       const allowedFields = [
-        "name",
-        "email",
-        "businessName",
-        "websiteUrl",
-        "city",
-        "pincode",
-        "gstNo",
-        "panNo",
-        "businessLogoKey",
-        "businessLogoUrl",
-        "filter",
+        "name", "email", "businessName", "websiteUrl", "city", "pincode",
+        "gstNo", "panNo", "businessLogoKey", "businessLogoUrl", "filter",
       ];
 
       const updatePayload = {};
       for (const key of allowedFields) {
-        if (Object.prototype.hasOwnProperty.call(req.body, key)) {
-          updatePayload[key] = req.body[key];
+        if (!Object.prototype.hasOwnProperty.call(req.body, key)) continue;
+        let val = req.body[key];
+        if (val === undefined || val === null) continue;
+        if (typeof val === "string") val = val.trim();
+        if (key === "filter") {
+          const normalized = normalizeFilter(val);
+          if (normalized) updatePayload.filter = normalized;
+          continue;
         }
+        if (key === "email" && val) {
+          updatePayload.email = String(val).toLowerCase();
+          continue;
+        }
+        updatePayload[key] = val;
       }
+
+      if (req.body.password && String(req.body.password).trim()) {
+        const pwd = String(req.body.password).trim();
+        if (pwd.length < 6) {
+          return res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+        }
+        updatePayload.password = await bcrypt.hash(pwd, 10);
+      }
+
+      if (Object.keys(updatePayload).length === 0) {
+        return res.status(400).json({ success: false, message: "No valid fields to update" });
+      }
+
+      updatePayload.updatedAt = new Date();
 
       const updated = await Client.findByIdAndUpdate(
         id,
@@ -298,16 +359,20 @@ const getClients = async (req, res) => {
         return res.status(404).json({ success: false, message: "Client not found" });
       }
 
-      res.status(200).json({ success: true, message: "Client updated", data: updated });
+      const data = await enrichClient(updated);
+      res.status(200).json({ success: true, message: "Client updated successfully", data });
     } catch (error) {
-      // Handle duplicate key errors
       if (error.code === 11000) {
-        const field = Object.keys(error.keyPattern)[0];
-        const fieldName = field === "gstNo" ? "GST Number" : field === "panNo" ? "PAN Number" : field;
+        const field = Object.keys(error.keyPattern || {})[0];
+        const fieldName = field === "gstNo" ? "GST Number" : field === "panNo" ? "PAN Number" : field === "email" ? "Email" : field;
         return res.status(400).json({ success: false, message: `Duplicate value for ${fieldName}` });
       }
+      if (error.name === "ValidationError") {
+        const msg = Object.values(error.errors || {}).map((e) => e.message).join(", ") || error.message;
+        return res.status(400).json({ success: false, message: msg });
+      }
       console.error("Error updating client:", error);
-      res.status(500).json({ success: false, message: "Failed to update client" });
+      res.status(500).json({ success: false, message: error.message || "Failed to update client" });
     }
   };
 
@@ -397,11 +462,18 @@ const uploadBusinessLogo = async (req, res) => {
     const s3Key = `admin/business-logos/${timestamp}_${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
 
     const uploadUrl = await putobject(s3Key, mimeType);
+    let fileUrl = null;
+    try {
+      fileUrl = await getobject(s3Key);
+    } catch (err) {
+      console.error('[uploadBusinessLogo] presign read URL failed:', err.message);
+    }
 
     res.json({
       success: true,
       uploadUrl,
       s3Key,
+      fileUrl,
       message: "Upload URL generated successfully"
     });
 

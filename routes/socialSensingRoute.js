@@ -44,6 +44,27 @@ const extractJson = (text) => {
   return null;
 };
 
+const normalizeSentiment = (parsed) => {
+  if (!parsed || typeof parsed !== 'object') return null;
+  let positive = Number(parsed.positive);
+  let neutral = Number(parsed.neutral);
+  let negative = Number(parsed.negative);
+  if ([positive, neutral, negative].some((n) => Number.isNaN(n))) return null;
+  const sum = positive + neutral + negative;
+  if (sum <= 0) return null;
+  if (Math.abs(sum - 100) > 1) {
+    positive = Math.round((positive / sum) * 100);
+    neutral = Math.round((neutral / sum) * 100);
+    negative = Math.max(0, 100 - positive - neutral);
+  }
+  return {
+    positive,
+    neutral,
+    negative,
+    summary: String(parsed.summary || parsed.overall || '').trim(),
+  };
+};
+
 const getClientId = (req) => {
   if (req.client?.id) return String(req.client.id);
   try {
@@ -309,25 +330,31 @@ router.get('/sentiment', async (req, res) => {
     }
 
     const raw = await callGroq(
-      'You are a sentiment analysis expert. Return valid JSON only.',
+      'You are a sentiment analysis expert. Reply with a single JSON object only, no markdown.',
       `Based on these REAL search/social results about "${keyword}":
 "${contextText}"
 
-Analyze overall public sentiment. Return JSON:
+Analyze overall public sentiment. Return exactly:
 {"positive": 65, "neutral": 22, "negative": 13, "summary": "one line summary"}
-Percentages must sum to 100.`,
-      400
+Use integers 0-100. positive + neutral + negative must equal 100.`,
+      500,
+      0.3
     );
-    const parsed = extractJson(raw);
-    if (!parsed || typeof parsed.positive !== 'number') {
-      throw new Error('Failed to parse sentiment from AI response');
+    const parsed = normalizeSentiment(extractJson(raw));
+    if (!parsed) {
+      throw new Error('Failed to parse sentiment from AI response. Try again.');
     }
     res.json({ success: true, sentiment: parsed, source: 'real-data+groq' });
   } catch (e) {
     if (e.response?.status === 429) {
       return res.status(429).json({ success: false, error: 'Rate limit. Please wait.' });
     }
-    res.status(500).json({ success: false, error: e.message });
+    const code = e.code || '';
+    const msg = e.message || 'Sentiment analysis failed';
+    if (code === 'ECONNABORTED' || /timeout/i.test(msg)) {
+      return res.status(504).json({ success: false, error: 'AI analysis timed out. Please retry.' });
+    }
+    res.status(500).json({ success: false, error: msg });
   }
 });
 

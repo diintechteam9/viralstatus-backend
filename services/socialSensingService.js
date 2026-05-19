@@ -7,12 +7,58 @@ const PLATFORM_LABELS = {
   articles: 'Articles', post: 'Posts', comment: 'Comments', trend: 'Trends',
 };
 
+/** Parse "1.2M", "18K", "About 18,000 results", raw numbers */
+const parseMetricNumber = (raw) => {
+  if (raw == null || raw === '' || raw === 'N/A') return 0;
+  if (typeof raw === 'number' && !Number.isNaN(raw)) return raw;
+  const s = String(raw).replace(/,/g, '').trim();
+  const m = s.match(/([\d.]+)\s*([KMB])?/i);
+  if (!m) {
+    const digits = s.replace(/[^\d.]/g, '');
+    const n = parseFloat(digits);
+    return Number.isNaN(n) ? 0 : n;
+  }
+  let n = parseFloat(m[1]);
+  if (Number.isNaN(n)) return 0;
+  const suffix = (m[2] || '').toUpperCase();
+  if (suffix === 'K') n *= 1000;
+  else if (suffix === 'M') n *= 1_000_000;
+  else if (suffix === 'B') n *= 1_000_000_000;
+  return Math.round(n);
+};
+
+const parseSerpTotalResults = (val) => {
+  if (val == null) return 0;
+  if (typeof val === 'number') return val;
+  return parseMetricNumber(val);
+};
+
 const formatCount = (n) => {
-  const num = Number(n);
+  const num = typeof n === 'string' ? parseMetricNumber(n) : Number(n);
   if (!num || Number.isNaN(num)) return 'N/A';
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
-  if (num >= 1_000) return `${Math.round(num / 1_000)}K`;
+  if (num >= 10_000) return `${Math.round(num / 1000)}K`;
+  if (num >= 1_000) return `${(num / 1000).toFixed(1)}K`;
   return String(Math.round(num));
+};
+
+const isInstagramUsername = (keyword) => /^@?[a-zA-Z0-9._]{2,30}$/.test(String(keyword || '').replace(/^@/, '').trim());
+
+const buildSearchMetrics = ({ analyzedCount, reportedTotal, label, followers, note, estimatedTotal }) => {
+  const analyzed = Math.max(0, Number(analyzedCount) || 0);
+  const reported = parseSerpTotalResults(reportedTotal);
+  const useAnalyzed =
+    !reported ||
+    analyzed === 0 ||
+    (reported > analyzed * 50 && analyzed <= 25);
+  return {
+    totalPosts: formatCount(useAnalyzed ? analyzed : reported),
+    totalPostsLabel: useAnalyzed ? (label || 'Results analyzed') : 'Total matches',
+    postsAnalyzed: analyzed,
+    estimatedTotal: estimatedTotal || (useAnalyzed && reported > analyzed ? formatCount(reported) : null),
+    totalFollowers: followers != null && followers !== '' ? formatCount(followers) : null,
+    metricsNote: note || null,
+  };
 };
 
 const decodeBearer = (raw) => {
@@ -112,35 +158,35 @@ const searchTwitter = async (keyword) => {
     };
   });
 
+  const metrics = buildSearchMetrics({
+    analyzedCount: topPosts.length,
+    reportedTotal: meta.result_count,
+    label: 'Tweets analyzed',
+    note: meta.result_count
+      ? `X API estimate: ~${formatCount(meta.result_count)} matching tweets (sample of ${topPosts.length} shown)`
+      : null,
+  });
   return {
     source: 'twitter',
-    totalPosts: formatCount(meta.result_count),
     avgEngagement: topPosts.length ? calcAvgEngagement(topPosts) : 'N/A',
     topPosts,
+    ...metrics,
   };
 };
 
 const calcAvgEngagement = (posts) => {
-  const parse = (s) => {
-    if (!s || s === 'N/A') return 0;
-    const m = String(s).replace(/,/g, '').match(/([\d.]+)([KMB])?/i);
-    if (!m) return 0;
-    let n = parseFloat(m[1]);
-    if (m[2]?.toUpperCase() === 'K') n *= 1000;
-    if (m[2]?.toUpperCase() === 'M') n *= 1_000_000;
-    if (m[2]?.toUpperCase() === 'B') n *= 1_000_000_000;
-    return n;
-  };
-  // Only count posts that have at least one real engagement metric
   const postsWithData = posts.filter((p) =>
-    (p.likes && p.likes !== 'N/A') ||
-    (p.comments && p.comments !== 'N/A') ||
-    (p.views && p.views !== 'N/A') ||
-    (p.shares && p.shares !== 'N/A')
+    parseMetricNumber(p.likes) > 0 ||
+    parseMetricNumber(p.comments) > 0 ||
+    parseMetricNumber(p.views) > 0 ||
+    parseMetricNumber(p.shares) > 0
   );
   if (!postsWithData.length) return 'N/A';
   const totals = postsWithData.map((p) =>
-    parse(p.likes) + parse(p.comments) + parse(p.shares) + parse(p.views) * 0.01
+    parseMetricNumber(p.likes) +
+    parseMetricNumber(p.comments) +
+    parseMetricNumber(p.shares) +
+    parseMetricNumber(p.views) * 0.01
   );
   const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
   return avg > 0 ? formatCount(Math.round(avg)) : 'N/A';
@@ -201,11 +247,67 @@ const searchReddit = async (keyword) => {
     shares: 'N/A',
   }));
 
+  const dist = r.data?.data?.dist || children.length;
+  const metrics = buildSearchMetrics({
+    analyzedCount: topPosts.length,
+    reportedTotal: dist,
+    label: 'Posts analyzed',
+    note: `Reddit search sample (${topPosts.length} posts)`,
+  });
   return {
     source: 'reddit',
-    totalPosts: formatCount(r.data?.data?.dist || children.length),
     avgEngagement: topPosts.length ? calcAvgEngagement(topPosts) : 'N/A',
     topPosts,
+    ...metrics,
+  };
+};
+
+const mapInstagramSerpPosts = (rawPosts, username) =>
+  (rawPosts || []).slice(0, 10).map((m) => ({
+    title: (m.caption || m.title || m.description || 'Instagram post').slice(0, 200),
+    source: m.username ? `@${m.username}` : `@${username}`,
+    url: m.link || m.permalink || '',
+    description: m.media_type || m.type || '',
+    publishedAt: m.date || (m.timestamp ? new Date(m.timestamp).toLocaleDateString() : ''),
+    likes: formatCount(m.likes ?? m.like_count),
+    comments: formatCount(m.comments ?? m.comments_count),
+    views: m.views ? formatCount(parseMetricNumber(m.views)) : 'N/A',
+    shares: 'N/A',
+    thumbnail: m.thumbnail || m.display_url || '',
+  }));
+
+const searchInstagramProfile = async (username) => {
+  const user = String(username).replace(/^@/, '').trim();
+  const data = await serpSearch({ engine: 'instagram_profile', username: user });
+  const followers =
+    data.followers ??
+    data.follower_count ??
+    data.user?.edge_followed_by?.count ??
+    data.user?.followers;
+  const postsCount =
+    data.posts_count ??
+    data.media_count ??
+    data.user?.edge_owner_to_timeline_media?.count;
+  const rawPosts = data.posts || data.latest_posts || data.recent_posts || [];
+  const topPosts = mapInstagramSerpPosts(rawPosts, user);
+  if (!topPosts.length) {
+    throw new Error(`No public Instagram posts found for @${user}`);
+  }
+  const metrics = buildSearchMetrics({
+    analyzedCount: topPosts.length,
+    reportedTotal: postsCount,
+    label: 'Posts analyzed',
+    followers,
+    note: followers != null
+      ? `Public profile @${user} — followers from live profile data`
+      : `Public profile @${user} — post sample only`,
+  });
+  return {
+    source: 'serpapi-instagram-profile',
+    profileUsername: user,
+    avgEngagement: calcAvgEngagement(topPosts),
+    topPosts,
+    ...metrics,
   };
 };
 
@@ -241,6 +343,7 @@ const searchInstagram = async (keyword) => {
     return {
       source: 'instagram',
       totalPosts: '0',
+      totalPostsLabel: 'Hashtag posts',
       avgEngagement: 'N/A',
       topPosts: [],
       warnings: [`No Instagram hashtag found for "${tag}"`],
@@ -269,12 +372,23 @@ const searchInstagram = async (keyword) => {
     shares: 'N/A',
   }));
 
+  const metrics = buildSearchMetrics({
+    analyzedCount: topPosts.length,
+    reportedTotal: media.length,
+    label: 'Hashtag posts analyzed',
+    note: `Instagram hashtag #${tag} (API returns recent media sample)`,
+  });
   return {
     source: 'instagram',
-    totalPosts: formatCount(media.length),
     avgEngagement: topPosts.length ? calcAvgEngagement(topPosts) : 'N/A',
     topPosts,
+    ...metrics,
   };
+};
+
+const extensionLooksLikeMetric = (ext) => {
+  if (!ext || typeof ext !== 'string') return false;
+  return /[\d.,]+\s*[KMB]?|\d+\s*(likes?|views?|comments?)/i.test(ext);
 };
 
 const mapSerpOrganic = (items) =>
@@ -284,9 +398,9 @@ const mapSerpOrganic = (items) =>
     url: r.link || '',
     description: r.snippet || r.description || '',
     publishedAt: r.date || '',
-    likes: r.extensions?.[0] || 'N/A',
+    likes: extensionLooksLikeMetric(r.extensions?.[0]) ? formatCount(parseMetricNumber(r.extensions[0])) : 'N/A',
     comments: 'N/A',
-    views: r.views ? formatCount(parseInt(String(r.views).replace(/\D/g, ''), 10)) : 'N/A',
+    views: r.views ? formatCount(parseMetricNumber(r.views)) : 'N/A',
     shares: 'N/A',
   }));
 
@@ -348,11 +462,17 @@ const searchSerpPlatform = async (keyword, platform) => {
             };
           });
           const totalResults = searchRes.data?.pageInfo?.totalResults || items.length;
+          const metrics = buildSearchMetrics({
+            analyzedCount: topPosts.length,
+            reportedTotal: totalResults,
+            label: 'Videos analyzed',
+            note: `YouTube reports ~${formatCount(totalResults)} matching videos`,
+          });
           return {
             source: 'youtube-api',
-            totalPosts: formatCount(totalResults),
             avgEngagement: calcAvgEngagement(topPosts),
             topPosts,
+            ...metrics,
           };
         }
       } catch (ytErr) {
@@ -369,10 +489,16 @@ const searchSerpPlatform = async (keyword, platform) => {
       description: v.description || '',
       publishedAt: v.published_date || '',
       likes: 'N/A', comments: 'N/A',
-      views: v.views ? formatCount(parseInt(String(v.views).replace(/,/g, ''), 10)) : 'N/A',
+      views: v.views ? formatCount(parseMetricNumber(v.views)) : 'N/A',
       shares: 'N/A',
     }));
-    return { source: 'serpapi-youtube', totalPosts: formatCount(videos.length), avgEngagement: calcAvgEngagement(topPosts), topPosts };
+    const metrics = buildSearchMetrics({
+      analyzedCount: topPosts.length,
+      reportedTotal: videos.length,
+      label: 'Videos analyzed',
+      note: 'SerpAPI YouTube sample (top results)',
+    });
+    return { source: 'serpapi-youtube', avgEngagement: calcAvgEngagement(topPosts), topPosts, ...metrics };
   }
 
   if (platform === 'news') {
@@ -392,12 +518,26 @@ const searchSerpPlatform = async (keyword, platform) => {
       publishedAt: n.date || '',
       likes: 'N/A', comments: 'N/A', views: 'N/A', shares: 'N/A',
     }));
+    const metrics = buildSearchMetrics({
+      analyzedCount: topPosts.length,
+      reportedTotal: finalItems.length,
+      label: 'Articles analyzed',
+      note: 'News articles matching keyword (sample)',
+    });
     return {
       source: 'serpapi-news',
-      totalPosts: formatCount(finalItems.length),
       avgEngagement: 'N/A',
       topPosts,
+      ...metrics,
     };
+  }
+
+  if (platform === 'instagram' && isInstagramUsername(keyword)) {
+    try {
+      return await searchInstagramProfile(keyword);
+    } catch (profileErr) {
+      console.warn('[Instagram profile]', profileErr.message);
+    }
   }
 
   const site = siteMap[platform];
@@ -405,13 +545,20 @@ const searchSerpPlatform = async (keyword, platform) => {
   const data = await serpSearch({ engine: 'google', q, gl: 'in', hl: 'en', num: 10 });
   const organic = [...(data.organic_results || []), ...(data.perspectives || [])];
   const topPosts = mapSerpOrganic(organic);
-  const total = data.search_information?.total_results;
-
+  const webTotal = parseSerpTotalResults(data.search_information?.total_results);
+  const metrics = buildSearchMetrics({
+    analyzedCount: topPosts.length,
+    reportedTotal: webTotal,
+    label: 'Results analyzed',
+    note: platform === 'instagram'
+      ? 'Web mentions on Instagram — not total profile posts. Use @username for follower count.'
+      : 'Google web search sample — not platform-native post totals',
+  });
   return {
     source: 'serpapi',
-    totalPosts: formatCount(total),
     avgEngagement: topPosts.length ? calcAvgEngagement(topPosts) : 'N/A',
     topPosts,
+    ...metrics,
   };
 };
 
@@ -437,7 +584,13 @@ const searchKeyword = async (keyword, platform = 'news') => {
   if (platform === 'twitter' || platform === 'x') {
     result = await tryProvider('Twitter', () => searchTwitter(keyword));
   } else if (platform === 'instagram') {
-    result = await tryProvider('Instagram', () => searchInstagram(keyword));
+    const cleaned = keyword.replace(/^@/, '').trim();
+    if (isInstagramUsername(cleaned)) {
+      result = await tryProvider('Instagram Profile', () => searchInstagramProfile(cleaned));
+    }
+    if (!result && keyword.startsWith('#')) {
+      result = await tryProvider('Instagram Hashtag', () => searchInstagram(keyword));
+    }
     if (!result) result = await tryProvider('SerpAPI', () => searchSerpPlatform(keyword, platform));
   } else if (platform === 'reddit') {
     result = await tryProvider('Reddit', () => searchReddit(keyword));
@@ -448,19 +601,21 @@ const searchKeyword = async (keyword, platform = 'news') => {
     if (!result) result = await tryProvider('NewsAPI', async () => {
       const data = await searchNewsApi(keyword);
       const articles = data.articles || [];
-      return {
-        source: 'newsapi',
-        totalPosts: formatCount(data.totalResults),
-        avgEngagement: 'N/A',
-        topPosts: articles.map((a) => ({
+      const topPosts = articles.slice(0, 10).map((a) => ({
           title: a.title || 'Article',
           source: a.source?.name || '',
           url: a.url || '',
           description: a.description || '',
           publishedAt: a.publishedAt ? new Date(a.publishedAt).toLocaleDateString() : '',
           likes: 'N/A', comments: 'N/A', views: 'N/A', shares: 'N/A',
-        })),
-      };
+        }));
+      const metrics = buildSearchMetrics({
+        analyzedCount: topPosts.length,
+        reportedTotal: data.totalResults,
+        label: 'Articles analyzed',
+        note: 'NewsAPI article sample',
+      });
+      return { source: 'newsapi', avgEngagement: 'N/A', topPosts, ...metrics };
     });
   } else if (['youtube', 'facebook', 'quora', 'blog', 'forum', 'articles', 'reviews', 'post', 'comment', 'trend'].includes(platform)) {
     result = await tryProvider('SerpAPI', () => searchSerpPlatform(keyword, platform));
@@ -476,6 +631,12 @@ const searchKeyword = async (keyword, platform = 'news') => {
   return {
     results: {
       totalPosts: result.totalPosts,
+      totalPostsLabel: result.totalPostsLabel,
+      totalFollowers: result.totalFollowers,
+      postsAnalyzed: result.postsAnalyzed,
+      estimatedTotal: result.estimatedTotal,
+      metricsNote: result.metricsNote,
+      profileUsername: result.profileUsername,
       avgEngagement: result.avgEngagement,
       topPosts: result.topPosts,
     },
@@ -559,6 +720,19 @@ const fetchTrends = async (geo = 'IN') => {
 const buildSentimentContext = async (keyword) => {
   const chunks = [];
   const errors = [];
+  const cleaned = String(keyword).replace(/^@/, '').trim();
+
+  if (isInstagramUsername(cleaned)) {
+    try {
+      const profile = await searchInstagramProfile(cleaned);
+      if (profile.totalFollowers && profile.totalFollowers !== 'N/A') {
+        chunks.push(`Instagram profile @${cleaned} has ${profile.totalFollowers} followers.`);
+      }
+      chunks.push(...profile.topPosts.map((p) => `${p.title}. ${p.description || ''}`));
+    } catch (e) {
+      errors.push(`Instagram profile: ${e.message}`);
+    }
+  }
 
   try {
     const data = await serpSearch({ engine: 'google', q: keyword, gl: 'in', num: 8 });
