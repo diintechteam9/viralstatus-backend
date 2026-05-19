@@ -44,6 +44,129 @@ const formatCount = (n) => {
 
 const isInstagramUsername = (keyword) => /^@?[a-zA-Z0-9._]{2,30}$/.test(String(keyword || '').replace(/^@/, '').trim());
 
+const IG_PATH_SKIP = new Set([
+  'p', 'reel', 'reels', 'stories', 'explore', 'accounts', 'direct', 'tv', 'about', 'legal',
+]);
+
+const extractInstagramHandleFromUrl = (url) => {
+  if (!url) return null;
+  const m = String(url).match(/instagram\.com\/([a-zA-Z0-9._]+)/i);
+  if (!m) return null;
+  const handle = m[1].toLowerCase();
+  if (IG_PATH_SKIP.has(handle)) return null;
+  return handle;
+};
+
+const brandKeywordBase = (keyword) =>
+  String(keyword || '').replace(/^@/, '').trim().toLowerCase().replace(/\s+/g, '');
+
+const isExactBrandKeyword = (keyword, handle) => {
+  const base = brandKeywordBase(keyword);
+  return base.length >= 2 && handle.toLowerCase() === base;
+};
+
+const scoreInstagramHandle = (handle, keyword, mentionCount = 0) => {
+  const base = brandKeywordBase(keyword);
+  const h = handle.toLowerCase();
+  let score = mentionCount * 10;
+  if (base && h.includes(base)) score += 12;
+  if (h === `${base}team` || h === `${base}official`) score += 25;
+  if (h.endsWith('team') || h.endsWith('official')) score += 10;
+  if (h.length > base.length && h.startsWith(base)) score += 8;
+  // Bare "aitota" often a personal account; prefer aitotateam when searching brand "Aitota"
+  if (isExactBrandKeyword(keyword, h) && base.length >= 4) score -= 6;
+  return score;
+};
+
+const countHandleMentions = (organic) => {
+  const counts = {};
+  for (const r of organic || []) {
+    const h = extractInstagramHandleFromUrl(r.link);
+    if (h) counts[h] = (counts[h] || 0) + 1;
+    const blob = `${r.title || ''} ${r.snippet || ''}`;
+    (blob.match(/@([a-zA-Z0-9._]{2,30})/g) || []).forEach((tag) => {
+      const u = tag.slice(1).toLowerCase();
+      if (isValidInstagramHandle(u)) counts[u] = (counts[u] || 0) + 1;
+    });
+  }
+  return counts;
+};
+
+const rankBrandHandles = (handles, keyword, mentionCounts) => {
+  const unique = [...new Set(handles.filter(isValidInstagramHandle))];
+  return unique.sort(
+    (a, b) =>
+      scoreInstagramHandle(b, keyword, mentionCounts[b] || 0) -
+      scoreInstagramHandle(a, keyword, mentionCounts[a] || 0)
+  );
+};
+
+const isValidInstagramHandle = (handle) => {
+  const h = String(handle || '').toLowerCase().trim();
+  if (h.length < 2 || h.length > 30) return false;
+  if (!/^[a-z0-9][a-z0-9._]*[a-z0-9]$/.test(h) && !/^[a-z0-9]{2,}$/.test(h)) return false;
+  if (/^[._]|[._]$|\.\.|__/.test(h)) return false;
+  return true;
+};
+
+const brandHandleCandidates = (keyword) => {
+  const base = brandKeywordBase(keyword);
+  if (!base || base.length < 2) return [];
+  // Brand variants BEFORE bare handle (avoids wrong personal @aitota for brand "Aitota")
+  const variants = [
+    `${base}team`,
+    `${base}official`,
+    `${base}india`,
+    `${base}hq`,
+    `${base}global`,
+    base,
+  ];
+  return [...new Set(variants.filter(isValidInstagramHandle))];
+};
+
+/** Find likely @handle for a brand (e.g. Aitota → aitotateam) via Google + result URLs */
+const discoverInstagramHandles = async (keyword) => {
+  const data = await serpSearch({
+    engine: 'google',
+    q: `${keyword} site:instagram.com`,
+    gl: 'in',
+    hl: 'en',
+    num: 10,
+  });
+  const counts = {};
+  const bump = (handle, weight = 1) => {
+    if (!isValidInstagramHandle(handle)) return;
+    counts[handle] = (counts[handle] || 0) + weight;
+  };
+
+  for (const r of data.organic_results || []) {
+    bump(extractInstagramHandleFromUrl(r.link), 3);
+    const blob = `${r.title || ''} ${r.snippet || ''} ${r.source || ''}`;
+    const atMatches = blob.match(/@([a-zA-Z0-9._]{2,30})/g) || [];
+    atMatches.forEach((tag) => {
+      const h = tag.slice(1).toLowerCase();
+      if (isValidInstagramHandle(h)) bump(h, 2);
+    });
+  }
+
+  return Object.keys(counts).sort(
+    (a, b) => scoreInstagramHandle(b, keyword, counts[b]) - scoreInstagramHandle(a, keyword, counts[a])
+  );
+};
+
+const mergeProfileIntoSerpResult = (serpResult, profile) => ({
+  ...serpResult,
+  source: profile.source || serpResult.source,
+  profileUsername: profile.profileUsername,
+  totalFollowers: profile.totalFollowers || serpResult.totalFollowers,
+  totalPosts: profile.totalPosts || serpResult.totalPosts,
+  totalPostsLabel: profile.totalPostsLabel || serpResult.totalPostsLabel,
+  metricsNote: profile.totalFollowers
+    ? `Brand search — followers from @${profile.profileUsername} (discovered from Instagram mentions)`
+    : serpResult.metricsNote,
+  avgEngagement: profile.avgEngagement !== 'N/A' ? profile.avgEngagement : serpResult.avgEngagement,
+});
+
 const buildSearchMetrics = ({ analyzedCount, reportedTotal, label, followers, note, estimatedTotal }) => {
   const analyzed = Math.max(0, Number(analyzedCount) || 0);
   const reported = parseSerpTotalResults(reportedTotal);
@@ -276,35 +399,245 @@ const mapInstagramSerpPosts = (rawPosts, username) =>
     thumbnail: m.thumbnail || m.display_url || '',
   }));
 
+const parseInstagramFollowers = (data) => {
+  const raw =
+    data?.followers ??
+    data?.follower_count ??
+    data?.followers_count ??
+    data?.user?.edge_followed_by?.count ??
+    data?.user?.followers ??
+    data?.profile?.followers ??
+    data?.profile?.follower_count ??
+    data?.ig_profile?.followers;
+  if (raw == null || raw === '') return null;
+  if (typeof raw === 'number') return raw;
+  const parsed = parseMetricNumber(String(raw).replace(/followers?/gi, '').trim());
+  return parsed > 0 ? parsed : null;
+};
+
+/** Parse "12.5K followers" / "1,234 Followers" from Google snippets */
+const extractFollowersFromSnippet = (text) => {
+  if (!text) return null;
+  const s = String(text);
+  const patterns = [
+    /([\d][\d.,]*\s*[KMB]?)\s+followers/i,
+    /followers?\s*[·:|\-]?\s*([\d][\d.,]*\s*[KMB]?)/i,
+    /([\d][\d.,]*[KMB]?)\s+Followers/i,
+  ];
+  for (const re of patterns) {
+    const m = s.match(re);
+    if (m) {
+      const n = parseMetricNumber(m[1].replace(/\s+/g, ''));
+      if (n > 0) return n;
+    }
+  }
+  return null;
+};
+
+const collectTextBlobsFromGoogle = (data) => {
+  const blobs = [];
+  if (data.knowledge_graph) {
+    blobs.push(JSON.stringify(data.knowledge_graph));
+  }
+  if (data.answer_box) {
+    blobs.push(data.answer_box.snippet, data.answer_box.answer, data.answer_box.title);
+  }
+  for (const r of data.organic_results || []) {
+    blobs.push(r.title, r.snippet, r.source, r.description);
+  }
+  return blobs.filter(Boolean);
+};
+
+const mapGoogleResultsToIgPosts = (organic, keyword) =>
+  (organic || []).slice(0, 10).map((r) => {
+    const handle = extractInstagramHandleFromUrl(r.link);
+    return {
+      title: r.title || 'Instagram mention',
+      source: handle ? `@${handle}` : (r.source || 'Instagram'),
+      url: r.link || '',
+      description: r.snippet || '',
+      publishedAt: r.date || '',
+      likes: 'N/A',
+      comments: 'N/A',
+      views: 'N/A',
+      shares: 'N/A',
+      thumbnail: r.thumbnail || '',
+    };
+  });
+
+/**
+ * SerpAPI has no instagram_profile engine (returns 400).
+ * Use Google search on instagram.com/{user} and parse follower counts from snippets.
+ */
+const fetchInstagramProfileMeta = async (username) => {
+  const user = String(username).replace(/^@/, '').trim().toLowerCase();
+  if (!isValidInstagramHandle(user)) {
+    throw new Error(`Invalid Instagram username @${user}`);
+  }
+
+  const data = await serpSearch({
+    engine: 'google',
+    q: `site:instagram.com/${user}`,
+    gl: 'in',
+    hl: 'en',
+    num: 8,
+  });
+
+  let followers = parseInstagramFollowers(data.knowledge_graph);
+  const blobs = collectTextBlobsFromGoogle(data);
+  if (!followers) {
+    for (const blob of blobs) {
+      followers = extractFollowersFromSnippet(blob);
+      if (followers) break;
+    }
+  }
+
+  const profileOrganic = (data.organic_results || []).filter(
+    (r) => extractInstagramHandleFromUrl(r.link) === user
+  );
+  let topPosts = mapGoogleResultsToIgPosts(profileOrganic, user);
+
+  if (!followers && topPosts.length) {
+    for (const p of topPosts) {
+      followers = extractFollowersFromSnippet(`${p.title} ${p.description}`);
+      if (followers) break;
+    }
+  }
+
+  if (!followers) {
+    try {
+      const extra = await serpSearch({
+        engine: 'google',
+        q: `"@${user}" instagram followers`,
+        gl: 'in',
+        hl: 'en',
+        num: 5,
+      });
+      for (const blob of collectTextBlobsFromGoogle(extra)) {
+        followers = extractFollowersFromSnippet(blob);
+        if (followers) break;
+      }
+    } catch (_) {}
+  }
+
+  return { user, followers, postsCount: null, topPosts, raw: data };
+};
+
 const searchInstagramProfile = async (username) => {
-  const user = String(username).replace(/^@/, '').trim();
-  const data = await serpSearch({ engine: 'instagram_profile', username: user });
-  const followers =
-    data.followers ??
-    data.follower_count ??
-    data.user?.edge_followed_by?.count ??
-    data.user?.followers;
-  const postsCount =
-    data.posts_count ??
-    data.media_count ??
-    data.user?.edge_owner_to_timeline_media?.count;
-  const rawPosts = data.posts || data.latest_posts || data.recent_posts || [];
-  const topPosts = mapInstagramSerpPosts(rawPosts, user);
-  if (!topPosts.length) {
-    throw new Error(`No public Instagram posts found for @${user}`);
+  const { user, followers, postsCount, topPosts } = await fetchInstagramProfileMeta(username);
+  if (!topPosts.length && !followers) {
+    throw new Error(`No public Instagram profile data for @${user}`);
   }
   const metrics = buildSearchMetrics({
-    analyzedCount: topPosts.length,
+    analyzedCount: topPosts.length || 1,
     reportedTotal: postsCount,
-    label: 'Posts analyzed',
+    label: topPosts.length ? 'Posts analyzed' : 'Profile found',
     followers,
     note: followers != null
-      ? `Public profile @${user} — followers from live profile data`
-      : `Public profile @${user} — post sample only`,
+      ? `Public profile @${user} — ${formatCount(followers)} followers`
+      : `Public profile @${user}`,
   });
   return {
-    source: 'serpapi-instagram-profile',
+    source: 'serpapi-google-profile',
     profileUsername: user,
+    avgEngagement: topPosts.length ? calcAvgEngagement(topPosts) : 'N/A',
+    topPosts: topPosts.length ? topPosts : [],
+    ...metrics,
+  };
+};
+
+/** Pick official brand account — highest followers among ranked handles (not first match) */
+const pickBestInstagramProfile = async (handles, keyword, mentionCounts) => {
+  const ranked = rankBrandHandles(handles, keyword, mentionCounts).slice(0, 6);
+  const profiles = [];
+
+  for (const handle of ranked) {
+    try {
+      const meta = await fetchInstagramProfileMeta(handle);
+      profiles.push({
+        ...meta,
+        mentionScore: mentionCounts[meta.user] || 0,
+        rankScore: scoreInstagramHandle(meta.user, keyword, mentionCounts[meta.user] || 0),
+      });
+    } catch (err) {
+      console.warn(`[IG @${handle}]`, err.message);
+    }
+  }
+
+  if (!profiles.length) return null;
+
+  profiles.sort((a, b) => {
+    const fa = a.followers || 0;
+    const fb = b.followers || 0;
+    if (fb !== fa) return fb - fa;
+    if (b.mentionScore !== a.mentionScore) return b.mentionScore - a.mentionScore;
+    return b.rankScore - a.rankScore;
+  });
+
+  const best = profiles[0];
+  const base = brandKeywordBase(keyword);
+  if (
+    profiles.length > 1 &&
+    isExactBrandKeyword(keyword, best.user) &&
+    (best.followers || 0) < 500
+  ) {
+    const alt = profiles.find(
+      (p) => p.user !== best.user && p.user.startsWith(base) && (p.followers || 0) > (best.followers || 0)
+    );
+    if (alt) return alt;
+  }
+
+  return best;
+};
+
+/** Brand name search: web posts + best-matching @handle (e.g. Aitota → @aitotateam) */
+const searchInstagramBrand = async (keyword) => {
+  const data = await serpSearch({
+    engine: 'google',
+    q: `${keyword} site:instagram.com`,
+    gl: 'in',
+    hl: 'en',
+    num: 10,
+  });
+  const organic = data.organic_results || [];
+  const mentionCounts = countHandleMentions(organic);
+  let topPosts = mapGoogleResultsToIgPosts(organic, keyword);
+
+  const discovered = await discoverInstagramHandles(keyword);
+  const handles = [...discovered, ...brandHandleCandidates(keyword)];
+  const bestProfile = await pickBestInstagramProfile(handles, keyword, mentionCounts);
+
+  const profileUsername = bestProfile?.user || null;
+  const followers = bestProfile?.followers || null;
+
+  if (profileUsername) {
+    const brandPosts = topPosts.filter(
+      (p) =>
+        p.url?.includes(`instagram.com/${profileUsername}`) ||
+        p.source?.toLowerCase() === `@${profileUsername}`
+    );
+    const otherPosts = topPosts.filter((p) => !brandPosts.includes(p));
+    topPosts = [...brandPosts, ...otherPosts].slice(0, 10);
+  }
+
+  if (!topPosts.length) {
+    throw new Error(`No Instagram results found for "${keyword}"`);
+  }
+
+  const webTotal = parseSerpTotalResults(data.search_information?.total_results);
+  const metrics = buildSearchMetrics({
+    analyzedCount: topPosts.length,
+    reportedTotal: webTotal,
+    label: 'Posts analyzed',
+    followers,
+    note: followers
+      ? `Brand "${keyword}" → official @${profileUsername} (${formatCount(followers)} followers, ${topPosts.length} mentions)`
+      : `Instagram mentions for "${keyword}" — use @aitotateam for exact profile`,
+  });
+
+  return {
+    source: followers ? 'serpapi-google-profile' : 'serpapi',
+    profileUsername,
     avgEngagement: calcAvgEngagement(topPosts),
     topPosts,
     ...metrics,
@@ -569,7 +902,7 @@ const searchKeyword = async (keyword, platform = 'news') => {
   const tryProvider = async (name, fn) => {
     try {
       const result = await fn();
-      if (result?.topPosts?.length) return result;
+      if (result?.topPosts?.length || result?.totalFollowers) return result;
       if (result?.warnings?.length) warnings.push(...result.warnings);
       errors.push(`${name}: no results`);
       return null;
@@ -585,13 +918,45 @@ const searchKeyword = async (keyword, platform = 'news') => {
     result = await tryProvider('Twitter', () => searchTwitter(keyword));
   } else if (platform === 'instagram') {
     const cleaned = keyword.replace(/^@/, '').trim();
-    if (isInstagramUsername(cleaned)) {
-      result = await tryProvider('Instagram Profile', () => searchInstagramProfile(cleaned));
-    }
-    if (!result && keyword.startsWith('#')) {
+    const isHashtag = keyword.trim().startsWith('#');
+    const tryIgProfile = (handle) =>
+      tryProvider(`Instagram @${handle}`, () => searchInstagramProfile(handle));
+
+    if (isHashtag) {
       result = await tryProvider('Instagram Hashtag', () => searchInstagram(keyword));
+    } else {
+      const brandResult = await tryProvider('Instagram Brand', () => searchInstagramBrand(keyword));
+      let graphResult = null;
+      if (process.env.INSTAGRAM_ACCESS_TOKEN) {
+        graphResult = await tryProvider('Instagram Graph', () => searchInstagram(keyword));
+      }
+      if (brandResult && graphResult) {
+        result = {
+          ...brandResult,
+          source: 'instagram+google',
+          topPosts:
+            graphResult.topPosts?.length >= (brandResult.topPosts?.length || 0)
+              ? graphResult.topPosts
+              : brandResult.topPosts,
+          avgEngagement:
+            graphResult.avgEngagement !== 'N/A'
+              ? graphResult.avgEngagement
+              : brandResult.avgEngagement,
+          totalFollowers: brandResult.totalFollowers,
+          profileUsername: brandResult.profileUsername,
+          metricsNote: brandResult.metricsNote,
+        };
+      } else {
+        result = brandResult || graphResult;
+      }
+      if (!result && isInstagramUsername(cleaned)) {
+        result = await tryIgProfile(cleaned);
+      }
     }
-    if (!result) result = await tryProvider('SerpAPI', () => searchSerpPlatform(keyword, platform));
+
+    if (!result) {
+      result = await tryProvider('SerpAPI', () => searchSerpPlatform(keyword, platform));
+    }
   } else if (platform === 'reddit') {
     result = await tryProvider('Reddit', () => searchReddit(keyword));
     if (!result) result = await tryProvider('SerpAPI', () => searchSerpPlatform(keyword, platform));
