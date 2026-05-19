@@ -29,7 +29,13 @@ Social Sensing / AI (agar use ho):
 ## 3. Public URL
 
 - **Settings → Networking → Generate Domain** (HTTPS).
-- Frontend `VITE_BACKEND_URL` / production config me is Railway URL ko set karo (ya same domain reverse proxy).
+- Frontend env me **poora URL** lagao (protocol zaroori):
+
+```env
+VITE_BACKEND_URL=https://viralstatus-backend-production.up.railway.app
+```
+
+Galat (405 / login fail): `viralstatus-backend-production.up.railway.app` — bina `https://` ke browser request frontend par bhej deta hai.
 
 ## 4. Health check
 
