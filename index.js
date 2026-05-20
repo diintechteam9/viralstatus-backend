@@ -187,6 +187,8 @@ app.use(cors({
             "https://vs.yovoai.com",
             "https://vs.yovoai.com/",
             "https://www.yovoai.com",
+            "https://myaiads.diintech.com",
+            "https://myaiads.diintech.com/",
             "http://localhost:5173",
             "http://localhost:4000",
             "http://13.200.235.104:4000"
