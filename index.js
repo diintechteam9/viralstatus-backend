@@ -189,6 +189,8 @@ app.use(cors({
             "https://www.yovoai.com",
             "https://myaiads.diintech.com",
             "https://myaiads.diintech.com/",
+            "https://viralstatus-backend-production.up.railway.app",
+            "https://viralstatus-backend-production.up.railway.app/",
             "http://localhost:5173",
             "http://localhost:4000",
             "http://13.200.235.104:4000"

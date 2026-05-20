@@ -2,7 +2,7 @@ const videoJobService = require('../../services/videoJobService');
 
 /**
  * Create a new async video generation job
- * POST /api/videocard/generate-finalvideo-async by krishna 
+ * POST /api/videocard/generate-finalvideo-async 
  */
 const createAsyncVideoJob = async (req, res) => {
   try {
