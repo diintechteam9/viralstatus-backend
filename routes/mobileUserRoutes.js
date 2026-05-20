@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const {
+  getMobileAppConfig,
   step1SendEmailOtp,
   step1VerifyEmailOtp,
   step2SendMobileOtp,
@@ -38,6 +39,9 @@ const upload = multer({
     else cb(new Error('Invalid file type. Allowed: jpeg, png, webp'), false);
   },
 });
+
+// App config (public) — default CLI code for Flutter / mobile
+router.get('/app-config', getMobileAppConfig);
 
 // Registration Steps
 router.post('/register/step1', step1SendEmailOtp);

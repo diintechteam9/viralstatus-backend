@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const MobileUser = require('../models/MobileUser');
 const Client = require('../models/client');
 const bcrypt = require('bcryptjs');
@@ -47,14 +48,85 @@ const generateToken = (user, client) =>
     { expiresIn: '7d' }
   );
 
-// Validate clientId (CLI-XXXXXX format)
-const validateClientId = async (clientCode) => {
-  if (!clientCode) throw new Error('clientId is required');
-  const client = await Client.findOne({ clientId: clientCode.toUpperCase() });
-  if (!client) throw new Error('Invalid Client ID');
-  if (!client.isActive) throw new Error('Client account is inactive');
+const CLIENT_CODE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+const generateClientCode = async () => {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const code =
+      'CLI-' +
+      Array.from({ length: 6 }, () => CLIENT_CODE_CHARS[Math.floor(Math.random() * CLIENT_CODE_CHARS.length)]).join('');
+    const exists = await Client.findOne({ clientId: code });
+    if (!exists) return code;
+  }
+  throw new Error('Could not generate unique Client ID');
+};
+
+/** Legacy clients may lack clientId — assign CLI-XXXXXX on first mobile use */
+const ensureClientCode = async (client) => {
+  if (!client) return client;
+  if (client.clientId) return client;
+  client.clientId = await generateClientCode();
+  await client.save();
+  console.log(`[mobile] Assigned ${client.clientId} to client ${client._id}`);
   return client;
 };
+
+/**
+ * Resolve tenant for mobile app registration/login.
+ * Accepts: CLI-XXXXXX, MongoDB ObjectId, or client email.
+ * Flutter apps often send ObjectId; web sends CLI code.
+ */
+const resolveClientForMobile = async (clientCode) => {
+  if (clientCode === undefined || clientCode === null || String(clientCode).trim() === '') {
+    throw new Error('clientId is required');
+  }
+
+  const raw = String(clientCode).trim();
+  let client = null;
+
+  // 1) Official code CLI-XXXXXX (case-insensitive)
+  const code = raw.toUpperCase();
+  if (code.startsWith('CLI-')) {
+    client = await Client.findOne({ clientId: code });
+  }
+
+  // 2) MongoDB _id (24-char hex) — common in mobile apps
+  if (!client && /^[a-fA-F0-9]{24}$/.test(raw) && mongoose.Types.ObjectId.isValid(raw)) {
+    client = await Client.findById(raw);
+  }
+
+  // 3) Client email
+  if (!client && raw.includes('@')) {
+    client = await Client.findOne({ email: raw.toLowerCase() });
+  }
+
+  // 4) Try code lookup even without CLI- prefix (normalized)
+  if (!client) {
+    client = await Client.findOne({ clientId: code });
+  }
+
+  // 5) Server default (same as web VITE_DEFAULT_CLIENT_ID)
+  const defaultCode = process.env.DEFAULT_MOBILE_CLIENT_ID || process.env.VITE_DEFAULT_CLIENT_ID;
+  if (!client && defaultCode) {
+    client = await Client.findOne({ clientId: String(defaultCode).trim().toUpperCase() });
+  }
+
+  if (!client) {
+    throw new Error(
+      `Invalid Client ID "${raw}". Use CLI-XXXXXX from admin (not MongoDB _id unless registered).`
+    );
+  }
+
+  client = await ensureClientCode(client);
+
+  if (client.isActive === false) {
+    throw new Error('Client account is inactive');
+  }
+
+  return client;
+};
+
+const validateClientId = resolveClientForMobile;
 
 // ─── Send Email OTP via Brevo ────────────────────────────────────────────────
 
@@ -118,6 +190,45 @@ const sendMobileOtp = async (mobile, otp, method = 'gupshup') => {
       console.error('WhatsApp API Error:', JSON.stringify(waError || waErr.message));
       throw new Error(`WhatsApp API Error: ${waError?.message || waError?.error_data?.details || waErr.message}`);
     }
+  }
+};
+
+// ─── Mobile app bootstrap (Flutter) — which CLI code to use ─────────────────
+
+const getMobileAppConfig = async (req, res) => {
+  try {
+    const docs = await Client.find({ isActive: { $ne: false } }).sort({ createdAt: -1 }).limit(100);
+    const clients = [];
+    for (const doc of docs) {
+      const c = await ensureClientCode(doc);
+      clients.push({
+        clientId: c.clientId,
+        businessName: c.businessName,
+        name: c.name,
+        email: c.email,
+        mongoId: String(c._id),
+      });
+    }
+
+    const envDefault = process.env.DEFAULT_MOBILE_CLIENT_ID || process.env.VITE_DEFAULT_CLIENT_ID || '';
+    let defaultClientId = envDefault ? String(envDefault).trim().toUpperCase() : '';
+    if (defaultClientId) {
+      try {
+        const resolved = await resolveClientForMobile(defaultClientId);
+        defaultClientId = resolved.clientId;
+      } catch {
+        defaultClientId = clients[0]?.clientId || '';
+      }
+    } else {
+      defaultClientId = clients[0]?.clientId || '';
+    }
+
+    res.json({
+      success: true,
+      data: { defaultClientId, clients },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -1021,6 +1132,7 @@ const getProfileImageReadUrl = async (req, res) => {
 };
 
 module.exports = {
+  getMobileAppConfig,
   step1SendEmailOtp,
   step1VerifyEmailOtp,
   step2SendMobileOtp,

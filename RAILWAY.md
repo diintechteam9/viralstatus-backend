@@ -17,6 +17,7 @@ Kam se kam:
 | Variable | Notes |
 |----------|--------|
 | `MONGO_URI` | MongoDB connection string (required) |
+| `DEFAULT_MOBILE_CLIENT_ID` | `CLI-XXXXXX` for YOHO Flutter app registration (e.g. `CLI-UOVNVD`) |
 | `JWT_SECRET` / session secrets | Production ke liye strong values |
 | `NODE_ENV` | `production` |
 | `FRONTEND_URL`, `BACKEND_URL` | Public frontend URL (CORS / redirects) |
