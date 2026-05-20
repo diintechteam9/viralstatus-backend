@@ -122,12 +122,10 @@ const verifyToken = async (req, res, next) => {
 
     const mobile = await MobileUser.findById(decoded.id).select('-password');
     if (mobile) {
-      const stableUserId =
-        mobile.googleId || mobile.firebaseUid || `mobile:${mobile._id.toString()}`;
       req.user = {
         id: mobile._id,
         email: mobile.email,
-        googleId: stableUserId,
+        googleId: mobile.googleId || null,
         userType: 'mobileuser',
         role: 'mobileuser',
       };

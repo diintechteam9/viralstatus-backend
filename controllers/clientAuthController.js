@@ -2,6 +2,23 @@ const Client = require('../models/client');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
+// GET /api/admin/get-client-token/:clientMongoId
+const getClientToken = async (req, res) => {
+  try {
+    const secret = req.headers['x-internal-secret'];
+    if (!secret || secret !== process.env.INTERNAL_API_SECRET) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    const client = await Client.findById(req.params.clientMongoId);
+    if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
+    if (!client.isActive) return res.status(403).json({ success: false, message: 'Client account is inactive' });
+    const token = generateToken(client);
+    res.json({ success: true, token });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 const generateToken = (client) =>
   jwt.sign(
     { id: client._id, clientId: client.clientId, role: 'client' },
@@ -94,4 +111,4 @@ const getClientProfile = async (req, res) => {
   }
 };
 
-module.exports = { registerClient, loginClient, getClientProfile };
+module.exports = { registerClient, loginClient, getClientProfile, getClientToken };

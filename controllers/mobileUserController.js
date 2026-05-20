@@ -111,10 +111,14 @@ const resolveClientForMobile = async (clientCode) => {
     client = await Client.findOne({ clientId: String(defaultCode).trim().toUpperCase() });
   }
 
+  // 6) Last resort — pick first active client from DB (prevents hard failure on misconfigured apps)
   if (!client) {
-    throw new Error(
-      `Invalid Client ID "${raw}". Use CLI-XXXXXX from admin (not MongoDB _id unless registered).`
-    );
+    console.warn(`[resolveClientForMobile] Could not resolve clientId "${raw}" — falling back to first active client`);
+    client = await Client.findOne({ isActive: { $ne: false } }).sort({ createdAt: 1 });
+  }
+
+  if (!client) {
+    throw new Error('Invalid Client ID. Please contact support.');
   }
 
   client = await ensureClientCode(client);
@@ -201,12 +205,10 @@ const getMobileAppConfig = async (req, res) => {
     const clients = [];
     for (const doc of docs) {
       const c = await ensureClientCode(doc);
+      // Do NOT expose email or mongoId — sensitive data
       clients.push({
         clientId: c.clientId,
-        businessName: c.businessName,
-        name: c.name,
-        email: c.email,
-        mongoId: String(c._id),
+        businessName: c.businessName || c.name || '',
       });
     }
 
@@ -262,7 +264,8 @@ const step1SendEmailOtp = async (req, res) => {
         registrationStep: 0,
       });
     } else {
-      user.password = hashedPassword;
+      // Only update password if a new one is explicitly provided (prevent silent overwrite)
+      if (password) user.password = hashedPassword;
       user.emailOtp = otp;
       user.emailOtpExpiry = otpExpiry();
       await user.save();
