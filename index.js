@@ -210,7 +210,8 @@ app.use(cors({
         "Origin",
         "Access-Control-Request-Method",
         "Access-Control-Request-Headers",
-        "x-client-id"
+        "x-client-id",
+        "x-internal-secret"
     ],
     exposedHeaders: ["Content-Range", "X-Content-Range"],
     maxAge: 86400, // 24 hours
@@ -228,7 +229,7 @@ app.use((req, res, next) => {
     if (req.method === 'OPTIONS') {
         res.header('Access-Control-Allow-Origin', req.headers.origin || 'https://viralstatus-frontend.vercel.app' || 'https://client.yovoai.com');
         res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, x-client-id');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, x-client-id, x-internal-secret');
         res.header('Access-Control-Allow-Credentials', 'true');
         res.status(200).end();
         return;
