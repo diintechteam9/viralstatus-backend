@@ -58,11 +58,19 @@ exports.saveReelMetadata = async (req, res) => {
     if (!poolId || !Array.isArray(reels) || reels.length === 0)
       return res.status(400).json({ success: false, error: 'poolId and reels array required' });
 
+    // Filter out already existing s3Keys to prevent duplicates
+    const existingKeys = await Reel.find({ s3Key: { $in: reels.map(r => r.s3Key) } }).select('s3Key');
+    const existingKeySet = new Set(existingKeys.map(r => r.s3Key));
+    const newReels = reels.filter(r => !existingKeySet.has(r.s3Key));
+
+    if (newReels.length === 0)
+      return res.json({ success: true, reels: [], count: 0, message: 'All reels already uploaded' });
+
     // Generate all signed GET URLs in parallel
-    const urlMap = await Promise.all(reels.map((r) => getobject(r.s3Key)));
+    const urlMap = await Promise.all(newReels.map((r) => getobject(r.s3Key)));
 
     // Bulk insert all reels at once
-    const docs = reels.map((r, i) => ({
+    const docs = newReels.map((r, i) => ({
       poolId,
       s3Key: r.s3Key,
       s3Url: urlMap[i],
