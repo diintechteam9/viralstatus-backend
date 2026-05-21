@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const poolController = require('../controllers/poolController');
 const reelController = require('../controllers/reelcontroller');
+const taskManagementController = require('../controllers/taskManagementController');
 const folderController = require('../controllers/poolFolderController');
 
 // ─── Static / specific routes FIRST (before any /:param routes) ───────────────
@@ -33,6 +34,17 @@ router.delete('/reels', reelController.deleteMultipleReels);
 
 // Approved credits
 router.post('/reels/approved/:campaignId', reelController.approveCreditsForUser);
+
+// Task management
+router.post('/task/accept', reelController.acceptTask);
+router.post('/task/reject', reelController.rejectTask);
+router.post('/task/bulk-assign', taskManagementController.bulkAssignTasks);
+router.post('/task/bulk-accept', taskManagementController.bulkAcceptTasks);
+router.post('/task/bulk-reject', taskManagementController.bulkRejectTasks);
+router.post('/task/cancel', taskManagementController.cancelTask);
+router.get('/task/timer-status/:taskId', taskManagementController.getTaskTimerStatus);
+router.get('/task/campaign/:campaignId', taskManagementController.getCampaignTasks);
+router.get('/shared/get/:userId', reelController.getSharedReelsForUser);
 
 // ─── Dynamic /:poolId routes ──────────────────────────────────────────────────
 

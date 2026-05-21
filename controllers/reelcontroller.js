@@ -438,6 +438,8 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
           duplicateReels.push(reel._id.toString());
           continue;
         }
+        const autoAccept = !!campaign.autoApproval;
+        const now = new Date();
         userReels.push({
           reelId: reel._id,
           s3Key: reel.s3Key,
@@ -448,9 +450,10 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
           title: reel.title || '',
           campaignImageKey: campaignImageKey,
           isTaskComplete: false,
-          isTaskAccepted: false,
-          TaskStatus: 'assigned',
-          createdAt: new Date()
+          isTaskAccepted: autoAccept,
+          TaskStatus: autoAccept ? 'accepted' : 'pending',
+          acceptedAt: autoAccept ? now : null,
+          createdAt: now,
         });
         assignedCount++;
       }
@@ -533,6 +536,14 @@ exports.getSharedReelsForUser = async (req, res) => {
         campaignImageKey: r.campaignImageKey || '',
         campaignImageUrl: r.campaignImageKey ? await getobject(r.campaignImageKey) : '',
         TaskStatus: r.TaskStatus || 'assigned',
+        isTaskAccepted: !!r.isTaskAccepted,
+        isTaskComplete: !!r.isTaskComplete,
+        acceptedAt: r.acceptedAt,
+        cancelledAt: r.cancelledAt,
+        penaltyApplied: !!r.penaltyApplied,
+        creditsPenalized: r.creditsPenalized || 0,
+        timerExpired: !!r.timerExpired,
+        cancellationReason: r.cancellationReason || '',
         _id: r._id,
         status: userRespEntry ? userRespEntry.status : 'pending',
         createdAt: r.createdAt,
@@ -814,6 +825,88 @@ exports.completeTaskStatus = async (req, res) => {
     });
   } catch (err) {
     console.error('Error updating TaskStatus:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Accept task - Update TaskStatus to 'accepted' and isTaskAccepted to true
+exports.acceptTask = async (req, res) => {
+  const { userId, reelId, campaignId } = req.body;
+  try {
+    if (!userId || !reelId) {
+      return res.status(400).json({ error: 'Missing userId or reelId' });
+    }
+    
+    // Find the user's SharedReels document
+    const sharedReels = await SharedReels.findOne({ googleId: userId });
+    if (!sharedReels) {
+      return res.status(404).json({ error: 'User shared reels not found' });
+    }
+    
+    // Find the specific reel and update status
+    const reelIndex = sharedReels.reels.findIndex(reel => 
+      reel.reelId.toString() === reelId && 
+      (campaignId ? reel.campaignId === campaignId : true)
+    );
+    
+    if (reelIndex === -1) {
+      return res.status(404).json({ error: 'Reel not found for this user' });
+    }
+    
+    sharedReels.reels[reelIndex].TaskStatus = 'accepted';
+    sharedReels.reels[reelIndex].isTaskAccepted = true;
+    if (!sharedReels.reels[reelIndex].acceptedAt) {
+      sharedReels.reels[reelIndex].acceptedAt = new Date();
+    }
+    await sharedReels.save();
+    
+    res.json({ 
+      success: true, 
+      message: 'Task accepted successfully',
+      updatedReel: sharedReels.reels[reelIndex]
+    });
+  } catch (err) {
+    console.error('Error accepting task:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Reject task - Update TaskStatus to 'rejected'
+exports.rejectTask = async (req, res) => {
+  const { userId, reelId, campaignId } = req.body;
+  try {
+    if (!userId || !reelId) {
+      return res.status(400).json({ error: 'Missing userId or reelId' });
+    }
+    
+    // Find the user's SharedReels document
+    const sharedReels = await SharedReels.findOne({ googleId: userId });
+    if (!sharedReels) {
+      return res.status(404).json({ error: 'User shared reels not found' });
+    }
+    
+    // Find the specific reel and update status
+    const reelIndex = sharedReels.reels.findIndex(reel => 
+      reel.reelId.toString() === reelId && 
+      (campaignId ? reel.campaignId === campaignId : true)
+    );
+    
+    if (reelIndex === -1) {
+      return res.status(404).json({ error: 'Reel not found for this user' });
+    }
+    
+    // Update task status to rejected
+    sharedReels.reels[reelIndex].TaskStatus = 'rejected';
+    sharedReels.reels[reelIndex].isTaskAccepted = false;
+    await sharedReels.save();
+    
+    res.json({ 
+      success: true, 
+      message: 'Task rejected successfully',
+      updatedReel: sharedReels.reels[reelIndex]
+    });
+  } catch (err) {
+    console.error('Error rejecting task:', err);
     res.status(500).json({ error: err.message });
   }
 };

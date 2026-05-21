@@ -102,6 +102,22 @@ const campaignSchema = new mongoose.Schema({
   category: {
     type: String,
     default: ''
+  },
+  autoApproval: {
+    type: Boolean,
+    default: false
+  },
+  cancellationPenalty: {
+    type: Number,
+    default: 2
+  },
+  penaltyThresholdMinutes: {
+    type: Number,
+    default: 30
+  },
+  allowCancellation: {
+    type: Boolean,
+    default: true
   }
 }, { timestamps: true });
 

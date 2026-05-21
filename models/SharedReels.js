@@ -46,15 +46,23 @@ const sharedReelsSchema = new mongoose.Schema({
         type: Boolean,
         default: false
       },
-      TaskStatus : {
+      TaskStatus: {
         type: String,
-        default: 'assigned'
+        default: 'assigned',
+        enum: ['assigned', 'pending', 'accepted', 'in_progress', 'completed', 'cancelled', 'rejected'],
       },
+      acceptedAt: { type: Date, default: null },
+      inProgressAt: { type: Date, default: null },
+      cancelledAt: { type: Date, default: null },
+      penaltyApplied: { type: Boolean, default: false },
+      creditsPenalized: { type: Number, default: 0 },
+      timerExpired: { type: Boolean, default: false },
+      cancellationReason: { type: String, default: '' },
       taskCode: {
         type: String,
         default: ''
       },
-      createdAt:{
+      createdAt: {
         type: Date,
         default: Date.now
       }
