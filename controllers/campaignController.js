@@ -12,6 +12,8 @@ const campaign = require('../models/campaign');
 const TelegramServiceController = require('./telegram/telegrambotalertcontroller');
 const telegramService = new TelegramServiceController();
 const TelegramSettings = require('../models/Settings');
+const telegramAlerts = require('../utils/telegramAlerts');
+const { resolveOneUserProfile } = require('../utils/resolveUserProfiles');
 
 /** Normalize client id for Campaign.clientId (MongoDB Client _id as string, or legacy). */
 async function resolveCampaignClientStorageId(raw) {
@@ -213,6 +215,13 @@ exports.createCampaign = [
         const settings = await TelegramSettings.findOne();
         const allow = !settings || settings.telegramAlertsEnabledOnCampaignStart !== false;
         if (allow) await telegramService.sendTextMessage(formatCampaignStartMessage(savedCampaign.toObject()));
+        // New: Campaign Create alert
+        await telegramAlerts.alertCampaignCreate({
+          campaignName: savedCampaign.campaignName,
+          clientName: savedCampaign.brandName,
+          credits: savedCampaign.credits,
+          cutoff: savedCampaign.cutoff,
+        });
       } catch (alertErr) { console.error('Telegram alert error:', alertErr); }
       res.json({ success: true, campaign: savedCampaign });
     } catch (err) {
@@ -404,8 +413,25 @@ exports.registeredCampaign = async (req, res) => {
       }
     }
     await reg.save();
-    // Sort registeredCampaigns by registeredAt descending (most recent first)
     reg.registeredCampaigns.sort((a, b) => new Date(b.registeredAt) - new Date(a.registeredAt));
+    const latest = reg.registeredCampaigns.find(
+      (c) => c.campaign && c.campaign._id.toString() === campaign._id.toString()
+    );
+    try {
+      const profile = await resolveOneUserProfile(userId);
+      await telegramAlerts.alertUserJoin({
+        userName: profile.name,
+        email: profile.email,
+        mobile: profile.mobile,
+        city: profile.city,
+        campaignName: campaign.campaignName,
+        brandName: campaign.brandName,
+        registeredAt: latest?.registeredAt || new Date(),
+        platform: 'YOHO Mobile App',
+      });
+    } catch (alertErr) {
+      console.error('[Telegram] campaign registration alert:', alertErr.message);
+    }
     res.json({ success: true, registeredCampaign: reg });
   } catch (err) {
     console.error('Register campaign error:', err);

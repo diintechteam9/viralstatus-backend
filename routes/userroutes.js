@@ -3,10 +3,14 @@ const { loginUser, registerUser} = require('../controllers/usercontroller');
 const router = express.Router();
 const User = require('../models/user');
 const MobileUser = require('../models/MobileUser');
+const { getParticipantInsights } = require('../controllers/participantInsightsController');
 
 router.post('/login', loginUser);
 
 router.post('/register', registerUser);
+
+// GET /api/user/participant-insights/:googleId?campaignId=...
+router.get('/participant-insights/:googleId', getParticipantInsights);
 
 // GET /api/user/by-googleid/:googleId — googleId OR MongoDB _id se dhundho
 router.get('/by-googleid/:googleId', async (req, res) => {

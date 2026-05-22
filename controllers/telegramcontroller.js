@@ -1,10 +1,12 @@
 const { Telegraf } = require('telegraf');
+const { getBotToken, getChatId } = require('../utils/telegramConfig');
 require('dotenv').config();
 
 class TelegramController {
   constructor() {
-    this.bot = new Telegraf(process.env.TELEGRAMBOT_API_KEY);
-    this.chatId = process.env.CHATID;
+    const token = getBotToken();
+    this.chatId = getChatId();
+    this.bot = token ? new Telegraf(token) : null;
   }
 
   // Validate video format and size

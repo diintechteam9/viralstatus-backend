@@ -1,10 +1,12 @@
 const { Telegraf } = require('telegraf');
+const { getBotToken, getChatId } = require('../../utils/telegramConfig');
 require('dotenv').config();
 
 class TelegramServiceController {
   constructor() {
-    this.bot = new Telegraf(process.env.TELEGRAMBOT_API_KEY);
-    this.chatId = process.env.CHATID;
+    const token = getBotToken();
+    this.chatId = getChatId();
+    this.bot = token ? new Telegraf(token) : null;
   }
 
 
@@ -15,9 +17,12 @@ class TelegramServiceController {
   async sendTextMessage(text) {
     try {
       if (!this.chatId) {
-        throw new Error('Chat ID not configured');
+        throw new Error('Chat ID not configured — set TELEGRAM_CHAT_ID or CHATID in .env');
       }
-      
+      if (!this.bot) {
+        throw new Error('Bot token not configured — set TELEGRAM_BOT_TOKEN or TELEGRAMBOT_API_KEY in .env');
+      }
+
       await this.bot.telegram.sendMessage(this.chatId, text, { parse_mode: 'HTML' });
       return { success: true, message: 'Text sent to Telegram successfully' };
     } catch (error) {

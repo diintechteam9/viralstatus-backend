@@ -1,14 +1,5 @@
-const mongoose = require('mongoose');
-
-const TelegramSettingsSchema = new mongoose.Schema(
-  {
-    telegramAlertsEnabledOnRegistration: { type: Boolean, default: true },
-    telegramAlertsEnabledOnProfileCreated: { type: Boolean, default: true },
-    telegramAlertsEnabledOnCampaignStart: { type: Boolean, default: true },
-  },
-  { timestamps: true }
-);
-
-module.exports = mongoose.model('TelegramSettings', TelegramSettingsSchema);
-
-
+/**
+ * @deprecated Use models/telegram/TelegramSettings.js directly.
+ * Re-export full schema so all alert toggles work (avoids duplicate Mongoose model conflict).
+ */
+module.exports = require('./telegram/TelegramSettings');

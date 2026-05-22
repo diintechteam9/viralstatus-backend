@@ -21,8 +21,9 @@ async function getYoutubeStats(videoId) {
       comments: stats.commentCount || '0',
     };
   } catch (error) {
-    console.error('YouTube API error for videoId', videoId, error);
-    return { views: '0', likes: '0', comments: '0' };
+    const msg = error.response?.data?.error?.message || error.message;
+    console.error('[YouTube API]', videoId, msg);
+    return { views: '0', likes: '0', comments: '0', error: msg };
   }
 }
 

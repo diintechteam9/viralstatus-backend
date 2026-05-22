@@ -1,5 +1,19 @@
 const dotenv = require("dotenv");
 dotenv.config();
+const { logConfigOnStartup } = require("./utils/telegramConfig");
+logConfigOnStartup();
+if (process.env.INSTAGRAM_USER_ID && !String(process.env.INSTAGRAM_USER_ID).startsWith('178414') && !process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID) {
+  console.warn(
+    '[Stats] INSTAGRAM_USER_ID is a Facebook user id — not used for /media. ' +
+    'Participant reels use RAPIDAPI_KEY. Optional: INSTAGRAM_BUSINESS_ACCOUNT_ID or INSTAGRAM_PAGE_ID for your brand posts.'
+  );
+}
+console.info(
+  '[Stats] APIs:',
+  process.env.YOUTUBE_API_KEY ? 'YouTube=ok' : 'YouTube=MISSING',
+  '|',
+  process.env.RAPIDAPI_KEY ? 'Instagram(RapidAPI)=ok' : 'Instagram(RapidAPI)=MISSING'
+);
 const express = require("express");
 const http = require('http');
 const cors = require("cors");
@@ -95,24 +109,10 @@ const {
 
 // ─── Auto Stats Cron ─────────────────────────────────────────────────────────
 const cron = require('node-cron');
-const getYoutubeStats = require('./utils/getYoutubeStats');
+const { getPostStats } = require('./utils/socialPostStats');
 const UserResponse = require('./models/userResponse');
-const Campaign = require('./models/campaign');
 
-function extractYoutubeId(url) {
-  if (!url) return null;
-  let m = url.match(/youtu\.be\/([\w-]{11})/);
-  if (m) return m[1];
-  m = url.match(/[?&]v=([\w-]{11})/);
-  if (m) return m[1];
-  m = url.match(/youtube\.com\/shorts\/([\w-]{11})/);
-  if (m) return m[1];
-  m = url.match(/youtube\.com\/embed\/([\w-]{11})/);
-  if (m) return m[1];
-  return null;
-}
-
-// Run every 6 hours — update views/likes/comments + auto-approve credits
+// Run every 6 hours — update views/likes/comments (YouTube + Instagram) + auto-approve credits
 cron.schedule('0 */6 * * *', async () => {
   try {
     console.log('[AutoStats] Starting stats update...');
@@ -122,27 +122,26 @@ cron.schedule('0 */6 * * *', async () => {
       let changed = false;
       for (const entry of doc.response) {
         if (!entry.urls) continue;
-        const videoId = extractYoutubeId(entry.urls);
-        if (!videoId) continue;
         try {
-          const stats = await getYoutubeStats(videoId);
-          const views = parseInt(stats.views || '0', 10);
-          const likes = parseInt(stats.likes || '0', 10);
-          const comments = parseInt(stats.comments || '0', 10);
-          entry.views = views;
-          entry.likes = likes;
-          entry.comments = comments;
-          // Auto-approve credits if views >= cutoff
-          if (!entry.isCreditAccepted && views >= (entry.cutoff || 0) && entry.cutoff > 0) {
+          const stats = await getPostStats(entry.urls);
+          entry.views = parseInt(stats.views || 0, 10);
+          entry.likes = parseInt(stats.likes || 0, 10);
+          entry.comments = parseInt(stats.comments || 0, 10);
+          if (!entry.isCreditAccepted && entry.cutoff > 0 && entry.views >= entry.cutoff) {
             entry.isCreditAccepted = true;
             entry.status = 'approved';
           }
           changed = true;
-        } catch {}
+        } catch (err) {
+          console.warn('[AutoStats] skip', entry.urls, err.message);
+        }
       }
-      if (changed) { await doc.save(); updated++; }
+      if (changed) {
+        await doc.save();
+        updated++;
+      }
     }
-    console.log(`[AutoStats] Done — updated ${updated} user responses`);
+    console.log(`[AutoStats] Done — updated ${updated} user documents`);
   } catch (err) {
     console.error('[AutoStats] Cron error:', err.message);
   }
@@ -455,6 +454,21 @@ io.on('connection', (socket) => {
 });
 
 connectDB().then(() => {
+    server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            console.error(`\n❌ Port ${PORT} is already in use (EADDRINUSE).`);
+            console.error('   Stop the existing backend, then run node index.js again.\n');
+            console.error('   PowerShell — free the port:');
+            console.error(`   Get-NetTCPConnection -LocalPort ${PORT} -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }`);
+            console.error('\n   Or use another port:');
+            console.error(`   $env:PORT=4001; node index.js\n`);
+            process.exit(1);
+            return;
+        }
+        console.error('❌ Server failed to start:', err.message);
+        process.exit(1);
+    });
+
     server.listen(PORT, () => {
         console.log(`\n🚀 Server started successfully`);
         console.log(`📍 Port: ${PORT}`);

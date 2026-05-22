@@ -11,6 +11,9 @@ const UserResponse = require('../models/userResponse');
 const userResponse = require('../models/userResponse');
 const Campaign = require('../models/campaign');
 const getYoutubeStats = require('../utils/getYoutubeStats');
+const { getPostStats, detectPlatform, extractYoutubeId } = require('../utils/socialPostStats');
+const telegramAlerts = require('../utils/telegramAlerts');
+const { resolveUserProfiles, resolveOneUserProfile } = require('../utils/resolveUserProfiles');
 
 // ─── Fast Multi Upload: Step 1 — Get batch presigned PUT URLs ───────────────
 exports.getPresignedUrls = async (req, res) => {
@@ -486,8 +489,22 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
       isDuplicate: hasDuplicates,
       assignments,
       duplicateReelsByUser,
-      campaignId // include campaignId in the response
+      campaignId
     });
+    if (!hasDuplicates && assignments.some((a) => (a.reels?.length || 0) > 0)) {
+      const profiles = await resolveUserProfiles(userIds);
+      const enriched = assignments
+        .filter((a) => a.reels?.length > 0)
+        .map((a) => ({ ...a, profile: profiles[a.userId] }));
+      telegramAlerts
+        .alertTasksAssigned({
+          campaign: campaign.toObject ? campaign.toObject() : campaign,
+          assignments: enriched,
+          reelsPerUser,
+          autoApproval: !!campaign.autoApproval,
+        })
+        .catch((err) => console.error('[Telegram] task assign alert:', err.message));
+    }
 
   } catch (err) {
     console.error('Error assigning reels to users:', err);
@@ -568,11 +585,22 @@ exports.addUserResponseUrl = async (req, res) => {
 
     const creditAmount = campaign.credits || 0;
     const cutoff = campaign.cutoff || 0;
+    let views = 0;
+    let likes = 0;
+    let comments = 0;
+    try {
+      const stats = await getPostStats(url);
+      views = parseInt(stats.views || 0, 10);
+      likes = parseInt(stats.likes || 0, 10);
+      comments = parseInt(stats.comments || 0, 10);
+    } catch (statsErr) {
+      console.warn('[addUserResponseUrl] Could not fetch initial stats:', statsErr.message);
+    }
     let userResponse = await UserResponse.findOne({ googleId: userId });
     const responseEntry = {
       urls: url, campaignId, reelId,
       isTaskCompleted: false,
-      views: 0, cutoff,
+      views, likes, comments, cutoff,
       isCreditAccepted: false,
       creditAmount,
       status: 'pending'
@@ -583,6 +611,18 @@ exports.addUserResponseUrl = async (req, res) => {
       userResponse.response.push(responseEntry);
     }
     await userResponse.save();
+    const profile = await resolveOneUserProfile(userId);
+    telegramAlerts
+      .alertUserEarn({
+        userName: profile.name,
+        email: profile.email,
+        mobile: profile.mobile,
+        credits: creditAmount,
+        campaignName: campaign.campaignName,
+        videoUrl: url,
+        note: 'Pending review — credits after approval',
+      })
+      .catch((err) => console.error('[Telegram] submission alert:', err.message));
     res.json({ success: true, userResponse });
   } catch (err) {
     console.error('Error saving user response:', err);
@@ -603,90 +643,121 @@ exports.getAddUserResponseUrl = async (req, res) =>{
   }
 };
 
-exports.approveCreditsForUser = async (req, res) => {
-  const { campaignId } = req.params;
-  try {
-    // Find all userResponses with at least one response for this campaign
-    const userResponses = await UserResponse.find({ 'response.campaignId': campaignId });
-    let updatedUsers = [];
-    let allApprovedEntries = [];
-    for (const userResponse of userResponses) {
-      let updated = false;
-      let approvedEntries = [];
-      for (let entry of userResponse.response) {
-        if (String(entry.campaignId) !== String(campaignId)) continue;
-        const videoId = extractYoutubeId(entry.urls);
-        if (!videoId) {
-          console.log('No videoId extracted for URL:', entry.urls);
-          continue;
+async function syncCampaignResponseStats(campaignId) {
+  const userResponses = await UserResponse.find({ 'response.campaignId': campaignId });
+  const updatedUsers = [];
+  const allApprovedEntries = [];
+  const entries = [];
+  const errors = [];
+
+  for (const userResponse of userResponses) {
+    let updated = false;
+    const approvedEntries = [];
+
+    for (const entry of userResponse.response) {
+      if (String(entry.campaignId) !== String(campaignId)) continue;
+      if (!entry.urls) continue;
+
+      const platform = detectPlatform(entry.urls);
+      let latestViews = 0;
+      let latestLikes = 0;
+      let latestComments = 0;
+
+      try {
+        const stats = await getPostStats(entry.urls);
+        latestViews = parseInt(stats.views || 0, 10);
+        latestLikes = parseInt(stats.likes || 0, 10);
+        latestComments = parseInt(stats.comments || 0, 10);
+
+        if (
+          stats.error &&
+          latestViews === 0 &&
+          latestLikes === 0 &&
+          latestComments === 0
+        ) {
+          errors.push({ url: entry.urls, platform, message: stats.error });
         }
-        const stats = await getYoutubeStats(videoId);
-        const latestViews = parseInt(stats.views || '0', 10);
-        const latestLikes = parseInt(stats.likes || '0', 10);
-        const latestComments = parseInt(stats.comments || '0', 10);
-        console.log('User:', userResponse.googleId, 'Entry URL:', entry.urls);
-        console.log('  Previous stored views:', entry.views);
-        console.log('  Latest views:', latestViews);
-        console.log('  Latest likes:', latestLikes);
-        console.log('  Latest comments:', latestComments);
-        console.log('  Cutoff:', entry.cutoff);
-        console.log('  isCreditAccepted:', entry.isCreditAccepted);
-        // Always update views, likes, and comments
-        entry.views = latestViews;
-        entry.likes = latestLikes;
-        entry.comments = latestComments;
+
+        // Only overwrite stored values if we got real data from the API
+        const hasNewData = latestViews > 0 || latestLikes > 0 || latestComments > 0;
+        if (hasNewData) {
+          entry.views = latestViews;
+          entry.likes = latestLikes;
+          entry.comments = latestComments;
+        } else {
+          // Keep existing stored values so UI doesn't regress to 0
+          latestViews = entry.views || 0;
+          latestLikes = entry.likes || 0;
+          latestComments = entry.comments || 0;
+        }
         updated = true;
-        if (latestViews >= entry.cutoff && !entry.isCreditAccepted) {
-          console.log('  Approving credit: views', latestViews, '>= cutoff', entry.cutoff);
+
+        if (entry.cutoff > 0 && latestViews >= entry.cutoff && !entry.isCreditAccepted) {
           entry.isCreditAccepted = true;
           entry.status = 'approved';
           approvedEntries.push({ url: entry.urls, views: latestViews });
         }
-      }
-      if (updated) {
-        console.log('Saving updated userResponse for userId:', userResponse.googleId);
-        await userResponse.save();
-        updatedUsers.push(userResponse.googleId);
-        allApprovedEntries.push(...approvedEntries);
+
+        entries.push({
+          userId: userResponse.googleId,
+          url: entry.urls,
+          platform,
+          views: latestViews,
+          likes: latestLikes,
+          comments: latestComments,
+          cutoff: entry.cutoff,
+          isCreditAccepted: entry.isCreditAccepted,
+          status: entry.status,
+        });
+      } catch (err) {
+        errors.push({ url: entry.urls, platform, message: err.message });
       }
     }
-    res.json({ success: true, updatedUsers, approvedEntries: allApprovedEntries });
+
+    if (updated) {
+      await userResponse.save();
+      updatedUsers.push(userResponse.googleId);
+      allApprovedEntries.push(...approvedEntries);
+    }
+  }
+
+  return { updatedUsers, allApprovedEntries, entries, errors };
+}
+
+exports.approveCreditsForUser = async (req, res) => {
+  const { campaignId } = req.params;
+  try {
+    const result = await syncCampaignResponseStats(campaignId);
+    res.json({
+      success: true,
+      updated: result.updatedUsers.length > 0,
+      updatedUsers: result.updatedUsers,
+      approvedEntries: result.allApprovedEntries,
+      entries: result.entries,
+      errors: result.errors,
+    });
   } catch (err) {
     console.error('Error in approveCreditsForUser:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
-// Helper function to extract YouTube video ID from a URL
-function extractYoutubeId(url) {
-  // Simple regex for YouTube video ID extraction
-  if (!url) return null;
-  // Try youtu.be short links
-  let match = url.match(/youtu\.be\/([\w-]{11})/);
-  if (match) return match[1];
-  // Try youtube.com/watch?v=ID
-  match = url.match(/[?&]v=([\w-]{11})/);
-  if (match) return match[1];
-  // Try shorts
-  match = url.match(/youtube\.com\/shorts\/([\w-]{11})/);
-  if (match) return match[1];
-  // Try embed
-  match = url.match(/youtube\.com\/embed\/([\w-]{11})/);
-  if (match) return match[1];
-  return null;
-}
-
 exports.getYoutubeVideoStats = async (req, res) => {
-  // Accept videoId from query or body
+  const url = req.query.url || req.body.url;
   const videoId = req.query.videoId || req.body.videoId;
-  if (!videoId) {
-    return res.status(400).json({ error: 'videoId is required' });
-  }
+
   try {
-    const stats = await getYoutubeStats(videoId);
-    res.json({ success: true, stats });
+    if (url) {
+      const stats = await getPostStats(url);
+      return res.json({ success: true, stats, platform: stats.platform });
+    }
+    if (videoId) {
+      const stats = await getYoutubeStats(videoId);
+      return res.json({ success: true, stats });
+    }
+    return res.status(400).json({ success: false, error: 'url or videoId is required' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 

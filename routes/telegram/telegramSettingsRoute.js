@@ -1,6 +1,34 @@
 const express = require('express');
 const router = express.Router();
 const TelegramSettings = require('../../models/telegram/TelegramSettings');
+const { getConfigStatus } = require('../../utils/telegramConfig');
+const { sendTestAlert } = require('../../utils/telegramAlerts');
+
+// Env + connection status (no secrets exposed)
+router.get('/alert-status', async (req, res) => {
+  try {
+    res.json({ success: true, ...getConfigStatus() });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Send test message to configured chat
+router.post('/test-alert', async (req, res) => {
+  try {
+    const result = await sendTestAlert();
+    if (result.success) {
+      return res.json({ success: true, message: 'Test alert sent to Telegram' });
+    }
+    return res.status(400).json({
+      success: false,
+      message: result.message || result.error || 'Failed to send test alert',
+      status: result.status,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // Get settings
 router.get('/settings', async (req, res) => {
