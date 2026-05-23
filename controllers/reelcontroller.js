@@ -530,9 +530,14 @@ exports.getSharedReelsForUser = async (req, res) => {
     if (!shared || !Array.isArray(shared.reels)) {
       return res.json({ success: true, reels: [] });
     }
-    // Remove the filter for isTaskCompleted, include all reels
-    const incompleteReels = shared.reels.filter(r => !r.isTaskComplete); // kept for future use
-    const reelsToReturn = shared.reels;
+    // Filter out tasks whose campaign has expired
+    const now = new Date();
+    const campaignIds = [...new Set(shared.reels.map(r => r.campaignId).filter(Boolean))];
+    const campaigns = await Campaign.find({ _id: { $in: campaignIds } }).select('_id endDate').lean();
+    const expiredIds = new Set(
+      campaigns.filter(c => c.endDate && new Date(c.endDate) < now).map(c => String(c._id))
+    );
+    const reelsToReturn = shared.reels.filter(r => !expiredIds.has(String(r.campaignId)));
 
     // Fetch userResponse for this user
     const userRespDoc = await UserResponse.findOne({ googleId: userId });
