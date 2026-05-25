@@ -8,6 +8,9 @@ if (process.env.INSTAGRAM_USER_ID && !String(process.env.INSTAGRAM_USER_ID).star
     'Participant reels use RAPIDAPI_KEY. Optional: INSTAGRAM_BUSINESS_ACCOUNT_ID or INSTAGRAM_PAGE_ID for your brand posts.'
   );
 }
+if (process.env.IMAGINEART_API_KEY && process.env.IMAGINEART_COVER_ENABLED !== 'true') {
+  console.info('[aiImage] News cover uses Pollinations (free). Set IMAGINEART_COVER_ENABLED=true only if Vyro variation API works on your plan.');
+}
 console.info(
   '[Stats] APIs:',
   process.env.YOUTUBE_API_KEY ? 'YouTube=ok' : 'YouTube=MISSING',
@@ -52,6 +55,7 @@ const googleAuthRoutes = require('./routes/googleAuth');
 const groupRoutes = require('./routes/grouproutes');
 const campaignRoutes = require('./routes/campaignRoutes');
 const ugcRoutes = require('./routes/ugcRoutes');
+const newsBlogRoutes = require('./routes/newsBlogRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const poolRoutes = require('./routes/poolRoutes');
 const imagePoolRoutes = require('./routes/imagePoolRoutes');
@@ -299,6 +303,8 @@ app.use('/api/superadmin', superadminRoutes);
 app.use('/api/auth/user/campaign', campaignRoutes);
 app.use('/api/campaign-tasks', require('./routes/campaignTaskRoutes'));
 app.use('/api/ugc', ugcRoutes);
+app.use('/api/news-blog', newsBlogRoutes);
+app.use('/api/image-proxy', require('./routes/imageProxyRoute'));
 app.use('/api/ai', aiRoutes);
 
 // Pool Routes and Reel Routes (for uploading and managing reels)

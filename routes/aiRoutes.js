@@ -65,4 +65,38 @@ Return ONLY a valid JSON object with no markdown or explanation:
   }
 });
 
+router.post('/news-blog-fill', async (req, res) => {
+  const { topic, category } = req.body;
+  if (!topic) return res.status(400).json({ success: false, message: 'topic is required' });
+  try {
+    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    const completion = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{
+        role: 'user',
+        content: `You are a professional content writer for YovoAI — an influencer marketing platform in India.
+Write a ${category || 'Blog'} post about: "${topic}".
+Return ONLY a valid JSON object with no markdown, no explanation:
+{
+  "title": "engaging post title",
+  "summary": "3-4 sentence engaging summary for listing preview (80-120 words)",
+  "content": "full detailed post content (700-900 words, multiple paragraphs, professional tone)",
+  "tags": "tag1,tag2,tag3,tag4,tag5",
+  "author": "YovoAI Team",
+  "imagePrompt": "a short visual description for image generation (no text in image)"
+}`,
+      }],
+      temperature: 0.75,
+    });
+    const text = completion.choices[0]?.message?.content?.trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return res.status(500).json({ success: false, message: 'AI response parse failed' });
+    const data = JSON.parse(jsonMatch[0]);
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('AI news-blog fill error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 module.exports = router;
