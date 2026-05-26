@@ -25,6 +25,8 @@ const {
   verifyResetOtp,
   resetPassword,
   resendResetOtp,
+  updateUserLocation,
+  getUserLocation,
 } = require('../controllers/mobileUserController');
 
 const { protect } = require('../middleware/mobileAuth');
@@ -70,6 +72,10 @@ router.post('/login/firebase', firebaseLogin);
 // Profile (protected)
 router.get('/profile', protect, getProfile);
 router.put('/profile', protect, updateProfile);
+
+// Location — call when user opens app (after login, with GPS permission)
+router.post('/location', protect, updateUserLocation);
+router.get('/location', protect, getUserLocation);
 
 // Profile Image Upload - R2 (protected)
 // Route 1: Direct upload - multipart/form-data

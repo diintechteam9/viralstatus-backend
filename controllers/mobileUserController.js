@@ -7,6 +7,7 @@ const axios = require('axios');
 const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { r2Client } = require('../config/r2');
+const { buildLocationPayload, formatLocationResponse } = require('../utils/userLocation');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -462,6 +463,58 @@ const step3CompleteProfile = async (req, res) => {
   }
 };
 
+// ─── USER LOCATION (app enter / foreground) ─────────────────────────────────
+
+/** POST — save current GPS + reverse geocode city/address */
+const updateUserLocation = async (req, res) => {
+  try {
+    const locationPayload = await buildLocationPayload(req.body);
+    if (!locationPayload) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid latitude and longitude are required',
+      });
+    }
+
+    const user = await MobileUser.findByIdAndUpdate(
+      req.user.id,
+      { ...locationPayload, lastLoginAt: new Date() },
+      { new: true }
+    ).select('-password -emailOtp -emailOtpExpiry -mobileOtp -mobileOtpExpiry -resetOtp -resetOtpExpiry');
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Location updated',
+      data: { location: formatLocationResponse(user) },
+    });
+  } catch (err) {
+    console.error('[updateUserLocation]', err.message);
+    res.status(500).json({ success: false, message: err.message || 'Failed to update location' });
+  }
+};
+
+/** GET — last saved location */
+const getUserLocation = async (req, res) => {
+  try {
+    const user = await MobileUser.findById(req.user.id).select(
+      'location locationAddress locationUpdatedAt city pincode'
+    );
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    res.json({
+      success: true,
+      data: { location: formatLocationResponse(user) },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
 
 const loginUser = async (req, res) => {
@@ -487,6 +540,8 @@ const loginUser = async (req, res) => {
     if (!isValid) return res.status(401).json({ success: false, message: 'Invalid email or password' });
 
     user.lastLoginAt = new Date();
+    const locationPayload = await buildLocationPayload(req.body);
+    if (locationPayload) Object.assign(user, locationPayload);
     await user.save();
 
     const token = generateToken(user, client);
@@ -501,7 +556,13 @@ const loginUser = async (req, res) => {
     res.json({
       success: true,
       message: 'Login successful',
-      data: { user: userObj, token, clientId: client.clientId, googleId: userObj.googleId || null },
+      data: {
+        user: userObj,
+        token,
+        clientId: client.clientId,
+        googleId: userObj.googleId || null,
+        location: formatLocationResponse(userObj),
+      },
     });
   } catch (err) {
     res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
@@ -759,6 +820,8 @@ const firebaseLogin = async (req, res) => {
     }
 
     user.lastLoginAt = new Date();
+    const locationPayload = await buildLocationPayload(req.body);
+    if (locationPayload) Object.assign(user, locationPayload);
     await user.save();
     const token = generateToken(user, client);
     const userObj = user.toObject();
@@ -772,7 +835,12 @@ const firebaseLogin = async (req, res) => {
     res.json({
       success: true,
       message: 'Login successful',
-      data: { user: userObj, token, clientId: client.clientId },
+      data: {
+        user: userObj,
+        token,
+        clientId: client.clientId,
+        location: formatLocationResponse(userObj),
+      },
     });
   } catch (err) {
     res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
@@ -1158,4 +1226,6 @@ module.exports = {
   verifyResetOtp,
   resetPassword,
   resendResetOtp,
+  updateUserLocation,
+  getUserLocation,
 };

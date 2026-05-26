@@ -112,8 +112,31 @@ const {
   stopTemplateSyncScheduler,
 } = require("./services/whatsappTemplateSyncScheduler");
 
-// ─── Auto Stats Cron ─────────────────────────────────────────────────────────
+// ─── Auto News & Blog Post Cron (5x Daily IST) ────────────────────────────
 const cron = require('node-cron');
+const { runAutoPostJob } = require('./services/autoPostService');
+
+const autoPostTimes = [
+  '0 8 * * *',   // 8:00 AM IST
+  '0 11 * * *',  // 11:00 AM IST
+  '0 14 * * *',  // 2:00 PM IST
+  '0 17 * * *',  // 5:00 PM IST
+  '0 20 * * *',  // 8:00 PM IST
+];
+
+autoPostTimes.forEach(time => {
+  cron.schedule(time, async () => {
+    try {
+      await runAutoPostJob();
+    } catch (err) {
+      console.error('[AutoPost] Cron error:', err.message);
+    }
+  }, { timezone: 'Asia/Kolkata' });
+});
+
+console.log('[AutoPost] ✅ 5x daily cron scheduled — 8AM, 11AM, 2PM, 5PM, 8PM IST (1 News + 1 Blog each = 10 posts/day)');
+
+// ─── Auto Stats Cron ─────────────────────────────────────────────────────────
 const { getPostStats } = require('./utils/socialPostStats');
 const UserResponse = require('./models/userResponse');
 

@@ -54,9 +54,30 @@ const mobileUserSchema = new mongoose.Schema({
 
   clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client' },
   clientCode: { type: String },  // CLI-XXXXXX string copy
+
+  /** GPS from mobile app (on open / login) */
+  location: {
+    latitude: { type: Number },
+    longitude: { type: Number },
+    accuracy: { type: Number },
+    altitude: { type: Number },
+    heading: { type: Number },
+    speed: { type: Number },
+  },
+  locationAddress: {
+    formattedAddress: { type: String, default: '' },
+    city: { type: String, default: '' },
+    state: { type: String, default: '' },
+    country: { type: String, default: '' },
+    pincode: { type: String, default: '' },
+  },
+  locationUpdatedAt: { type: Date },
+
   createdAt: { type: Date, default: Date.now },
   lastLoginAt: { type: Date, default: Date.now },
 });
+
+mobileUserSchema.index({ 'location.latitude': 1, 'location.longitude': 1 });
 
 mobileUserSchema.index({ email: 1, clientId: 1 }, { unique: true });
 

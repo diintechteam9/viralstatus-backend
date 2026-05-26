@@ -1,11 +1,15 @@
+'use strict';
+
 const express = require('express');
 const router = express.Router();
 const c = require('../controllers/newsBlogController');
 const { authenticate, authorize } = require('../middleware/authenticate');
 
+// ── Public routes ─────────────────────────────────────────────────────────────
 router.get('/', c.getAll);
 
 // ── MUST be before /:id routes ────────────────────────────────────────────────
+
 router.get('/external', async (req, res) => {
   const key = process.env.NEWS_API_KEY;
   if (!key) return res.json({ success: true, articles: [] });
@@ -44,17 +48,34 @@ router.get('/external', async (req, res) => {
   }
 });
 
+// ── Admin: manual auto-generate trigger (MUST be before /:id) ─────────────────
+router.post('/auto-generate', authenticate, authorize('admin', 'super_admin'), (req, res) => {
+  // Respond immediately — job runs in background
+  res.json({ success: true, message: 'Auto-post job started. 1 News + 1 Blog will be generated. Check server logs.' });
+
+  // Fire and forget — errors logged inside service
+  const { runAutoPostJob } = require('../services/autoPostService');
+  runAutoPostJob().catch(err => {
+    console.error('[AutoPost] Manual trigger error:', err.message);
+  });
+});
+
+// ── Admin: upload routes (MUST be before /:id) ────────────────────────────────
 router.post('/upload-cover', authenticate, authorize('admin', 'super_admin'), c.uploadCover);
 router.post('/upload-cover-base64', authenticate, authorize('admin', 'super_admin'), c.uploadCoverBase64);
 router.post('/upload-media', authenticate, authorize('admin', 'super_admin'), c.uploadMedia);
+
+// ── Admin: create post ────────────────────────────────────────────────────────
 router.post('/', authenticate, authorize('admin', 'super_admin'), c.create);
 
+// ── Public: per-post routes ───────────────────────────────────────────────────
 router.get('/:id/comments', c.getComments);
 router.post('/:id/comment', c.addComment);
 router.post('/:id/like', c.toggleLike);
 router.post('/:id/share', c.recordShare);
-router.patch('/:id/publish', authenticate, authorize('admin', 'super_admin'), c.togglePublish);
 
+// ── Admin: per-post admin routes ──────────────────────────────────────────────
+router.patch('/:id/publish', authenticate, authorize('admin', 'super_admin'), c.togglePublish);
 router.get('/:id', c.getOne);
 router.put('/:id', authenticate, authorize('admin', 'super_admin'), c.update);
 router.delete('/:id', authenticate, authorize('admin', 'super_admin'), c.remove);
