@@ -5,6 +5,7 @@ const { authenticate, authorize } = require('../middleware/authenticate');
 
 // Client: save/get UGC form
 router.post('/form/:campaignId', authenticate, authorize('client', 'admin', 'super_admin'), ugc.saveUGCForm);
+router.get('/form/:campaignId/:userId', ugc.getUGCForm);
 router.get('/form/:campaignId', ugc.getUGCForm);
 
 // User: upload UGC video
