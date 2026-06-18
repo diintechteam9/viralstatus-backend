@@ -6,6 +6,9 @@ const ugcSubmissionSchema = new mongoose.Schema({
   videoKey: { type: String, required: true },  // R2 key
   videoUrl: { type: String, default: '' },
   status: { type: String, default: 'pending' }, // pending | approved | rejected
+  videoDuration: { type: Number, default: 0 },  // seconds
+  creditsEarned: { type: Number, default: 0 },  // 1 credit per second
+  creditsAwarded: { type: Boolean, default: false },
 }, { timestamps: true });
 
 ugcSubmissionSchema.index({ campaignId: 1, userId: 1 }, { unique: true });

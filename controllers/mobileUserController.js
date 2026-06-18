@@ -40,7 +40,7 @@ const attachFreshProfileImageUrl = async (plainUser) => {
 
 const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
 
-const otpExpiry = () => new Date(Date.now() + 10 * 60 * 1000);
+const otpExpiry = () => new Date(Date.now() + (parseInt(process.env.OTP_EXPIRY_SECONDS) || 600) * 1000);
 
 const generateToken = (user, client) =>
   jwt.sign(
@@ -150,44 +150,62 @@ const sendEmailOtp = async (email, otp) => {
 
 // ─── Send Mobile OTP ─────────────────────────────────────────────────────────
 
-const sendMobileOtp = async (mobile, otp, method = 'gupshup') => {
-  if (method === 'gupshup') {
-    const number = mobile.replace('+', '');
-    await axios.get('https://enterprise.smsgupshup.com/GatewayAPI/rest', {
-      params: {
-        method: 'SendMessage',
-        send_to: number,
-        msg: `Your OTP is ${otp}. Valid for 10 minutes.`,
-        msg_type: 'TEXT',
-        userid: process.env.GUPSHUP_USERID,
-        auth_scheme: 'plain',
-        password: process.env.GUPSHUP_PASSWORD,
-        v: '1.1',
-        format: 'text',
-        mask: process.env.GUPSHUP_MASK || 'MOBISL',
-      },
-    });
+const sendMobileOtp = async (mobile, otp, method = 'sms') => {
+  if (method === 'sms') {
+    const number = mobile.replace(/\D/g, '');
+    const message = `Your OTP is ${otp} Login User name vijay@123 Expire within 20 Minuts. TEAM WEBTECH`;
+    const params = {
+      'authentic-key': process.env.WEBTECHSMS_AUTH_KEY,
+      senderid: process.env.WEBTECHSMS_SENDER_ID,
+      route: process.env.WEBTECHSMS_ROUTE || '2',
+      number,
+      message,
+      templateid: process.env.WEBTECHSMS_TEMPLATE_ID,
+    };
+    const queryString = Object.entries(params)
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join('&');
+    const apiUrl = process.env.WEBTECHSMS_API_URL || 'http://smpp.webtechsolution.co/http-tokenkeyapi.php';
+    const res = await axios.get(`${apiUrl}?${queryString}`, { timeout: 15000 });
+    const responseStr = String(res.data);
+    console.log('[WebtechSMS] Response:', responseStr);
+
+    const errorMap = {
+      '002': 'Invalid SMS Auth Key. Check WEBTECHSMS_AUTH_KEY.',
+      '003': 'Invalid Route ID. Check WEBTECHSMS_ROUTE.',
+      '004': 'Sender ID missing. Check WEBTECHSMS_SENDER_ID.',
+      '005': 'No message found.',
+      '008': 'Invalid mobile number: ' + number,
+      '009': 'Insufficient SMS credits.',
+      '010': 'Parent account has low balance.',
+      '011': 'SMS campaign failed.',
+    };
+    for (const [code, msg] of Object.entries(errorMap)) {
+      if (responseStr.includes(code)) throw new Error('SMS failed: ' + msg);
+    }
   } else if (method === 'whatsapp') {
     const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     const token = process.env.WHATSAPP_ACCESS_TOKEN;
     const version = process.env.WHATSAPP_GRAPH_VERSION || 'v19.0';
     const to = mobile.replace(/\D/g, '');
     try {
+      const waPayload = {
+        messaging_product: 'whatsapp',
+        to,
+        type: 'template',
+        template: {
+          name: process.env.WHATSAPP_TEMPLATE_NAME || 'otp_verification',
+          language: { code: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en_US' },
+          components: [
+            { type: 'body', parameters: [{ type: 'text', text: String(otp) }] },
+            { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: String(otp) }] },
+          ],
+        },
+      };
+      console.log('[WhatsApp] Sending payload:', JSON.stringify(waPayload));
       await axios.post(
         `https://graph.facebook.com/${version}/${phoneId}/messages`,
-        {
-          messaging_product: 'whatsapp',
-          to,
-          type: 'template',
-          template: {
-            name: process.env.WHATSAPP_TEMPLATE_NAME || 'otp_verification',
-            language: { code: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en_US' },
-            components: [
-              { type: 'body', parameters: [{ type: 'text', text: otp }] },
-              { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: otp }] },
-            ],
-          },
-        },
+        waPayload,
         { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
       );
     } catch (waErr) {
@@ -329,7 +347,7 @@ const step1VerifyEmailOtp = async (req, res) => {
 
 const step2SendMobileOtp = async (req, res) => {
   try {
-    const { email, mobile, otpMethod = 'whatsapp', clientId } = req.body;
+    const { email, mobile, otpMethod = 'sms', clientId } = req.body;
     if (!email || !mobile || !clientId)
       return res.status(400).json({ success: false, message: 'email, mobile and clientId required' });
 
@@ -368,8 +386,8 @@ const step2SendMobileOtp = async (req, res) => {
 const step2VerifyMobileOtp = async (req, res) => {
   try {
     const { email, mobile, otp, clientId } = req.body;
-    if (!email || !mobile || !otp || !clientId)
-      return res.status(400).json({ success: false, message: 'email, mobile, otp and clientId required' });
+    if (!email || !otp || !clientId)
+      return res.status(400).json({ success: false, message: 'email, otp and clientId required' });
 
     const client = await validateClientId(clientId);
 
@@ -512,6 +530,86 @@ const getUserLocation = async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ─── MOBILE OTP LOGIN — STEP 1: Send OTP ────────────────────────────────────
+
+const sendLoginMobileOtp = async (req, res) => {
+  try {
+    const { mobile, otpMethod = 'sms', clientId } = req.body;
+    if (!mobile || !clientId)
+      return res.status(400).json({ success: false, message: 'mobile and clientId required' });
+
+    const client = await validateClientId(clientId);
+
+    const user = await MobileUser.findOne({ mobile, clientId: client._id, registrationStep: 3 });
+    if (!user)
+      return res.status(404).json({ success: false, message: 'No registered account found with this mobile number.' });
+
+    const otp = generateOtp();
+    await sendMobileOtp(mobile, otp, otpMethod);
+
+    user.mobileOtp = String(otp);
+    user.mobileOtpExpiry = otpExpiry();
+    user.otpMethod = otpMethod;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: `OTP sent to ${mobile} via ${otpMethod.toUpperCase()}.`,
+      data: { mobile, otpMethod, clientId: client.clientId },
+    });
+  } catch (err) {
+    const status = err.message.includes('Client') ? 400 : err.message.includes('WhatsApp') ? 502 : 500;
+    res.status(status).json({ success: false, message: err.message });
+  }
+};
+
+// ─── MOBILE OTP LOGIN — STEP 2: Verify OTP & Login ───────────────────────────
+
+const verifyLoginMobileOtp = async (req, res) => {
+  try {
+    const { mobile, otp, clientId } = req.body;
+    if (!mobile || !otp || !clientId)
+      return res.status(400).json({ success: false, message: 'mobile, otp and clientId required' });
+
+    const client = await validateClientId(clientId);
+
+    const user = await MobileUser.findOne({ mobile, clientId: client._id, registrationStep: 3 });
+    if (!user)
+      return res.status(404).json({ success: false, message: 'User not found.' });
+
+    if (!user.mobileOtp)
+      return res.status(400).json({ success: false, message: 'OTP not requested. Please request a new OTP.' });
+
+    if (String(user.mobileOtp).trim() !== String(otp).trim())
+      return res.status(400).json({ success: false, message: 'Incorrect OTP. Please try again.' });
+
+    if (user.mobileOtpExpiry < new Date())
+      return res.status(400).json({ success: false, message: 'OTP expired. Please resend.' });
+
+    user.mobileOtp = null;
+    user.mobileOtpExpiry = null;
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    const token = generateToken(user, client);
+    const userObj = user.toObject();
+    delete userObj.password;
+    delete userObj.emailOtp;
+    delete userObj.emailOtpExpiry;
+    delete userObj.mobileOtp;
+    delete userObj.mobileOtpExpiry;
+    await attachFreshProfileImageUrl(userObj);
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      data: { user: userObj, token, clientId: client.clientId },
+    });
+  } catch (err) {
+    res.status(err.message.includes('Client') ? 400 : 500).json({ success: false, message: err.message });
   }
 };
 
@@ -725,7 +823,7 @@ const resendEmailOtp = async (req, res) => {
 
 const resendMobileOtp = async (req, res) => {
   try {
-    const { email, mobile, otpMethod = 'whatsapp', clientId } = req.body;
+    const { email, mobile, otpMethod = 'sms', clientId } = req.body;
     if (!email || !mobile || !clientId)
       return res.status(400).json({ success: false, message: 'email, mobile and clientId required' });
 
@@ -1204,6 +1302,8 @@ const getProfileImageReadUrl = async (req, res) => {
 
 module.exports = {
   getMobileAppConfig,
+  sendLoginMobileOtp,
+  verifyLoginMobileOtp,
   step1SendEmailOtp,
   step1VerifyEmailOtp,
   step2SendMobileOtp,

@@ -3,6 +3,8 @@ const router = express.Router();
 const multer = require('multer');
 const {
   getMobileAppConfig,
+  sendLoginMobileOtp,
+  verifyLoginMobileOtp,
   step1SendEmailOtp,
   step1VerifyEmailOtp,
   step2SendMobileOtp,
@@ -54,6 +56,10 @@ router.post('/register/step3', step3CompleteProfile);
 
 // Login
 router.post('/login', loginUser);
+
+// Mobile OTP Login
+router.post('/login/send-otp', sendLoginMobileOtp);
+router.post('/login/verify-otp', verifyLoginMobileOtp);
 
 // Google Auth
 router.post('/register/google', googleAuth);

@@ -1,16 +1,37 @@
 const UGCForm = require('../models/UGCForm');
 const UGCSubmission = require('../models/UGCSubmission');
+const CreditWallet = require('../models/CreditWallet');
 const { s3Client } = require('../utils/r2');
 const { PutObjectCommand } = require('@aws-sdk/client-s3');
 const { getobject } = require('../utils/r2');
 const multer = require('multer');
+const ffmpeg = require('fluent-ffmpeg');
+const ffprobeStatic = require('ffprobe-static');
+const os = require('os');
+const path = require('path');
+const fs = require('fs');
 const {
   buildUGCFormResponse,
   buildSubmissionPayload,
   refreshSubmissionVideoUrl,
 } = require('../utils/ugcHelpers');
 
+ffmpeg.setFfprobePath(ffprobeStatic.path);
+
 const upload = multer({ limits: { fileSize: 200 * 1024 * 1024 } }); // 200MB
+
+// ── Get video duration from buffer ──────────────────────────────────────────
+const getVideoDuration = (buffer, mimetype) => {
+  return new Promise((resolve) => {
+    const tmpFile = path.join(os.tmpdir(), `ugc_${Date.now()}.mp4`);
+    fs.writeFileSync(tmpFile, buffer);
+    ffmpeg.ffprobe(tmpFile, (err, metadata) => {
+      fs.unlink(tmpFile, () => {});
+      if (err) { resolve(0); return; }
+      resolve(Math.floor(metadata?.format?.duration || 0));
+    });
+  });
+};
 
 // ── Client: Save/Update UGC Form for a campaign ──────────────────────────────
 exports.saveUGCForm = async (req, res) => {
@@ -60,6 +81,10 @@ exports.uploadUGCVideo = [
         return res.status(400).json({ success: false, message: 'campaignId, userId and video file are required' });
       }
 
+      // Get video duration before uploading
+      const videoDuration = await getVideoDuration(req.file.buffer, req.file.mimetype);
+      const creditsEarned = videoDuration; // 1 credit per second
+
       const ext = req.file.originalname.split('.').pop() || 'mp4';
       const key = `ugc/${campaignId}/${userId}_${Date.now()}.${ext}`;
       await s3Client.send(new PutObjectCommand({
@@ -70,17 +95,33 @@ exports.uploadUGCVideo = [
       }));
       const videoUrl = await getobject(key);
 
+      // Check if already submitted (to avoid double credits)
+      const existing = await UGCSubmission.findOne({ campaignId, userId });
+      const alreadyAwarded = existing?.creditsAwarded || false;
+
       const submission = await UGCSubmission.findOneAndUpdate(
         { campaignId, userId },
-        { videoKey: key, videoUrl, status: 'pending' },
+        { videoKey: key, videoUrl, status: 'pending', videoDuration, creditsEarned, creditsAwarded: true },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
+
+      // Add credits to wallet only if not already awarded
+      if (!alreadyAwarded && creditsEarned > 0) {
+        await CreditWallet.findOneAndUpdate(
+          { userId },
+          { $inc: { totalBalance: creditsEarned, pendingCredits: creditsEarned, totalCampaigns: 1 } },
+          { upsert: true, new: true }
+        );
+        console.log(`[UGC Credits] userId=${userId} earned ${creditsEarned} credits for ${videoDuration}s video`);
+      }
 
       const enriched = await buildUGCFormResponse(campaignId, userId);
 
       res.json({
         success: true,
-        message: 'UGC video submitted successfully',
+        message: `UGC video submitted! You earned ${creditsEarned} credits for ${videoDuration}s video.`,
+        creditsEarned,
+        videoDuration,
         submission: buildSubmissionPayload(submission.toObject()),
         ...enriched,
       });

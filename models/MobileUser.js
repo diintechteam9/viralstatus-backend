@@ -41,7 +41,7 @@ const mobileUserSchema = new mongoose.Schema({
   emailOtpExpiry: { type: Date },
   mobileOtp: { type: String },
   mobileOtpExpiry: { type: Date },
-  otpMethod: { type: String, enum: ['gupshup', 'twilio', 'whatsapp'], default: 'gupshup' },
+  otpMethod: { type: String, enum: ['sms', 'whatsapp', 'twilio', 'gupshup'], default: 'sms' },
 
   // Password Reset OTP
   resetOtp: { type: String },

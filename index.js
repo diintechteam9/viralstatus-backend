@@ -56,6 +56,7 @@ const groupRoutes = require('./routes/grouproutes');
 const campaignRoutes = require('./routes/campaignRoutes');
 const ugcRoutes = require('./routes/ugcRoutes');
 const newsBlogRoutes = require('./routes/newsBlogRoutes');
+const newsBlogTaskRoutes = require('./routes/newsBlogTaskRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const poolRoutes = require('./routes/poolRoutes');
 const imagePoolRoutes = require('./routes/imagePoolRoutes');
@@ -112,31 +113,33 @@ const {
   stopTemplateSyncScheduler,
 } = require("./services/whatsappTemplateSyncScheduler");
 
-// ─── Auto News & Blog Post Cron (5x Daily IST) ────────────────────────────
-const cron = require('node-cron');
-const { runAutoPostJob } = require('./services/autoPostService');
-
-const autoPostTimes = [
-  '0 8 * * *',   // 8:00 AM IST
-  '0 11 * * *',  // 11:00 AM IST
-  '0 14 * * *',  // 2:00 PM IST
-  '0 17 * * *',  // 5:00 PM IST
-  '0 20 * * *',  // 8:00 PM IST
-];
-
-autoPostTimes.forEach(time => {
-  cron.schedule(time, async () => {
-    try {
-      await runAutoPostJob();
-    } catch (err) {
-      console.error('[AutoPost] Cron error:', err.message);
-    }
-  }, { timezone: 'Asia/Kolkata' });
-});
-
-console.log('[AutoPost] ✅ 5x daily cron scheduled — 8AM, 11AM, 2PM, 5PM, 8PM IST (1 News + 1 Blog each = 10 posts/day)');
+// ─── Auto News & Blog Post Cron (DISABLED) ───────────────────────────────────
+// const cron = require('node-cron');
+// const { runAutoPostJob } = require('./services/autoPostService');
+//
+// const autoPostTimes = [
+//   '0 8 * * *',   // 8:00 AM IST
+//   '0 11 * * *',  // 11:00 AM IST
+//   '0 14 * * *',  // 2:00 PM IST
+//   '0 17 * * *',  // 5:00 PM IST
+//   '0 20 * * *',  // 8:00 PM IST
+// ];
+//
+// autoPostTimes.forEach(time => {
+//   cron.schedule(time, async () => {
+//     try {
+//       await runAutoPostJob();
+//     } catch (err) {
+//       console.error('[AutoPost] Cron error:', err.message);
+//     }
+//   }, { timezone: 'Asia/Kolkata' });
+// });
+//
+// console.log('[AutoPost] ✅ 5x daily cron scheduled — 8AM, 11AM, 2PM, 5PM, 8PM IST (1 News + 1 Blog each = 10 posts/day)');
+console.log('[AutoPost] ⏸ Auto-post cron is DISABLED.');
 
 // ─── Auto Stats Cron ─────────────────────────────────────────────────────────
+const cron = require('node-cron');
 const { getPostStats } = require('./utils/socialPostStats');
 const UserResponse = require('./models/userResponse');
 
@@ -327,6 +330,7 @@ app.use('/api/auth/user/campaign', campaignRoutes);
 app.use('/api/campaign-tasks', require('./routes/campaignTaskRoutes'));
 app.use('/api/ugc', ugcRoutes);
 app.use('/api/news-blog', newsBlogRoutes);
+app.use('/api/news-blog-tasks', newsBlogTaskRoutes);
 app.use('/api/image-proxy', require('./routes/imageProxyRoute'));
 app.use('/api/ai', aiRoutes);
 
