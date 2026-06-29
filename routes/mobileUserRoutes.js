@@ -29,6 +29,7 @@ const {
   resendResetOtp,
   updateUserLocation,
   getUserLocation,
+  getUsersLocationMap,
 } = require('../controllers/mobileUserController');
 
 const { protect } = require('../middleware/mobileAuth');
@@ -221,5 +222,21 @@ router.post('/forgot-password', forgotPassword);
 router.post('/forgot-password/verify-otp', verifyResetOtp);
 router.post('/forgot-password/reset', resetPassword);
 router.post('/forgot-password/resend-otp', resendResetOtp);
+
+// Live user location map (client/admin dashboard)
+router.get('/locations-map', getUsersLocationMap);
+
+// Get all MobileUser googleIds (for public campaign bulk assign)
+router.get('/all-google-ids', async (req, res) => {
+  try {
+    const MobileUser = require('../models/MobileUser');
+    const users = await MobileUser.find({ googleId: { $exists: true, $ne: null, $ne: '' } })
+      .select('googleId').lean();
+    const googleIds = users.map(u => u.googleId).filter(Boolean);
+    res.json({ success: true, googleIds });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 module.exports = router;

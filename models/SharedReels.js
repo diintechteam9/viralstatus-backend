@@ -11,7 +11,16 @@ const sharedReelsSchema = new mongoose.Schema({
       reelId: {
         type: String,
         ref: 'Reel',
-        required: true
+        default: '',
+      },
+      campaignTaskId: {
+        type: String,
+        default: '',
+      },
+      contentCategory: {
+        type: String,
+        enum: ['reels', 'post', 'ugc', 'app_review', 'gmb_review'],
+        default: 'reels',
       },
       s3Key: {
         type: String
@@ -62,12 +71,23 @@ const sharedReelsSchema = new mongoose.Schema({
         type: String,
         default: ''
       },
+      campaignType: {
+        type: String,
+        enum: ['public', 'private'],
+        default: 'private'
+      },
       createdAt: {
         type: Date,
         default: Date.now
       }
     }
-  ]
+  ],
+  /** Daily accept log — persists after cancel so 3/day limit is enforced */
+  acceptLog: [{
+    acceptedAt: { type: Date, default: Date.now },
+    reelId: { type: String, default: '' },
+    campaignId: { type: String, default: '' },
+  }],
 });
 
 module.exports = mongoose.model('SharedReels', sharedReelsSchema); 

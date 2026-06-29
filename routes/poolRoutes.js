@@ -41,6 +41,7 @@ router.post('/task/reject', reelController.rejectTask);
 router.post('/task/bulk-assign', taskManagementController.bulkAssignTasks);
 router.post('/task/bulk-accept', taskManagementController.bulkAcceptTasks);
 router.post('/task/bulk-reject', taskManagementController.bulkRejectTasks);
+router.get('/task/daily-quota/:userId', taskManagementController.getDailyQuota);
 router.post('/task/cancel', taskManagementController.cancelTask);
 router.get('/task/timer-status/:taskId', taskManagementController.getTaskTimerStatus);
 router.get('/task/campaign/:campaignId', taskManagementController.getCampaignTasks);

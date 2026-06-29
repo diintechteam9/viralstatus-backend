@@ -13,6 +13,7 @@ const TelegramServiceController = require('./telegram/telegrambotalertcontroller
 const telegramService = new TelegramServiceController();
 const TelegramSettings = require('../models/Settings');
 const telegramAlerts = require('../utils/telegramAlerts');
+const { parseSupportedTaskTypes } = require('../utils/campaignTaskTypes');
 const { resolveOneUserProfile } = require('../utils/resolveUserProfiles');
 
 /** Normalize client id for Campaign.clientId (MongoDB Client _id as string, or legacy). */
@@ -144,7 +145,7 @@ exports.createCampaign = [
       const {
         campaignName, brandName, goal, clientId, groupIds, tags,
         credits, location, tNc, description, startDate, endDate,
-        limit, views, status, members, cutoff, category
+        limit, views, status, members, cutoff, category, campaignType, supportedTaskTypes
       } = req.body;
 
       const resolvedFromAuth = req.user?.role === 'client' && req.user?.id ? String(req.user.id) : null;
@@ -208,6 +209,8 @@ exports.createCampaign = [
         status: statusValue, isActive: computedIsActive,
         cutoff: cutoff !== undefined ? Number(cutoff) : undefined,
         category: category || '',
+        campaignType: campaignType === 'public' ? 'public' : 'private',
+        supportedTaskTypes: parseSupportedTaskTypes(supportedTaskTypes),
         userIds: members ? (Array.isArray(members) ? members : members.split(',')) : [],
       });
       const savedCampaign = await campaign.save();
@@ -238,7 +241,6 @@ exports.getActiveCampaigns = async (req, res) => {
     const { clientId: clientIdQuery } = req.query;
     const now = new Date();
 
-    // Show all campaigns that are not expired and not Inactive
     const filter = {
       status: { $ne: 'Inactive' },
       endDate: { $gte: now },
@@ -265,6 +267,55 @@ exports.getActiveCampaigns = async (req, res) => {
     res.json({ success: true, campaigns });
   } catch (err) {
     console.error('Error in getActiveCampaigns:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Get only PUBLIC campaigns (no join required — direct task access)
+exports.getPublicActiveCampaigns = async (req, res) => {
+  try {
+    await activateCurrentCampaigns();
+    await deactivateExpiredCampaigns();
+    const now = new Date();
+    const campaigns = await Campaign.find({
+      status: { $ne: 'Inactive' },
+      endDate: { $gte: now },
+      campaignType: 'public',
+    }).lean();
+    for (const campaign of campaigns) {
+      if (campaign.image?.key) try { campaign.image.url = await getobject(campaign.image.key); } catch {}
+      if (campaign.categoryImage?.key) try { campaign.categoryImage.url = await getobject(campaign.categoryImage.key); } catch {}
+      if (campaign.brandImage?.key) try { campaign.brandImage.url = await getobject(campaign.brandImage.key); } catch {}
+    }
+    res.json({ success: true, campaigns });
+  } catch (err) {
+    console.error('Error in getPublicActiveCampaigns:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Get only PRIVATE campaigns (join required — client assigns tasks)
+exports.getPrivateActiveCampaigns = async (req, res) => {
+  try {
+    await activateCurrentCampaigns();
+    await deactivateExpiredCampaigns();
+    const now = new Date();
+    // private mein wo bhi include karo jinpe campaignType set nahi (legacy data)
+    const campaigns = await Campaign.find({
+      status: { $ne: 'Inactive' },
+      endDate: { $gte: now },
+      $or: [{ campaignType: 'private' }, { campaignType: { $exists: false } }, { campaignType: null }],
+    }).lean();
+    for (const campaign of campaigns) {
+      if (campaign.image?.key) try { campaign.image.url = await getobject(campaign.image.key); } catch {}
+      if (campaign.categoryImage?.key) try { campaign.categoryImage.url = await getobject(campaign.categoryImage.key); } catch {}
+      if (campaign.brandImage?.key) try { campaign.brandImage.url = await getobject(campaign.brandImage.key); } catch {}
+      // Ensure campaignType is always set in response
+      if (!campaign.campaignType) campaign.campaignType = 'private';
+    }
+    res.json({ success: true, campaigns });
+  } catch (err) {
+    console.error('Error in getPrivateActiveCampaigns:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
@@ -362,6 +413,13 @@ exports.updateCampaign = [
       } catch (alertErr) {
         console.error('Failed to send Telegram start alert on update:', alertErr);
       }
+    }
+
+    if (updateData.campaignType !== undefined) {
+      updateData.campaignType = updateData.campaignType === 'public' ? 'public' : 'private';
+    }
+    if (updateData.supportedTaskTypes !== undefined) {
+      updateData.supportedTaskTypes = parseSupportedTaskTypes(updateData.supportedTaskTypes);
     }
 
     const updatedCampaign = await Campaign.findOneAndUpdate({ _id: campaignId }, updateData, { new: true });

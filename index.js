@@ -328,6 +328,7 @@ app.use('/api/superadmin', superadminRoutes);
 // Campaign Routes
 app.use('/api/auth/user/campaign', campaignRoutes);
 app.use('/api/campaign-tasks', require('./routes/campaignTaskRoutes'));
+app.use('/api/reels-tutorials', require('./routes/reelsTutorialRoutes'));
 app.use('/api/ugc', ugcRoutes);
 app.use('/api/news-blog', newsBlogRoutes);
 app.use('/api/news-blog-tasks', newsBlogTaskRoutes);
@@ -432,6 +433,12 @@ if (!fs.existsSync(uploadsDir)) {
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(uploadsDir));
+
+// Serve proof screenshots
+const proofsDir = path.join(__dirname, 'uploads', 'proofs');
+if (!fs.existsSync(proofsDir)) {
+  fs.mkdirSync(proofsDir, { recursive: true });
+}
 
 // Serve screenshots
 const screenshotsDir = path.join(__dirname, 'uploads', 'screenshots');

@@ -12,6 +12,12 @@ router.post('/upload', authenticate, authorize('client', 'admin', 'super_admin')
 // Get all active campaigns — public route
 router.get('/active', campaignController.getActiveCampaigns);
 
+// Get only PUBLIC type active campaigns (no join required — for Task tab)
+router.get('/active/public', campaignController.getPublicActiveCampaigns);
+
+// Get only PRIVATE type active campaigns (join required — for Campaign tab)
+router.get('/active/private', campaignController.getPrivateActiveCampaigns);
+
 // Register user for campaign
 router.post('/register/:campaignId', campaignController.registeredCampaign);
 

@@ -19,6 +19,14 @@ const campaignTaskSchema = new mongoose.Schema({
     enum: ['like', 'comment', 'view', 'follow', 'upload_reel', 'share', 'save'],
   },
 
+  /** Campaign content category: reels, post, ugc, app_review, gmb_review */
+  contentCategory: {
+    type: String,
+    enum: ['reels', 'post', 'ugc', 'app_review', 'gmb_review'],
+    default: 'post',
+    index: true,
+  },
+
   targetUrl:   { type: String, default: '' },   // URL user must interact with
   targetCount: { type: Number, default: 1 },    // e.g. get 100 views
   credits:     { type: Number, required: true }, // credits on completion
@@ -37,6 +45,20 @@ const campaignTaskSchema = new mongoose.Schema({
 
   assignedTo: { type: [String], default: [] }, // googleIds
   completedBy: { type: [String], default: [] },
+
+  visibility: {
+    type: String,
+    enum: ['public', 'private'],
+    default: 'private',
+  },
+
+  // For public task completions — proof submitted by users
+  submissions: [{
+    userId:      { type: String, required: true },
+    proofUrl:    { type: String, default: '' },
+    submittedAt: { type: Date, default: Date.now },
+    status:      { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+  }],
 
   deadline: { type: Date, default: null },
   order:    { type: Number, default: 0 },

@@ -4,6 +4,7 @@ const Reel = require('../models/Reel');
 const CreditWallet = require('../models/CreditWallet');
 const reelController = require('./reelcontroller');
 const { calculatePenalty, getTimerStatus } = require('../utils/taskPenalty');
+const { getDailyQuota, recordDailyAccept, DEFAULT_DAILY_LIMIT } = require('../utils/dailyTaskLimit');
 
 function findReelIndex(sharedReels, reelId, campaignId) {
   return sharedReels.reels.findIndex(
@@ -62,8 +63,9 @@ exports.getCampaignTasks = async (req, res) => {
       settings: {
         autoApproval: !!campaign.autoApproval,
         cancellationPenalty: campaign.cancellationPenalty ?? 2,
-        penaltyThresholdMinutes: campaign.penaltyThresholdMinutes ?? 30,
+        penaltyThresholdMinutes: campaign.penaltyThresholdMinutes ?? 10,
         allowCancellation: campaign.allowCancellation !== false,
+        dailyTaskAcceptLimit: campaign.dailyTaskAcceptLimit ?? 3,
       },
     });
   } catch (err) {
@@ -197,7 +199,7 @@ exports.cancelTask = async (req, res) => {
     }
 
     const reel = shared.reels[idx];
-    const threshold = campaign.penaltyThresholdMinutes ?? 30;
+    const threshold = campaign.penaltyThresholdMinutes ?? 10;
     const penaltyAmount = campaign.cancellationPenalty ?? 2;
     const cancelledAt = new Date();
 
@@ -215,25 +217,19 @@ exports.cancelTask = async (req, res) => {
       }
     }
 
-    reel.TaskStatus = 'cancelled';
-    reel.isTaskAccepted = false;
-    reel.cancelledAt = cancelledAt;
-    reel.cancellationReason = reason || '';
-    reel.penaltyApplied = creditsPenalized > 0;
-    reel.creditsPenalized = creditsPenalized;
-    reel.timerExpired = creditsPenalized > 0;
-
+    // Remove task from user — returns slot; client can reassign
+    shared.reels.splice(idx, 1);
     await shared.save();
 
     res.json({
       success: true,
       message:
         creditsPenalized > 0
-          ? `Task cancelled. ${creditsPenalized} credit(s) deducted.`
-          : 'Task cancelled with no penalty.',
+          ? `Task cancelled. ${creditsPenalized} credit(s) deducted. Task returned to pool.`
+          : 'Task cancelled with no penalty. Task returned to pool.',
       creditsPenalized,
       penaltyApplied: creditsPenalized > 0,
-      updatedReel: reel,
+      returned: true,
     });
   } catch (err) {
     console.error('cancelTask:', err);
@@ -268,6 +264,23 @@ const assignmentStrategies = {
   },
 };
 
+/** GET /api/pools/task/daily-quota/:userId — optional query campaignId for campaign-specific limit */
+exports.getDailyQuota = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { campaignId } = req.query;
+    let limit = DEFAULT_DAILY_LIMIT;
+    if (campaignId) {
+      const campaign = await Campaign.findById(campaignId).select('dailyTaskAcceptLimit penaltyThresholdMinutes').lean();
+      if (campaign) limit = campaign.dailyTaskAcceptLimit ?? DEFAULT_DAILY_LIMIT;
+    }
+    const quota = await getDailyQuota(userId, limit);
+    res.json({ success: true, quota });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 /** POST /api/pools/task/bulk-assign — body: userIds, reelIds, campaignId, reelsPerUser, strategy */
 exports.bulkAssignTasks = async (req, res) => {
   try {
@@ -278,14 +291,23 @@ exports.bulkAssignTasks = async (req, res) => {
       reelsPerUser = 1,
       strategy = 'roundRobin',
     } = req.body;
-    if (!userIds?.length || !reelIds?.length || !campaignId) {
+    if (!reelIds?.length || !campaignId) {
       return res.status(400).json({
         success: false,
-        message: 'userIds, reelIds, campaignId required',
+        message: 'reelIds and campaignId required',
       });
     }
+    if (!userIds?.length) {
+      const campaign = await Campaign.findById(campaignId).select('campaignType').lean();
+      if (campaign?.campaignType !== 'public') {
+        return res.status(400).json({
+          success: false,
+          message: 'userIds required for private campaigns',
+        });
+      }
+    }
     const stratFn = assignmentStrategies[strategy] || assignmentStrategies.roundRobin;
-    const plan = stratFn(userIds, reelIds, reelsPerUser);
+    const plan = stratFn(userIds || [], reelIds, reelsPerUser);
 
     req.body = {
       userIds,

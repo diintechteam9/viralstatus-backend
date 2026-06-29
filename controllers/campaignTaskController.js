@@ -1,5 +1,96 @@
 const CampaignTask = require('../models/CampaignTask');
-const Campaign    = require('../models/campaign');
+const Campaign     = require('../models/campaign');
+const SharedReels  = require('../models/SharedReels');
+const UGCForm      = require('../models/UGCForm');
+const { buildTaskTemplate } = require('../utils/campaignTaskFactory');
+const { VALID_TASK_TYPE_IDS } = require('../utils/campaignTaskTypes');
+const multer       = require('multer');
+const path         = require('path');
+const fs           = require('fs');
+
+// Multer config for proof screenshots
+const proofStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '../uploads/proofs');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, `proof-${Date.now()}-${Math.random().toString(36).slice(2)}${path.extname(file.originalname)}`);
+  },
+});
+const uploadProof = multer({ storage: proofStorage, limits: { fileSize: 10 * 1024 * 1024 } });
+
+async function resolveTargetUserIds(campaign, userIds) {
+  if (Array.isArray(userIds) && userIds.length > 0) return userIds;
+  if (campaign.campaignType === 'public') {
+    const MobileUser = require('../models/MobileUser');
+    const allUsers = await MobileUser.find({ googleId: { $exists: true, $ne: null, $ne: '' } })
+      .select('googleId').lean();
+    return allUsers.map((u) => u.googleId).filter(Boolean);
+  }
+  return [];
+}
+
+async function assignCampaignTaskToUsers(task, userIds, assignmentScope, campaign) {
+  const taskCampaignType =
+    assignmentScope === 'public' || assignmentScope === 'private'
+      ? assignmentScope
+      : task.visibility === 'public' || campaign.campaignType === 'public'
+        ? 'public'
+        : 'private';
+
+  await CampaignTask.findByIdAndUpdate(
+    task._id,
+    { $addToSet: { assignedTo: { $each: userIds } } },
+    { new: true }
+  );
+
+  const now = new Date();
+  let assignedCount = 0;
+  const taskIdStr = String(task._id);
+
+  for (const googleId of userIds) {
+    const shared = await SharedReels.findOne({ googleId });
+    const already = shared?.reels?.some(
+      (r) =>
+        String(r.campaignTaskId) === taskIdStr ||
+        (String(r.campaignId) === String(task.campaignId) &&
+          r.contentCategory === task.contentCategory &&
+          String(r.reelId) === taskIdStr)
+    );
+    if (already) continue;
+
+    await SharedReels.findOneAndUpdate(
+      { googleId },
+      {
+        $push: {
+          reels: {
+            reelId: taskIdStr,
+            campaignTaskId: taskIdStr,
+            contentCategory: task.contentCategory || 'post',
+            s3Key: '',
+            s3Url: '',
+            campaignId: task.campaignId,
+            campaignName: campaign?.campaignName || task.title,
+            credits: task.credits,
+            title: task.title,
+            campaignImageKey: campaign?.image?.key || '',
+            isTaskComplete: false,
+            isTaskAccepted: false,
+            TaskStatus: 'assigned',
+            acceptedAt: null,
+            campaignType: taskCampaignType,
+            createdAt: now,
+          },
+        },
+      },
+      { upsert: true, new: true }
+    );
+    assignedCount++;
+  }
+  return assignedCount;
+}
 
 // POST /api/campaign-tasks
 exports.createTask = async (req, res) => {
@@ -7,7 +98,8 @@ exports.createTask = async (req, res) => {
     const {
       campaignId, clientId, title, description,
       platform, taskType, targetUrl, targetCount,
-      credits, proofRequired, status, deadline, order,
+      credits, proofRequired, status, deadline, order, visibility,
+      contentCategory,
     } = req.body;
 
     if (!campaignId || !title || !platform || !taskType || credits === undefined) {
@@ -23,11 +115,165 @@ exports.createTask = async (req, res) => {
       title, description, platform, taskType,
       targetUrl, targetCount, credits,
       proofRequired, status, deadline, order,
+      visibility: visibility || (campaign.campaignType === 'public' ? 'public' : 'private'),
+      contentCategory: contentCategory || 'post',
     });
 
     res.status(201).json({ success: true, task });
   } catch (err) {
     console.error('createTask:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/** POST /api/campaign-tasks/:campaignId/generate — auto-create tasks for supported types */
+exports.generateCampaignTasks = async (req, res) => {
+  try {
+    const { campaignId } = req.params;
+    const campaign = await Campaign.findById(campaignId).lean();
+    if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
+
+    const { contentCategory } = req.body;
+    let types = (campaign.supportedTaskTypes || ['reels']).filter((t) => VALID_TASK_TYPE_IDS.includes(t));
+    if (contentCategory && VALID_TASK_TYPE_IDS.includes(contentCategory)) {
+      types = [contentCategory];
+    }
+    const created = [];
+    const skipped = [];
+
+    for (const category of types) {
+      if (category === 'reels') {
+        skipped.push({ category, reason: 'Assign reels from Content Pool below' });
+        continue;
+      }
+
+      const existing = await CampaignTask.findOne({
+        campaignId: String(campaignId),
+        contentCategory: category,
+        status: { $in: ['active', 'draft', 'paused'] },
+      }).lean();
+
+      if (existing) {
+        skipped.push({ category, reason: 'Task already exists', taskId: existing._id });
+        continue;
+      }
+
+      const template = buildTaskTemplate(campaign, category);
+      if (!template) {
+        skipped.push({ category, reason: 'Unknown category' });
+        continue;
+      }
+
+      const task = await CampaignTask.create(template);
+      created.push(task);
+
+      if (category === 'ugc') {
+        await UGCForm.findOneAndUpdate(
+          { campaignId: String(campaignId) },
+          {
+            $setOnInsert: {
+              title: `${campaign.campaignName} — UGC Testimonial`,
+              instructions: template.description,
+              script: '',
+              referenceVideoUrl: '',
+            },
+          },
+          { upsert: true, new: true }
+        );
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Generated ${created.length} task(s)`,
+      created,
+      skipped,
+    });
+  } catch (err) {
+    console.error('generateCampaignTasks:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/** POST /api/campaign-tasks/:campaignId/distribute — send post/ugc/review tasks to users */
+exports.distributeCampaignTasks = async (req, res) => {
+  try {
+    const { campaignId } = req.params;
+    let { userIds, assignmentScope, contentCategory } = req.body;
+
+    const campaign = await Campaign.findById(campaignId).lean();
+    if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
+
+    userIds = await resolveTargetUserIds(campaign, userIds);
+    if (!userIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'No users to assign. For private campaigns, select participants first.',
+      });
+    }
+
+    const categoryList = contentCategory
+      ? [contentCategory]
+      : ['post', 'ugc', 'app_review', 'gmb_review'];
+
+    const tasks = await CampaignTask.find({
+      campaignId: String(campaignId),
+      status: 'active',
+      contentCategory: { $in: categoryList },
+    }).lean();
+
+    if (!tasks.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'No tasks to distribute. Click "Generate Tasks" first.',
+      });
+    }
+
+    let totalAssigned = 0;
+    const breakdown = [];
+
+    for (const task of tasks) {
+      const count = await assignCampaignTaskToUsers(task, userIds, assignmentScope, campaign);
+      totalAssigned += count;
+      breakdown.push({ contentCategory: task.contentCategory, title: task.title, assigned: count });
+    }
+
+    res.json({
+      success: true,
+      message: `Distributed ${totalAssigned} task assignment(s) to ${userIds.length} user(s)`,
+      totalAssigned,
+      userCount: userIds.length,
+      breakdown,
+    });
+  } catch (err) {
+    console.error('distributeCampaignTasks:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/** GET /api/campaign-tasks/task/:taskId — single task for user detail view */
+exports.getTaskById = async (req, res) => {
+  try {
+    const task = await CampaignTask.findById(req.params.taskId).lean();
+    if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
+
+    const campaign = await Campaign.findById(task.campaignId).lean();
+    const userId = req.query.userId;
+
+    res.json({
+      success: true,
+      task: {
+        ...task,
+        campaignName: campaign?.campaignName || '',
+        campaignImageUrl: campaign?.image?.url || '',
+        brandName: campaign?.brandName || '',
+        alreadyCompleted: userId ? (task.completedBy || []).includes(userId) : false,
+        alreadySubmitted: userId
+          ? (task.submissions || []).some((s) => s.userId === userId)
+          : false,
+      },
+    });
+  } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -43,11 +289,130 @@ exports.getTasksByCampaign = async (req, res) => {
   }
 };
 
+// GET /api/campaign-tasks/public/all  — saare active public tasks (kisi bhi user ke liye)
+exports.getPublicTasks = async (req, res) => {
+  try {
+    const { userId } = req.query; // optional — to check if already completed
+    const tasks = await CampaignTask.find({ visibility: 'public', status: 'active' })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Campaign info attach karo (name, image)
+    const campaignIds = [...new Set(tasks.map(t => t.campaignId))];
+    const campaigns   = await Campaign.find({ _id: { $in: campaignIds } }).lean();
+    const campMap     = {};
+    campaigns.forEach(c => { campMap[String(c._id)] = c; });
+
+    const enriched = tasks.map(t => {
+      const camp = campMap[t.campaignId] || {};
+      return {
+        ...t,
+        contentCategory: t.contentCategory || 'post',
+        campaignName:     camp.campaignName || '',
+        campaignImageUrl: camp.image?.url   || '',
+        brandName:        camp.brandName    || '',
+        alreadyCompleted: userId ? (t.completedBy || []).includes(userId) : false,
+        alreadySubmitted: userId
+          ? (t.submissions || []).some(s => s.userId === userId)
+          : false,
+      };
+    });
+
+    res.json({ success: true, tasks: enriched });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// POST /api/campaign-tasks/task/:taskId/submit-public
+// User public task ka proof submit karta hai
+exports.submitPublicTask = async (req, res) => {
+  try {
+    const { taskId }  = req.params;
+    const { userId, proofUrl } = req.body;
+
+    if (!userId) return res.status(400).json({ success: false, message: 'userId required' });
+
+    const task = await CampaignTask.findById(taskId);
+    if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
+
+    const isAssigned = (task.assignedTo || []).includes(userId);
+    if (task.visibility !== 'public' && !isAssigned) {
+      return res.status(400).json({ success: false, message: 'Task not available for this user' });
+    }
+
+    // Already submitted check
+    const alreadySubmitted = task.submissions.some(s => s.userId === userId);
+    if (alreadySubmitted) return res.status(400).json({ success: false, message: 'Already submitted' });
+
+    task.submissions.push({ userId, proofUrl: proofUrl || '', submittedAt: new Date(), status: 'pending' });
+    await task.save();
+
+    res.json({ success: true, message: 'Proof submitted successfully. Pending review.' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// PATCH /api/campaign-tasks/task/:taskId/review-submission
+// Client submission approve/reject karta hai
+exports.reviewPublicSubmission = async (req, res) => {
+  try {
+    const { taskId }  = req.params;
+    const { userId, status } = req.body; // status: 'approved' | 'rejected'
+
+    if (!['approved', 'rejected'].includes(status))
+      return res.status(400).json({ success: false, message: 'status must be approved or rejected' });
+
+    const task = await CampaignTask.findById(taskId);
+    if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
+
+    const sub = task.submissions.find(s => s.userId === userId);
+    if (!sub) return res.status(404).json({ success: false, message: 'Submission not found' });
+
+    sub.status = status;
+
+    // Agar approved to completedBy me add karo
+    if (status === 'approved' && !task.completedBy.includes(userId)) {
+      task.completedBy.push(userId);
+
+      // Credits add karo user ke wallet me
+      try {
+        const CreditWallet = require('../models/CreditWallet');
+        await CreditWallet.findOneAndUpdate(
+          { userId },
+          { $inc: { totalBalance: task.credits, acceptedCredits: task.credits } },
+          { upsert: true }
+        );
+      } catch (e) {
+        console.error('Credit wallet update failed:', e.message);
+      }
+    }
+
+    await task.save();
+    res.json({ success: true, message: `Submission ${status}` });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// GET /api/campaign-tasks/task/:taskId/submissions  — client ke liye
+exports.getPublicSubmissions = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const task = await CampaignTask.findById(taskId).lean();
+    if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
+    res.json({ success: true, submissions: task.submissions || [] });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // PUT /api/campaign-tasks/task/:taskId
 exports.updateTask = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const allowed = ['title','description','platform','taskType','targetUrl','targetCount','credits','proofRequired','status','deadline','order'];
+    const allowed = ['title','description','platform','taskType','targetUrl','targetCount','credits','proofRequired','status','deadline','order','visibility','contentCategory'];
     const update = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];
@@ -87,68 +452,131 @@ exports.updateTaskStatus = async (req, res) => {
   }
 };
 
-// POST /api/campaign-tasks/task/:taskId/assign
+// POST /api/campaign-tasks/task/:taskId/assign  — Private task assign
 exports.assignTask = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const { userIds, reelId, reelS3Url, reelS3Key, reelTitle } = req.body;
-    if (!Array.isArray(userIds) || userIds.length === 0)
-      return res.status(400).json({ success: false, message: 'userIds array is required' });
+    const { userIds, assignToAll, assignmentScope, reelId, reelS3Url, reelS3Key, reelTitle } = req.body;
 
-    const CampaignTask = require('../models/CampaignTask');
-    const SharedReels  = require('../models/SharedReels');
-
-    const task = await CampaignTask.findByIdAndUpdate(
-      taskId,
-      { $addToSet: { assignedTo: { $each: userIds } } },
-      { new: true }
-    );
+    const task = await CampaignTask.findById(taskId);
     if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
 
-    const now = new Date();
-    for (const googleId of userIds) {
-      const existing = await SharedReels.findOne({ googleId, 'reels.reelId': taskId });
-      if (existing) continue;
+    const campaign = await Campaign.findById(task.campaignId).lean();
 
-      await SharedReels.findOneAndUpdate(
-        { googleId },
-        {
-          $push: {
-            reels: {
-              reelId: taskId,
-              s3Key: reelS3Key || '',
-              s3Url: reelS3Url || '',
-              campaignId: task.campaignId,
-              campaignName: task.title,
-              credits: task.credits,
-              title: reelTitle || task.title,
-              campaignImageKey: '',
-              isTaskComplete: false,
-              isTaskAccepted: true,
-              TaskStatus: 'accepted',
-              acceptedAt: now,
-              createdAt: now,
-            },
-          },
-        },
-        { upsert: true, new: true }
-      );
+    let targetUserIds = userIds;
+    if (assignToAll || (task.visibility === 'public' && (!Array.isArray(userIds) || userIds.length === 0))) {
+      targetUserIds = await resolveTargetUserIds(campaign || {}, []);
     }
 
-    res.json({ success: true, task });
+    if (!Array.isArray(targetUserIds) || targetUserIds.length === 0)
+      return res.status(400).json({ success: false, message: 'No users to assign' });
+
+    const assignedCount = await assignCampaignTaskToUsers(
+      task,
+      targetUserIds,
+      assignmentScope || (task.visibility === 'public' ? 'public' : 'private'),
+      campaign || {}
+    );
+
+    // Optional reel attachment for upload_reel type
+    if (reelId && assignedCount > 0) {
+      for (const googleId of targetUserIds) {
+        await SharedReels.findOneAndUpdate(
+          { googleId, 'reels.campaignTaskId': String(taskId) },
+          {
+            $set: {
+              'reels.$.reelId': reelId,
+              'reels.$.s3Key': reelS3Key || '',
+              'reels.$.s3Url': reelS3Url || '',
+              'reels.$.title': reelTitle || task.title,
+            },
+          }
+        );
+      }
+    }
+
+    res.json({ success: true, message: `Task assigned to ${assignedCount} user(s)`, task });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
+// POST /api/campaign-tasks/task/:taskId/upload-proof  — screenshot upload
+exports.uploadPublicTaskProof = [
+  uploadProof.single('file'),
+  async (req, res) => {
+    try {
+      const { taskId } = req.params;
+      if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+
+      const task = await CampaignTask.findById(taskId).lean();
+      if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
+
+      // Build accessible URL
+      const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
+      const url = `${backendUrl}/uploads/proofs/${req.file.filename}`;
+
+      res.json({ success: true, url });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  },
+];
+
 // GET /api/campaign-tasks/:campaignId/participants
 exports.getCampaignParticipants = async (req, res) => {
   try {
     const { campaignId } = req.params;
-    const Campaign = require('../models/campaign');
     const campaign = await Campaign.findById(campaignId).lean();
     if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
     res.json({ success: true, userIds: campaign.userIds || [] });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// GET /api/campaign-tasks/:campaignId/submissions-by-category?contentCategory=post
+exports.getSubmissionsByCategory = async (req, res) => {
+  try {
+    const { campaignId } = req.params;
+    const { contentCategory } = req.query;
+    const filter = { campaignId: String(campaignId) };
+    if (contentCategory) filter.contentCategory = contentCategory;
+
+    const tasks = await CampaignTask.find(filter).lean();
+    const submissions = [];
+
+    for (const task of tasks) {
+      for (const sub of task.submissions || []) {
+        submissions.push({
+          userId: sub.userId,
+          proofUrl: sub.proofUrl || '',
+          submittedAt: sub.submittedAt,
+          status: sub.status || 'pending',
+          taskId: task._id,
+          taskTitle: task.title,
+          contentCategory: task.contentCategory,
+          credits: task.credits,
+          platform: task.platform,
+          taskType: task.taskType,
+          visibility: task.visibility,
+        });
+      }
+    }
+
+    submissions.sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
+
+    const stats = {
+      total: submissions.length,
+      pending: submissions.filter((s) => s.status === 'pending').length,
+      approved: submissions.filter((s) => s.status === 'approved').length,
+      rejected: submissions.filter((s) => s.status === 'rejected').length,
+      creditsGiven: submissions
+        .filter((s) => s.status === 'approved')
+        .reduce((sum, s) => sum + (s.credits || 0), 0),
+    };
+
+    res.json({ success: true, submissions, stats, taskCount: tasks.length });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

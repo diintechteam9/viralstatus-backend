@@ -10,10 +10,12 @@ const SharedReels = require('../models/SharedReels');
 const UserResponse = require('../models/userResponse');
 const userResponse = require('../models/userResponse');
 const Campaign = require('../models/campaign');
+const RegisteredCampaign = require('../models/RegisteredCampaign');
 const getYoutubeStats = require('../utils/getYoutubeStats');
 const { getPostStats, detectPlatform, extractYoutubeId } = require('../utils/socialPostStats');
 const telegramAlerts = require('../utils/telegramAlerts');
 const { resolveUserProfiles, resolveOneUserProfile } = require('../utils/resolveUserProfiles');
+const { getDailyQuota, recordDailyAccept, DEFAULT_DAILY_LIMIT } = require('../utils/dailyTaskLimit');
 
 // ─── Fast Multi Upload: Step 1 — Get batch presigned PUT URLs ───────────────
 exports.getPresignedUrls = async (req, res) => {
@@ -368,40 +370,63 @@ exports.deleteAllReelsFromPool = async (req, res) => {
   }
 };
 
-// Assign specified number of reels to each user (sequential with shuffled reels)
+// Assign reels to users — round-robin through selected pool (same reel can go to multiple users)
 exports.assignReelsToUsersWithCount = async (req, res) => {
-  const { userIds, reelIds, reelsPerUser, campaignId } = req.body;
+  let { userIds, reelIds, reelsPerUser, campaignId, assignmentScope } = req.body;
   // Validate inputs
-  if (!Array.isArray(userIds) || !Array.isArray(reelIds) || !reelsPerUser || reelsPerUser < 1) {
+  if (!Array.isArray(reelIds) || !reelsPerUser || reelsPerUser < 1) {
     return res.status(400).json({ 
       success: false,
-      error: "userIds and reelIds must be arrays and reelsPerUser must be a positive number." 
-    });
-  }
-
-  // Validate all reelIds are valid MongoDB ObjectIds
-  const invalidReelIds = reelIds.filter(id => !mongoose.Types.ObjectId.isValid(id));
-  if (invalidReelIds.length > 0) {
-    return res.status(400).json({
-      success: false,
-      error: `Invalid reel IDs provided: ${invalidReelIds.join(', ')}. Each reelId must be a valid MongoDB ObjectId.`
-    });
-  }
-
-  const totalReelsNeeded = userIds.length * reelsPerUser;
-  if (reelIds.length < totalReelsNeeded) {
-    return res.status(400).json({ 
-      success: false,
-      error: `Not enough reels. Need ${totalReelsNeeded} reels for ${userIds.length} users with ${reelsPerUser} reels each, but only ${reelIds.length} reels provided.` 
+      error: "reelIds must be an array and reelsPerUser must be a positive number." 
     });
   }
 
   try {
-    // Fetch campaign to get image key
     const campaign = await Campaign.findById(campaignId);
     if (!campaign) {
       return res.status(404).json({ success: false, error: 'Campaign not found' });
     }
+
+    // Public campaign — auto-assign to all registered users when no userIds provided
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      if (campaign.campaignType === 'public') {
+        const MobileUser = require('../models/MobileUser');
+        const allUsers = await MobileUser.find({ googleId: { $exists: true, $ne: null, $ne: '' } })
+          .select('googleId').lean();
+        userIds = allUsers.map(u => u.googleId).filter(Boolean);
+      }
+    }
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No users to assign. For private campaigns, select participants first.',
+      });
+    }
+
+    // Validate all reelIds are valid MongoDB ObjectIds
+    const invalidReelIds = reelIds.filter(id => !mongoose.Types.ObjectId.isValid(id));
+    if (invalidReelIds.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid reel IDs provided: ${invalidReelIds.join(', ')}. Each reelId must be a valid MongoDB ObjectId.`
+      });
+    }
+
+    if (!reelIds.length) {
+      return res.status(400).json({
+        success: false,
+        error: 'Select at least one reel to assign.',
+      });
+    }
+
+    const isPublicCampaign = campaign.campaignType === 'public';
+    const taskCampaignType =
+      assignmentScope === 'public' || assignmentScope === 'private'
+        ? assignmentScope
+        : isPublicCampaign
+          ? 'public'
+          : 'private';
+
     const campaignImageKey = campaign?.image?.key || null;
 
     // Fetch reels by IDs
@@ -416,7 +441,7 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
     // Shuffle the reels array for fair distribution
     const shuffledReels = [...reels].sort(() => Math.random() - 0.5);
     
-    // Create assignments
+    // Create assignments — round-robin through shuffledReels (reels can be reused across users)
     const assignments = [];
     let reelIndex = 0;
     const duplicateReelsByUser = {};
@@ -428,16 +453,23 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
 
       // Fetch user's existing SharedReels document
       const shared = await SharedReels.findOne({ googleId: userId });
-      const existingReelIds = shared ? shared.reels.map(r => r.reelId?.toString()) : [];
+      const existingReelIdsForCampaign = shared
+        ? shared.reels
+            .filter((r) => String(r.campaignId) === String(campaignId))
+            .map((r) => r.reelId?.toString())
+        : [];
       const campaignName = campaign.campaignName;
       const campaignCredits = campaign.credits;
 
-      // Assign reelsPerUser reels to this user
+      // Assign reelsPerUser reels to this user (cycle pool when fewer reels than users)
       let assignedCount = 0;
-      while (assignedCount < reelsPerUser && reelIndex < shuffledReels.length) {
-        const reel = shuffledReels[reelIndex];
+      let attempts = 0;
+      const maxAttempts = shuffledReels.length * reelsPerUser + shuffledReels.length;
+      while (assignedCount < reelsPerUser && attempts < maxAttempts) {
+        const reel = shuffledReels[reelIndex % shuffledReels.length];
         reelIndex++;
-        if (existingReelIds.includes(reel._id.toString())) {
+        attempts++;
+        if (existingReelIdsForCampaign.includes(reel._id.toString())) {
           duplicateReels.push(reel._id.toString());
           continue;
         }
@@ -456,6 +488,9 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
           isTaskAccepted: autoAccept,
           TaskStatus: autoAccept ? 'accepted' : 'pending',
           acceptedAt: autoAccept ? now : null,
+          campaignType: taskCampaignType,
+          contentCategory: 'reels',
+          campaignTaskId: '',
           createdAt: now,
         });
         assignedCount++;
@@ -477,11 +512,36 @@ exports.assignReelsToUsersWithCount = async (req, res) => {
       duplicateReelsByUser[userId] = duplicateReels;
     }
 
-    // Determine if there were any duplicates
-    const hasDuplicates = Object.values(duplicateReelsByUser).some(arr => arr.length > 0);
-    const responseMessage = hasDuplicates
-      ? 'Reel not assigned. Duplicate reels were not allowed.'
-      : `Successfully assigned up to ${reelsPerUser} new reels to each of ${userIds.length} users.`;
+    const usersWithTasks = assignments.filter((a) => (a.reels?.length || 0) > 0).length;
+    const totalAssigned = assignments.reduce((sum, a) => sum + (a.reels?.length || 0), 0);
+    const skippedDuplicates = Object.values(duplicateReelsByUser).reduce((sum, arr) => sum + arr.length, 0);
+
+    let responseMessage;
+    if (totalAssigned === 0) {
+      responseMessage = skippedDuplicates
+        ? 'No new tasks assigned — selected reel(s) were already assigned to these users for this campaign.'
+        : 'No tasks were assigned.';
+    } else if (isPublicCampaign) {
+      responseMessage = `Assigned ${totalAssigned} task(s) to ${usersWithTasks} of ${userIds.length} users using ${reelIds.length} reel(s) (round-robin).`;
+    } else {
+      responseMessage = `Successfully assigned ${totalAssigned} task(s) to ${usersWithTasks} user(s).`;
+    }
+    if (skippedDuplicates > 0 && totalAssigned > 0) {
+      responseMessage += ` (${skippedDuplicates} duplicate assignment(s) skipped.)`;
+    }
+
+    const hasDuplicates = skippedDuplicates > 0;
+
+    if (totalAssigned === 0) {
+      return res.status(400).json({
+        success: false,
+        message: responseMessage,
+        isDuplicate: hasDuplicates,
+        assignments,
+        duplicateReelsByUser,
+        campaignId,
+      });
+    }
 
     res.json({
       success: true,
@@ -522,6 +582,35 @@ exports.cleanupEmptySharedReels = async (req, res) => {
   }
 };
 
+// Resolve whether a shared reel is public or private for the user-facing Task tabs
+function resolveReelCampaignType(reel, campaign, userId, registeredCampaignIds, registeredCampaigns = []) {
+  // Public bulk-assignment flag always wins — must show in Public tab
+  if (reel.campaignType === 'public') {
+    return 'public';
+  }
+
+  const cid = String(reel.campaignId || '');
+  const userJoined =
+    registeredCampaignIds.has(cid) ||
+    (Array.isArray(campaign?.userIds) && campaign.userIds.includes(userId));
+  const campaignIsPrivate = !campaign || campaign.campaignType !== 'public';
+  const joinedEntry = registeredCampaigns.find(
+    (entry) => String(entry.campaign?._id || entry.campaign?.id || '') === cid
+  );
+  const joinedAsPrivate = joinedEntry && joinedEntry.campaign?.campaignType !== 'public';
+
+  if (reel.campaignType === 'private') {
+    return 'private';
+  }
+
+  // Joined private campaign → Private tab
+  if ((userJoined && campaignIsPrivate) || joinedAsPrivate) {
+    return 'private';
+  }
+
+  return campaign?.campaignType === 'public' ? 'public' : 'private';
+}
+
 //to store in db
 exports.getSharedReelsForUser = async (req, res) => {
   const { userId } = req.params; // userId is googleId
@@ -530,10 +619,20 @@ exports.getSharedReelsForUser = async (req, res) => {
     if (!shared || !Array.isArray(shared.reels)) {
       return res.json({ success: true, reels: [] });
     }
+
+    const regDoc = await RegisteredCampaign.findOne({ userId }).lean();
+    const registeredCampaigns = regDoc?.registeredCampaigns || [];
+    const registeredCampaignIds = new Set(
+      registeredCampaigns
+        .map((entry) => String(entry.campaign?._id || entry.campaign?.id || ''))
+        .filter(Boolean)
+    );
+
     // Filter out tasks whose campaign has expired
     const now = new Date();
     const campaignIds = [...new Set(shared.reels.map(r => r.campaignId).filter(Boolean))];
-    const campaigns = await Campaign.find({ _id: { $in: campaignIds } }).select('_id endDate').lean();
+    const campaigns = await Campaign.find({ _id: { $in: campaignIds } }).select('_id endDate campaignType userIds').lean();
+    const campaignMap = new Map(campaigns.map(c => [String(c._id), c]));
     const expiredIds = new Set(
       campaigns.filter(c => c.endDate && new Date(c.endDate) < now).map(c => String(c._id))
     );
@@ -545,6 +644,7 @@ exports.getSharedReelsForUser = async (req, res) => {
 
     // Generate fresh S3 URLs for each reel and for campaign image, and add status from userResponse
     const reelsWithFreshUrls = await Promise.all(reelsToReturn.map(async r => {
+      const campaign = campaignMap.get(String(r.campaignId));
       // Find matching userResponse entry by reelId and userId
       const userRespEntry = userResponses.find(ur => String(ur.reelId) === String(r.reelId));
       return {
@@ -567,6 +667,9 @@ exports.getSharedReelsForUser = async (req, res) => {
         timerExpired: !!r.timerExpired,
         cancellationReason: r.cancellationReason || '',
         _id: r._id,
+        contentCategory: r.contentCategory || 'reels',
+        campaignTaskId: r.campaignTaskId || '',
+        campaignType: resolveReelCampaignType(r, campaign, userId, registeredCampaignIds, registeredCampaigns),
         status: userRespEntry ? userRespEntry.status : 'pending',
         createdAt: r.createdAt,
       };
@@ -910,40 +1013,56 @@ exports.acceptTask = async (req, res) => {
   const { userId, reelId, campaignId } = req.body;
   try {
     if (!userId || !reelId) {
-      return res.status(400).json({ error: 'Missing userId or reelId' });
+      return res.status(400).json({ success: false, message: 'Missing userId or reelId' });
+    }
+
+    const campaign = campaignId ? await Campaign.findById(campaignId).lean() : null;
+    const dailyLimit = campaign?.dailyTaskAcceptLimit ?? DEFAULT_DAILY_LIMIT;
+    const quota = await getDailyQuota(userId, dailyLimit);
+    if (!quota.canAccept) {
+      return res.status(429).json({
+        success: false,
+        message: `Daily limit reached. You can accept only ${dailyLimit} task(s) per day.`,
+        quota,
+      });
     }
     
-    // Find the user's SharedReels document
     const sharedReels = await SharedReels.findOne({ googleId: userId });
     if (!sharedReels) {
-      return res.status(404).json({ error: 'User shared reels not found' });
+      return res.status(404).json({ success: false, message: 'User shared reels not found' });
     }
     
-    // Find the specific reel and update status
     const reelIndex = sharedReels.reels.findIndex(reel => 
       reel.reelId.toString() === reelId && 
-      (campaignId ? reel.campaignId === campaignId : true)
+      (campaignId ? String(reel.campaignId) === String(campaignId) : true)
     );
     
     if (reelIndex === -1) {
-      return res.status(404).json({ error: 'Reel not found for this user' });
+      return res.status(404).json({ success: false, message: 'Task not found for this user' });
+    }
+
+    if (sharedReels.reels[reelIndex].isTaskAccepted) {
+      return res.status(400).json({ success: false, message: 'Task already accepted' });
     }
     
+    const now = new Date();
     sharedReels.reels[reelIndex].TaskStatus = 'accepted';
     sharedReels.reels[reelIndex].isTaskAccepted = true;
-    if (!sharedReels.reels[reelIndex].acceptedAt) {
-      sharedReels.reels[reelIndex].acceptedAt = new Date();
-    }
+    sharedReels.reels[reelIndex].acceptedAt = now;
+    await recordDailyAccept(userId, reelId, campaignId || sharedReels.reels[reelIndex].campaignId);
     await sharedReels.save();
     
+    const updatedQuota = await getDailyQuota(userId, dailyLimit);
     res.json({ 
       success: true, 
       message: 'Task accepted successfully',
-      updatedReel: sharedReels.reels[reelIndex]
+      updatedReel: sharedReels.reels[reelIndex],
+      quota: updatedQuota,
+      penaltyThresholdMinutes: campaign?.penaltyThresholdMinutes ?? 10,
     });
   } catch (err) {
     console.error('Error accepting task:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 

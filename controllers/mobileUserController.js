@@ -1300,6 +1300,49 @@ const getProfileImageReadUrl = async (req, res) => {
   }
 };
 
+function getActivityStatus(lastActiveAt) {
+  if (!lastActiveAt) {
+    return { status: 'offline', color: '#000000', label: 'No location data' };
+  }
+  const mins = (Date.now() - new Date(lastActiveAt).getTime()) / 60000;
+  if (mins <= 5) return { status: 'live', color: '#22c55e', label: 'Live (< 5 min)' };
+  if (mins <= 48 * 60) return { status: 'recent', color: '#f97316', label: 'Recently active (< 48h)' };
+  if (mins <= 240 * 60) return { status: 'inactive', color: '#ef4444', label: 'Inactive (> 48h)' };
+  return { status: 'offline', color: '#000000', label: 'Offline (> 10 days)' };
+}
+
+/** GET — all users with GPS for client/admin live map */
+const getUsersLocationMap = async (req, res) => {
+  try {
+    const users = await MobileUser.find({
+      'location.latitude': { $exists: true, $ne: null },
+      'location.longitude': { $exists: true, $ne: null },
+    })
+      .select('name email googleId city location locationAddress locationUpdatedAt lastLoginAt profileImageKey')
+      .lean();
+
+    const markers = users.map((u) => {
+      const lastActive = u.locationUpdatedAt || u.lastLoginAt;
+      const activity = getActivityStatus(lastActive);
+      return {
+        userId: u.googleId || String(u._id),
+        name: u.name || u.email || 'User',
+        email: u.email || '',
+        city: u.city || u.locationAddress?.city || '',
+        latitude: u.location.latitude,
+        longitude: u.location.longitude,
+        address: u.locationAddress?.formatted || u.locationAddress?.displayName || '',
+        lastActiveAt: lastActive,
+        activity,
+      };
+    });
+
+    res.json({ success: true, count: markers.length, markers });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 module.exports = {
   getMobileAppConfig,
   sendLoginMobileOtp,
@@ -1328,4 +1371,5 @@ module.exports = {
   resendResetOtp,
   updateUserLocation,
   getUserLocation,
+  getUsersLocationMap,
 };

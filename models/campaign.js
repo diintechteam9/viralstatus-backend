@@ -113,12 +113,26 @@ const campaignSchema = new mongoose.Schema({
   },
   penaltyThresholdMinutes: {
     type: Number,
-    default: 30
+    default: 10
+  },
+  dailyTaskAcceptLimit: {
+    type: Number,
+    default: 3
   },
   allowCancellation: {
     type: Boolean,
     default: true
-  }
+  },
+  campaignType: {
+    type: String,
+    enum: ['public', 'private'],
+    default: 'private'
+  },
+  /** Supported task formats: reels, post, ugc, app_review, gmb_review */
+  supportedTaskTypes: {
+    type: [String],
+    default: ['reels'],
+  },
 }, { timestamps: true });
 
 module.exports = mongoose.models.Campaign || mongoose.model('Campaign', campaignSchema); 
