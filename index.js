@@ -405,6 +405,45 @@ if (process.env.NODE_ENV === 'development') {
     app.use(morgan('dev'));
 }
 
+// ─── Static file serving (must be before 404 handler) ────────────────────────
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+app.use('/uploads', express.static(uploadsDir));
+
+const proofsDir = path.join(__dirname, 'uploads', 'proofs');
+if (!fs.existsSync(proofsDir)) fs.mkdirSync(proofsDir, { recursive: true });
+
+const screenshotsDir = path.join(__dirname, 'uploads', 'screenshots');
+if (!fs.existsSync(screenshotsDir)) fs.mkdirSync(screenshotsDir, { recursive: true });
+app.use('/screenshots', express.static(screenshotsDir));
+
+// ─── Proof files: serve from R2 if not found locally (production fallback) ───
+app.get('/uploads/proofs/:filename', async (req, res) => {
+  const filename  = req.params.filename;
+  const localPath = path.join(__dirname, 'uploads', 'proofs', filename);
+
+  // 1. Try local file first (dev)
+  if (fs.existsSync(localPath)) {
+    return res.sendFile(localPath);
+  }
+
+  // 2. Fallback: fetch from R2 and pipe to client
+  try {
+    const { r2Client, BUCKET_NAME } = require('./config/r2');
+    const { GetObjectCommand }      = require('@aws-sdk/client-s3');
+    const r2Res = await r2Client.send(new GetObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key:    `proofs/${filename}`,
+    }));
+    const contentType = r2Res.ContentType || 'image/jpeg';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    r2Res.Body.pipe(res);
+  } catch (err) {
+    res.status(404).json({ error: 'Proof not found', message: err.message });
+  }
+});
+
 
 // for the whatsapp template 
 app.use("/api/requested-templates", requestedTemplateRoutes);
@@ -425,27 +464,7 @@ app.use((error, req, res, next) => {
         message: error.message || "Something went wrong"
     });
 });
-// Create uploads directory if it doesn't exist
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
 
-// Serve static files from uploads directory
-app.use('/uploads', express.static(uploadsDir));
-
-// Serve proof screenshots
-const proofsDir = path.join(__dirname, 'uploads', 'proofs');
-if (!fs.existsSync(proofsDir)) {
-  fs.mkdirSync(proofsDir, { recursive: true });
-}
-
-// Serve screenshots
-const screenshotsDir = path.join(__dirname, 'uploads', 'screenshots');
-if (!fs.existsSync(screenshotsDir)) {
-  fs.mkdirSync(screenshotsDir, { recursive: true });
-}
-app.use('/screenshots', express.static(screenshotsDir));
 
 // API routes
 app.use('/api/screenshots', screenshotRoutes);

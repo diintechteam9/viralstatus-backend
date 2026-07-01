@@ -55,7 +55,8 @@ const campaignTaskSchema = new mongoose.Schema({
   // For public task completions — proof submitted by users
   submissions: [{
     userId:      { type: String, required: true },
-    proofUrl:    { type: String, default: '' },
+    proofUrl:    { type: String, default: '' },  // signed URL (may expire) or local URL
+    proofKey:    { type: String, default: '' },  // R2 key — use this to generate fresh URL
     submittedAt: { type: Date, default: Date.now },
     status:      { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
   }],

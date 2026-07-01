@@ -329,7 +329,7 @@ exports.getPublicTasks = async (req, res) => {
 exports.submitPublicTask = async (req, res) => {
   try {
     const { taskId }  = req.params;
-    const { userId, proofUrl } = req.body;
+    const { userId, proofUrl, proofKey } = req.body;
 
     if (!userId) return res.status(400).json({ success: false, message: 'userId required' });
 
@@ -341,11 +341,16 @@ exports.submitPublicTask = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Task not available for this user' });
     }
 
-    // Already submitted check
     const alreadySubmitted = task.submissions.some(s => s.userId === userId);
     if (alreadySubmitted) return res.status(400).json({ success: false, message: 'Already submitted' });
 
-    task.submissions.push({ userId, proofUrl: proofUrl || '', submittedAt: new Date(), status: 'pending' });
+    task.submissions.push({
+      userId,
+      proofUrl:  proofUrl || '',
+      proofKey:  proofKey || '',   // R2 key saved — used to generate fresh URLs
+      submittedAt: new Date(),
+      status: 'pending',
+    });
     await task.save();
 
     res.json({ success: true, message: 'Proof submitted successfully. Pending review.' });
@@ -402,7 +407,17 @@ exports.getPublicSubmissions = async (req, res) => {
     const { taskId } = req.params;
     const task = await CampaignTask.findById(taskId).lean();
     if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
-    res.json({ success: true, submissions: task.submissions || [] });
+
+    const { getobject } = require('../utils/r2');
+    const submissions = await Promise.all((task.submissions || []).map(async (sub) => {
+      let proofUrl = sub.proofUrl || '';
+      if (sub.proofKey) {
+        try { proofUrl = await getobject(sub.proofKey); } catch {}
+      }
+      return { ...sub, proofUrl };
+    }));
+
+    res.json({ success: true, submissions });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -501,7 +516,7 @@ exports.assignTask = async (req, res) => {
   }
 };
 
-// POST /api/campaign-tasks/task/:taskId/upload-proof  — screenshot upload
+// POST /api/campaign-tasks/task/:taskId/upload-proof  — screenshot upload to R2
 exports.uploadPublicTaskProof = [
   uploadProof.single('file'),
   async (req, res) => {
@@ -512,11 +527,32 @@ exports.uploadPublicTaskProof = [
       const task = await CampaignTask.findById(taskId).lean();
       if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
 
-      // Build accessible URL
-      const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
-      const url = `${backendUrl}/uploads/proofs/${req.file.filename}`;
-
-      res.json({ success: true, url });
+      // Upload to R2
+      try {
+        const { r2Client, BUCKET_NAME } = require('../config/r2');
+        const { PutObjectCommand } = require('@aws-sdk/client-s3');
+        const ext = path.extname(req.file.originalname) || path.extname(req.file.filename);
+        const r2Key = `proofs/${req.file.filename}`;
+        await r2Client.send(new PutObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: r2Key,
+          Body: fs.readFileSync(req.file.path),
+          ContentType: req.file.mimetype || 'image/jpeg',
+        }));
+        // Delete local temp file
+        fs.unlink(req.file.path, () => {});
+        const r2PublicUrl = `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${BUCKET_NAME}/${r2Key}`;
+        // Use custom domain if set, else signed URL
+        const { getobject } = require('../utils/r2');
+        const signedUrl = await getobject(r2Key);
+        return res.json({ success: true, url: signedUrl, r2Key });
+      } catch (r2Err) {
+        console.error('R2 upload failed, falling back to local:', r2Err.message);
+        // Fallback: serve from local
+        const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
+        const url = `${backendUrl}/uploads/proofs/${req.file.filename}`;
+        return res.json({ success: true, url });
+      }
     } catch (err) {
       res.status(500).json({ success: false, message: err.message });
     }
@@ -544,22 +580,29 @@ exports.getSubmissionsByCategory = async (req, res) => {
     if (contentCategory) filter.contentCategory = contentCategory;
 
     const tasks = await CampaignTask.find(filter).lean();
+    const { getobject } = require('../utils/r2');
     const submissions = [];
 
     for (const task of tasks) {
       for (const sub of task.submissions || []) {
+        // Generate fresh signed URL from R2 key if available
+        let proofUrl = sub.proofUrl || '';
+        if (sub.proofKey) {
+          try { proofUrl = await getobject(sub.proofKey); } catch {}
+        }
         submissions.push({
-          userId: sub.userId,
-          proofUrl: sub.proofUrl || '',
-          submittedAt: sub.submittedAt,
-          status: sub.status || 'pending',
-          taskId: task._id,
-          taskTitle: task.title,
+          userId:          sub.userId,
+          proofUrl,
+          proofKey:        sub.proofKey || '',
+          submittedAt:     sub.submittedAt,
+          status:          sub.status || 'pending',
+          taskId:          task._id,
+          taskTitle:       task.title,
           contentCategory: task.contentCategory,
-          credits: task.credits,
-          platform: task.platform,
-          taskType: task.taskType,
-          visibility: task.visibility,
+          credits:         task.credits,
+          platform:        task.platform,
+          taskType:        task.taskType,
+          visibility:      task.visibility,
         });
       }
     }
@@ -567,13 +610,11 @@ exports.getSubmissionsByCategory = async (req, res) => {
     submissions.sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
 
     const stats = {
-      total: submissions.length,
-      pending: submissions.filter((s) => s.status === 'pending').length,
-      approved: submissions.filter((s) => s.status === 'approved').length,
-      rejected: submissions.filter((s) => s.status === 'rejected').length,
-      creditsGiven: submissions
-        .filter((s) => s.status === 'approved')
-        .reduce((sum, s) => sum + (s.credits || 0), 0),
+      total:        submissions.length,
+      pending:      submissions.filter(s => s.status === 'pending').length,
+      approved:     submissions.filter(s => s.status === 'approved').length,
+      rejected:     submissions.filter(s => s.status === 'rejected').length,
+      creditsGiven: submissions.filter(s => s.status === 'approved').reduce((sum, s) => sum + (s.credits || 0), 0),
     };
 
     res.json({ success: true, submissions, stats, taskCount: tasks.length });
