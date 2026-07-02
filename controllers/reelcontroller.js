@@ -696,111 +696,119 @@ exports.getSharedReelsForUser = async (req, res) => {
         try { brandImageUrl = await getobject(fullCampaign.brandImage.key); } catch (_) {}
       }
 
+      const proofRequired = (() => {
+        const cat = r.contentCategory || 'reels';
+        if (['app_review', 'gmb_review'].includes(cat)) return 'screenshot';
+        if (cat === 'ugc') return 'video';
+        if (['reels', 'post'].includes(cat)) return 'url';
+        return 'none';
+      })();
+
       return {
+        // ─── Task Identity ───────────────────────────────────────────
         _id: r._id,
         reelId: r.reelId,
         campaignTaskId: r.campaignTaskId || '',
-
         campaignId: r.campaignId,
-        clientId: fullCampaign?.clientId || '',
 
-        campaignName: r.campaignName || fullCampaign?.campaignName || '',
-        brandName: fullCampaign?.brandName || '',
-
+        // ─── Task Content ────────────────────────────────────────────
         title: r.title || '',
-        description: fullCampaign?.description || '',
-
-        platform: fullCampaign?.supportedTaskTypes?.[0] || 'reels',
-        taskType: r.contentCategory || fullCampaign?.supportedTaskTypes?.[0] || 'reels',
         contentCategory: r.contentCategory || 'reels',
-
-        campaignType: resolveReelCampaignType(r, campaign, userId, registeredCampaignIds, registeredCampaigns),
-        visibility: fullCampaign?.campaignType || 'private',
-
+        taskType: r.contentCategory || fullCampaign?.supportedTaskTypes?.[0] || 'reels',
+        platform: fullCampaign?.supportedTaskTypes?.[0] || 'reels',
+        proofRequired,
         credits: r.credits || fullCampaign?.credits || 0,
 
-        status: userRespEntry ? userRespEntry.status : (isUnderReview ? 'pending' : 'pending'),
+        // ─── Task Status ─────────────────────────────────────────────
         TaskStatus: r.TaskStatus || 'assigned',
+        submissionStatus: r.submissionStatus || 'none',
+        isTaskAccepted: !!r.isTaskAccepted,
+        isTaskComplete: !!r.isTaskComplete,
+        alreadyCompleted: !!r.isTaskComplete,
+        alreadySubmitted: !!userRespEntry,
+        canEdit: !!isUnderReview,
+        isUnderReview: !!isUnderReview,
+        campaignType: resolveReelCampaignType(r, campaign, userId, registeredCampaignIds, registeredCampaigns),
 
-        proofRequired: (() => {
-          const cat = r.contentCategory || 'reels';
-          if (['app_review', 'gmb_review'].includes(cat)) return 'screenshot';
-          if (cat === 'ugc') return 'video';
-          if (['reels', 'post'].includes(cat)) return 'url';
-          return 'none';
-        })(),
-        targetUrl: fullCampaign?.goal || '',
-        targetCount: fullCampaign?.cutoff || 0,
+        // ─── Task Timestamps ─────────────────────────────────────────
+        acceptedAt: r.acceptedAt,
+        cancelledAt: r.cancelledAt,
+        cancellationReason: r.cancellationReason || '',
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt || r.createdAt,
 
+        // ─── Timer & Penalty ─────────────────────────────────────────
+        timerExpired: timer.timerExpired,
+        penaltyZone: timer.penaltyZone,
+        safeToCancel: isUnderReview ? false : timer.safeToCancel,
+        remainingMs: timer.remainingMs ?? 0,
+        allowCancellation,
+        penaltyApplied: !!r.penaltyApplied,
+        creditsPenalized: r.creditsPenalized || 0,
+        potentialPenalty: timer.potentialPenalty ?? 0,
+        penaltyThresholdMinutes: timer.penaltyThresholdMinutes,
+        cancellationPenalty: timer.cancellationPenalty,
+
+        // ─── Reel Media ──────────────────────────────────────────────
         s3Key: r.s3Key,
         s3Url: r.s3Key ? await getobject(r.s3Key) : '',
 
-        campaignImageKey: imgKey,
-        campaignImageUrl,
+        // ─── Campaign Details ────────────────────────────────────────
+        campaign: {
+          _id: fullCampaign?._id || r.campaignId,
+          campaignName: r.campaignName || fullCampaign?.campaignName || '',
+          brandName: fullCampaign?.brandName || '',
+          clientId: fullCampaign?.clientId || '',
+          description: fullCampaign?.description || '',
+          goal: fullCampaign?.goal || '',
+          views: fullCampaign?.views || '',
+          credits: fullCampaign?.credits || 0,
+          cutoff: fullCampaign?.cutoff || 0,
+          tNc: fullCampaign?.tNc || '',
+          tags: fullCampaign?.tags || [],
+          location: fullCampaign?.location || '',
+          status: fullCampaign?.status || '',
+          campaignType: fullCampaign?.campaignType || 'private',
+          supportedTaskTypes: fullCampaign?.supportedTaskTypes || ['reels'],
+          autoApproval: !!fullCampaign?.autoApproval,
+          startDate: fullCampaign?.startDate || null,
+          endDate: fullCampaign?.endDate || null,
+          image: {
+            key: imgKey,
+            url: campaignImageUrl,
+          },
+          brandImage: {
+            key: fullCampaign?.brandImage?.key || '',
+            url: brandImageUrl,
+          },
+        },
 
-        brandImageKey: fullCampaign?.brandImage?.key || '',
-        brandImageUrl,
-
-        assignedTo: [],
-        completedBy: [],
-        submissions: userRespEntry ? [{
+        // ─── Submission (latest) ─────────────────────────────────────
+        submission: userRespEntry ? {
           url: userRespEntry.urls,
-          submittedAt: userRespEntry.createdAt,
           status: userRespEntry.status,
+          submissionReviewStatus: userRespEntry.status,
+          submittedAt: userRespEntry.createdAt,
           views: userRespEntry.views || 0,
           likes: userRespEntry.likes || 0,
           comments: userRespEntry.comments || 0,
           creditAmount: userRespEntry.creditAmount || 0,
           isCreditAccepted: userRespEntry.isCreditAccepted || false,
-        }] : [],
+        } : null,
 
-        order: 0,
+        // ─── Flat fields kept for backward compatibility ──────────────
+        campaignName: r.campaignName || fullCampaign?.campaignName || '',
+        brandName: fullCampaign?.brandName || '',
+        description: fullCampaign?.description || '',
+        campaignImageKey: imgKey,
+        campaignImageUrl,
+        brandImageKey: fullCampaign?.brandImage?.key || '',
+        brandImageUrl,
         deadline: fullCampaign?.endDate || null,
-
-        isTaskAccepted: !!r.isTaskAccepted,
-        isTaskComplete: !!r.isTaskComplete,
-
-        alreadyCompleted: !!r.isTaskComplete,
-        alreadySubmitted: !!userRespEntry,
-
-        acceptedAt: r.acceptedAt,
-        cancelledAt: r.cancelledAt,
-
-        penaltyApplied: !!r.penaltyApplied,
-        creditsPenalized: r.creditsPenalized || 0,
-
-        timerExpired: timer.timerExpired,
-        penaltyZone: timer.penaltyZone,
-        safeToCancel: isUnderReview ? false : timer.safeToCancel,
-        remainingMs: timer.remainingMs ?? 0,
-
-        penaltyThresholdMinutes: timer.penaltyThresholdMinutes,
-        cancellationPenalty: timer.cancellationPenalty,
-        allowCancellation,
-
-        submissionStatus: r.submissionStatus || 'none',
-        submissionReviewStatus: userRespEntry?.status || (isUnderReview ? 'pending' : null),
-
-        cancellationReason: r.cancellationReason || '',
-
-        // Campaign meta for UI context
-        campaignStartDate: fullCampaign?.startDate || null,
-        campaignEndDate: fullCampaign?.endDate || null,
-        campaignStatus: fullCampaign?.status || '',
-        campaignGoal: fullCampaign?.goal || '',
-        campaignViews: fullCampaign?.views || '',
-        campaignTnc: fullCampaign?.tNc || '',
-        campaignTags: fullCampaign?.tags || [],
-        campaignLocation: fullCampaign?.location || '',
-        autoApproval: !!fullCampaign?.autoApproval,
-
-        // Edit allowed when under review, always include these fields
-        canEdit: !!isUnderReview,
-        isUnderReview: !!isUnderReview,
-        potentialPenalty: timer.potentialPenalty ?? 0,
-
-        createdAt: r.createdAt,
-        updatedAt: r.updatedAt || r.createdAt,
+        targetUrl: fullCampaign?.goal || '',
+        targetCount: fullCampaign?.cutoff || 0,
+        submissionReviewStatus: userRespEntry?.status || null,
+        status: userRespEntry ? userRespEntry.status : 'pending',
       };
     }));
 
