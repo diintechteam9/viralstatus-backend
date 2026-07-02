@@ -129,7 +129,18 @@ async function cancelUserTask({ userId, reelId, campaignId, reason }) {
   }
 
   await releaseAcceptSlot(userId, reel.reelId || reelId, resolvedCampaignId);
-  shared.reels.splice(idx, 1);
+
+  // Status 'cancelled' set karo — DELETE mat karo taaki task list mein wapas aaye
+  shared.reels[idx].TaskStatus = 'cancelled';
+  shared.reels[idx].isTaskAccepted = false;
+  shared.reels[idx].isTaskComplete = false;
+  shared.reels[idx].cancelledAt = new Date();
+  shared.reels[idx].cancellationReason = reason || 'User cancelled';
+  shared.reels[idx].penaltyApplied = penaltyResult.penaltyApplied;
+  shared.reels[idx].creditsPenalized = penaltyResult.creditsPenalized;
+  shared.reels[idx].acceptedAt = null;
+  shared.reels[idx].inProgressAt = null;
+  shared.reels[idx].submissionStatus = 'none';
   await shared.save();
 
   const quota = await getDailyQuota(userId, penaltyResult.dailyTaskAcceptLimit ?? DEFAULT_DAILY_LIMIT);

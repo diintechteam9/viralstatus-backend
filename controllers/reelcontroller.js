@@ -646,7 +646,10 @@ exports.getSharedReelsForUser = async (req, res) => {
     const expiredIds = new Set(
       campaigns.filter(c => c.endDate && new Date(c.endDate) < now).map(c => String(c._id))
     );
-    const reelsToReturn = shared.reels.filter(r => !expiredIds.has(String(r.campaignId)));
+    const reelsToReturn = shared.reels.filter(r =>
+      !expiredIds.has(String(r.campaignId)) &&
+      r.TaskStatus !== 'rejected'
+    );
 
     // Fetch userResponse for this user
     const userRespDoc = await UserResponse.findOne({ googleId: userId });
