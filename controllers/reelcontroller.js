@@ -666,7 +666,9 @@ exports.getSharedReelsForUser = async (req, res) => {
 
       const userRespEntry = userResponses.find(ur =>
         String(ur.reelId) === String(r.reelId) ||
-        String(ur.reelId) === String(r.campaignTaskId)
+        String(ur.reelId) === String(r._id) ||
+        String(ur.reelId) === String(r.campaignTaskId) ||
+        (String(ur.campaignId) === String(r.campaignId) && String(ur.reelId) === String(r.reelId))
       );
       const timer = buildTimerPayload(r, campaign);
 
@@ -761,9 +763,8 @@ exports.getSharedReelsForUser = async (req, res) => {
         timerExpired: timer.timerExpired,
         penaltyZone: timer.penaltyZone,
         safeToCancel: isUnderReview ? false : timer.safeToCancel,
-        remainingMs: timer.remainingMs,
+        remainingMs: timer.remainingMs ?? 0,
 
-        potentialPenalty: timer.potentialPenalty,
         penaltyThresholdMinutes: timer.penaltyThresholdMinutes,
         cancellationPenalty: timer.cancellationPenalty,
         allowCancellation,
@@ -791,9 +792,10 @@ exports.getSharedReelsForUser = async (req, res) => {
         campaignLocation: fullCampaign?.location || '',
         autoApproval: !!fullCampaign?.autoApproval,
 
-        // Edit allowed when under review
-        canEdit: isUnderReview,
-        isUnderReview,
+        // Edit allowed when under review, always include these fields
+        canEdit: !!isUnderReview,
+        isUnderReview: !!isUnderReview,
+        potentialPenalty: timer.potentialPenalty ?? 0,
 
         createdAt: r.createdAt,
         updatedAt: r.updatedAt || r.createdAt,
