@@ -168,6 +168,66 @@ exports.bulkRejectTasks = async (req, res) => {
   }
 };
 
+/** POST /api/pools/task/edit — update submitted URL when task is accepted/in_progress */
+exports.editTask = async (req, res) => {
+  try {
+    const { userId, reelId, campaignId, url } = req.body;
+    if (!userId || !reelId || !campaignId || !url) {
+      return res.status(400).json({ success: false, message: 'userId, reelId, campaignId, url required' });
+    }
+
+    const shared = await SharedReels.findOne({ googleId: userId });
+    if (!shared) return res.status(404).json({ success: false, message: 'User tasks not found' });
+
+    const idx = findReelIndex(shared, reelId, campaignId);
+    if (idx === -1) return res.status(404).json({ success: false, message: 'Task not found' });
+
+    const reel = shared.reels[idx];
+    const allowed = ['accepted', 'in_progress'];
+    if (!allowed.includes(reel.TaskStatus)) {
+      return res.status(403).json({
+        success: false,
+        message: `Edit not allowed. Task status is '${reel.TaskStatus}'`,
+      });
+    }
+
+    // Update UserResponse URL
+    const UserResponse = require('../models/userResponse');
+    const userResp = await UserResponse.findOne({ googleId: userId });
+    if (userResp) {
+      const entry = userResp.response.find(
+        r => String(r.campaignId) === String(campaignId) && String(r.reelId) === String(reelId)
+      );
+      if (entry) {
+        entry.urls = url;
+        entry.status = 'pending';
+        await userResp.save();
+      }
+    }
+
+    // Update SharedReels submissionStatus back to pending_review
+    shared.reels[idx].submissionStatus = 'pending_review';
+    shared.reels[idx].TaskStatus = 'in_progress';
+    await shared.save();
+
+    return res.json({
+      success: true,
+      message: 'Submission updated successfully',
+      updatedReel: {
+        _id: reel._id,
+        reelId: reel.reelId,
+        campaignId: reel.campaignId,
+        TaskStatus: 'in_progress',
+        submissionStatus: 'pending_review',
+        submittedUrl: url,
+      },
+    });
+  } catch (err) {
+    console.error('editTask:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 /** POST /api/pools/task/cancel */
 exports.cancelTask = async (req, res) => {
   try {
