@@ -772,13 +772,6 @@ exports.getSharedReelsForUser = async (req, res) => {
         submissionStatus: r.submissionStatus || 'none',
         submissionReviewStatus: userRespEntry?.status || (isUnderReview ? 'pending' : null),
 
-        submittedUrl: userRespEntry?.urls || null,
-        submittedAt: userRespEntry?.createdAt || null,
-
-        submissionViews: userRespEntry?.views || 0,
-        submissionLikes: userRespEntry?.likes || 0,
-        submissionComments: userRespEntry?.comments || 0,
-
         cancellationReason: r.cancellationReason || '',
 
         // Campaign meta for UI context
