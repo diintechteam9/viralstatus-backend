@@ -699,6 +699,11 @@ exports.getSharedReelsForUser = async (req, res) => {
         campaignType: resolveReelCampaignType(r, campaign, userId, registeredCampaignIds, registeredCampaigns),
         status: userRespEntry ? userRespEntry.status : (r.submissionStatus === 'pending_review' ? 'pending' : 'pending'),
         submissionReviewStatus: userRespEntry?.status || (r.submissionStatus === 'pending_review' ? 'pending' : null),
+        submittedUrl: userRespEntry?.urls || null,
+        submittedAt: userRespEntry?.createdAt || null,
+        submissionViews: userRespEntry?.views || 0,
+        submissionLikes: userRespEntry?.likes || 0,
+        submissionComments: userRespEntry?.comments || 0,
         createdAt: r.createdAt,
       };
     }));

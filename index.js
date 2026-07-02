@@ -320,6 +320,8 @@ app.use('/api/mobile/user', mobileUserRoutes);
 app.use('/api/auth/client', clientAuthRoutes);
 app.use('/api/client', clientRoutes); 
 app.use('/api/admin', adminRoutes);
+app.use('/api/apps', require('./routes/appRoutes'));
+app.use('/api/appclient', require('./routes/appClientRoutes'));
 app.use('/api/superadmin', superadminRoutes);
 
 // Group Routes
