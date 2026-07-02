@@ -15,7 +15,13 @@ const getYoutubeStats = require('../utils/getYoutubeStats');
 const { getPostStats, detectPlatform, extractYoutubeId } = require('../utils/socialPostStats');
 const telegramAlerts = require('../utils/telegramAlerts');
 const { resolveUserProfiles, resolveOneUserProfile } = require('../utils/resolveUserProfiles');
-const { getDailyQuota, recordDailyAccept, DEFAULT_DAILY_LIMIT } = require('../utils/dailyTaskLimit');
+const {
+  acceptUserTask,
+  cancelUserTask,
+  syncSharedReelSubmission,
+  buildTimerPayload,
+  normalizeReelAcceptState,
+} = require('../services/userTaskService');
 
 // ─── Fast Multi Upload: Step 1 — Get batch presigned PUT URLs ───────────────
 exports.getPresignedUrls = async (req, res) => {
@@ -631,7 +637,9 @@ exports.getSharedReelsForUser = async (req, res) => {
     // Filter out tasks whose campaign has expired
     const now = new Date();
     const campaignIds = [...new Set(shared.reels.map(r => r.campaignId).filter(Boolean))];
-    const campaigns = await Campaign.find({ _id: { $in: campaignIds } }).select('_id endDate campaignType userIds').lean();
+    const campaigns = await Campaign.find({ _id: { $in: campaignIds } })
+      .select('_id endDate campaignType userIds penaltyThresholdMinutes cancellationPenalty allowCancellation dailyTaskAcceptLimit')
+      .lean();
     const campaignMap = new Map(campaigns.map(c => [String(c._id), c]));
     const expiredIds = new Set(
       campaigns.filter(c => c.endDate && new Date(c.endDate) < now).map(c => String(c._id))
@@ -643,10 +651,21 @@ exports.getSharedReelsForUser = async (req, res) => {
     const userResponses = userRespDoc && Array.isArray(userRespDoc.response) ? userRespDoc.response : [];
 
     // Generate fresh S3 URLs for each reel and for campaign image, and add status from userResponse
-    const reelsWithFreshUrls = await Promise.all(reelsToReturn.map(async r => {
+    let legacyFixed = false;
+
+    const reelsWithFreshUrls = await Promise.all(reelsToReturn.map(async (r) => {
       const campaign = campaignMap.get(String(r.campaignId));
-      // Find matching userResponse entry by reelId and userId
-      const userRespEntry = userResponses.find(ur => String(ur.reelId) === String(r.reelId));
+      const before = JSON.stringify({ a: r.isTaskAccepted, t: r.TaskStatus, at: r.acceptedAt });
+      normalizeReelAcceptState(r);
+      const after = JSON.stringify({ a: r.isTaskAccepted, t: r.TaskStatus, at: r.acceptedAt });
+      if (before !== after) legacyFixed = true;
+
+      const userRespEntry = userResponses.find(ur =>
+        String(ur.reelId) === String(r.reelId) ||
+        String(ur.reelId) === String(r.campaignTaskId)
+      );
+      const timer = buildTimerPayload(r, campaign);
+
       return {
         reelId: r.reelId,
         s3Key: r.s3Key,
@@ -664,16 +683,30 @@ exports.getSharedReelsForUser = async (req, res) => {
         cancelledAt: r.cancelledAt,
         penaltyApplied: !!r.penaltyApplied,
         creditsPenalized: r.creditsPenalized || 0,
-        timerExpired: !!r.timerExpired,
+        timerExpired: timer.timerExpired,
+        penaltyZone: timer.penaltyZone,
+        safeToCancel: timer.safeToCancel,
+        remainingMs: timer.remainingMs,
+        potentialPenalty: timer.potentialPenalty,
+        penaltyThresholdMinutes: timer.penaltyThresholdMinutes,
+        cancellationPenalty: timer.cancellationPenalty,
+        allowCancellation: timer.allowCancellation !== false,
+        submissionStatus: r.submissionStatus || 'none',
         cancellationReason: r.cancellationReason || '',
         _id: r._id,
         contentCategory: r.contentCategory || 'reels',
         campaignTaskId: r.campaignTaskId || '',
         campaignType: resolveReelCampaignType(r, campaign, userId, registeredCampaignIds, registeredCampaigns),
-        status: userRespEntry ? userRespEntry.status : 'pending',
+        status: userRespEntry ? userRespEntry.status : (r.submissionStatus === 'pending_review' ? 'pending' : 'pending'),
+        submissionReviewStatus: userRespEntry?.status || (r.submissionStatus === 'pending_review' ? 'pending' : null),
         createdAt: r.createdAt,
       };
     }));
+
+    if (legacyFixed) {
+      shared.reels.forEach((r) => normalizeReelAcceptState(r));
+      await shared.save();
+    }
     res.status(200).json({ success: true, reels: reelsWithFreshUrls });
   } catch (err) { 
     res.status(500).json({ error: err.message });
@@ -719,6 +752,9 @@ exports.addUserResponseUrl = async (req, res) => {
       userResponse.response.push(responseEntry);
     }
     await userResponse.save();
+
+    await syncSharedReelSubmission(userId, reelId, campaignId, 'submit');
+
     const profile = await resolveOneUserProfile(userId);
     telegramAlerts
       .alertUserEarn({
@@ -872,68 +908,43 @@ exports.getYoutubeVideoStats = async (req, res) => {
 // Update isTaskComplete to true for a specific reel
 exports.updateTaskCompleted = async (req, res) => {
   const { userId, reelId } = req.params;
+  const { campaignId } = req.body || {};
   try {
-    // Find the user's SharedReels document
-    const sharedReels = await SharedReels.findOne({ googleId: userId });
-    if (!sharedReels) {
-      return res.status(404).json({ error: 'User shared reels not found' });
+    const updated = await syncSharedReelSubmission(userId, reelId, campaignId, 'complete');
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Reel not found for this user' });
     }
-
-    // Find the specific reel and update isTaskComplete
-    const reelIndex = sharedReels.reels.findIndex(reel => 
-      reel.reelId.toString() === reelId || reel._id.toString() === reelId
-    );
-
-    if (reelIndex === -1) {
-      return res.status(404).json({ error: 'Reel not found for this user' });
-    }
-
-    // Update isTaskComplete to true
-    sharedReels.reels[reelIndex].isTaskComplete = true;
-    await sharedReels.save();
-
-    res.json({ 
-      success: true, 
-      message: 'Task accepted successfully',
-      updatedReel: sharedReels.reels[reelIndex]
+    res.json({
+      success: true,
+      message: 'Task marked completed',
+      updatedReel: updated,
     });
   } catch (err) {
-    console.error('Error updating task accepted:', err);
-    res.status(500).json({ error: err.message });
+    console.error('Error updating task completed:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
-// Update isTaskAccepted to true for a specific reel
+// Legacy Android — delegates to unified accept
 exports.updateTaskAccepted = async (req, res) => {
   const { userId, reelId } = req.params;
+  const { campaignId } = req.body || req.query || {};
   try {
-    // Find the user's SharedReels document
-    const sharedReels = await SharedReels.findOne({ googleId: userId });
-    if (!sharedReels) {
-      return res.status(404).json({ error: 'User shared reels not found' });
-    }
-
-    // Find the specific reel and update isTaskAccepted
-    const reelIndex = sharedReels.reels.findIndex(reel => 
-      reel.reelId.toString() === reelId || reel._id.toString() === reelId
-    );
-
-    if (reelIndex === -1) {
-      return res.status(404).json({ error: 'Reel not found for this user' });
-    }
-
-    // Update isTaskAccepted to true
-    sharedReels.reels[reelIndex].isTaskAccepted = true;
-    await sharedReels.save();
-
-    res.json({ 
-      success: true, 
-      message: 'Task accepted successfully',
-      updatedReel: sharedReels.reels[reelIndex]
+    const result = await acceptUserTask({ userId, reelId, campaignId });
+    return res.status(result.status).json({
+      success: result.ok,
+      message: result.message,
+      updatedReel: result.updatedReel,
+      quota: result.quota,
+      timerExpired: result.timerExpired ?? false,
+      penaltyZone: result.penaltyZone ?? false,
+      potentialPenalty: result.potentialPenalty ?? 0,
+      penaltyThresholdMinutes: result.penaltyThresholdMinutes,
+      cancellationPenalty: result.cancellationPenalty,
     });
   } catch (err) {
     console.error('Error updating task accepted:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
@@ -941,37 +952,26 @@ exports.updateTaskStatusAccepted = async (req, res) => {
   return res.status(501).json({ error: 'Not implemented' });
 };
 
-// Update TaskStatus to 'accepted' for a specific reel (POST)
+// Legacy Android — POST /shared/task-accepted/:userId/:reelId
 exports.acceptTaskStatus = async (req, res) => {
   const { userId, reelId } = req.params;
+  const { campaignId } = req.body || req.query || {};
   try {
-    if (!userId || !reelId) {
-      return res.status(400).json({ error: 'Missing userId or reelId' });
-    }
-    const SharedReels = require('../models/SharedReels');
-    // Find the user's SharedReels document
-    const sharedReels = await SharedReels.findOne({ googleId: userId });
-    if (!sharedReels) {
-      return res.status(404).json({ error: 'User shared reels not found' });
-    }
-    // Find the specific reel and update TaskStatus
-    const reelIndex = sharedReels.reels.findIndex(reel => 
-      reel.reelId.toString() === reelId || reel._id.toString() === reelId
-    );
-    if (reelIndex === -1) {
-      return res.status(404).json({ error: 'Reel not found for this user' });
-    }
-    // Update TaskStatus to 'accepted'
-    sharedReels.reels[reelIndex].TaskStatus = 'accepted';
-    await sharedReels.save();
-    res.json({ 
-      success: true, 
-      message: 'Task status updated to accepted',
-      updatedReel: sharedReels.reels[reelIndex]
+    const result = await acceptUserTask({ userId, reelId, campaignId });
+    return res.status(result.status).json({
+      success: result.ok,
+      message: result.message,
+      updatedReel: result.updatedReel,
+      quota: result.quota,
+      timerExpired: result.timerExpired ?? false,
+      penaltyZone: result.penaltyZone ?? false,
+      potentialPenalty: result.potentialPenalty ?? 0,
+      penaltyThresholdMinutes: result.penaltyThresholdMinutes,
+      cancellationPenalty: result.cancellationPenalty,
     });
   } catch (err) {
     console.error('Error updating TaskStatus:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
@@ -1008,57 +1008,23 @@ exports.completeTaskStatus = async (req, res) => {
   }
 };
 
-// Accept task - Update TaskStatus to 'accepted' and isTaskAccepted to true
+// Accept task — unified with legacy routes
 exports.acceptTask = async (req, res) => {
   const { userId, reelId, campaignId } = req.body;
   try {
-    if (!userId || !reelId) {
-      return res.status(400).json({ success: false, message: 'Missing userId or reelId' });
-    }
-
-    const campaign = campaignId ? await Campaign.findById(campaignId).lean() : null;
-    const dailyLimit = campaign?.dailyTaskAcceptLimit ?? DEFAULT_DAILY_LIMIT;
-    const quota = await getDailyQuota(userId, dailyLimit);
-    if (!quota.canAccept) {
-      return res.status(429).json({
-        success: false,
-        message: `Daily limit reached. You can accept only ${dailyLimit} task(s) per day.`,
-        quota,
-      });
-    }
-    
-    const sharedReels = await SharedReels.findOne({ googleId: userId });
-    if (!sharedReels) {
-      return res.status(404).json({ success: false, message: 'User shared reels not found' });
-    }
-    
-    const reelIndex = sharedReels.reels.findIndex(reel => 
-      reel.reelId.toString() === reelId && 
-      (campaignId ? String(reel.campaignId) === String(campaignId) : true)
-    );
-    
-    if (reelIndex === -1) {
-      return res.status(404).json({ success: false, message: 'Task not found for this user' });
-    }
-
-    if (sharedReels.reels[reelIndex].isTaskAccepted) {
-      return res.status(400).json({ success: false, message: 'Task already accepted' });
-    }
-    
-    const now = new Date();
-    sharedReels.reels[reelIndex].TaskStatus = 'accepted';
-    sharedReels.reels[reelIndex].isTaskAccepted = true;
-    sharedReels.reels[reelIndex].acceptedAt = now;
-    await recordDailyAccept(userId, reelId, campaignId || sharedReels.reels[reelIndex].campaignId);
-    await sharedReels.save();
-    
-    const updatedQuota = await getDailyQuota(userId, dailyLimit);
-    res.json({ 
-      success: true, 
-      message: 'Task accepted successfully',
-      updatedReel: sharedReels.reels[reelIndex],
-      quota: updatedQuota,
-      penaltyThresholdMinutes: campaign?.penaltyThresholdMinutes ?? 10,
+    const result = await acceptUserTask({ userId, reelId, campaignId });
+    return res.status(result.status).json({
+      success: result.ok,
+      message: result.message,
+      updatedReel: result.updatedReel,
+      quota: result.quota,
+      timerExpired: result.timerExpired ?? false,
+      penaltyZone: result.penaltyZone ?? false,
+      potentialPenalty: result.potentialPenalty ?? 0,
+      penaltyThresholdMinutes: result.penaltyThresholdMinutes,
+      cancellationPenalty: result.cancellationPenalty,
+      remainingMs: result.remainingMs,
+      phase: result.phase,
     });
   } catch (err) {
     console.error('Error accepting task:', err);

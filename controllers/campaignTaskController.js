@@ -4,6 +4,7 @@ const SharedReels  = require('../models/SharedReels');
 const UGCForm      = require('../models/UGCForm');
 const { buildTaskTemplate } = require('../utils/campaignTaskFactory');
 const { VALID_TASK_TYPE_IDS } = require('../utils/campaignTaskTypes');
+const { syncSharedReelSubmission } = require('../services/userTaskService');
 const multer       = require('multer');
 const path         = require('path');
 const fs           = require('fs');
@@ -353,7 +354,14 @@ exports.submitPublicTask = async (req, res) => {
     });
     await task.save();
 
-    res.json({ success: true, message: 'Proof submitted successfully. Pending review.' });
+    await syncSharedReelSubmission(userId, taskId, task.campaignId, 'submit');
+
+    res.json({
+      success: true,
+      message: 'Proof submitted successfully. Pending review.',
+      TaskStatus: 'in_progress',
+      submissionStatus: 'pending_review',
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -395,6 +403,13 @@ exports.reviewPublicSubmission = async (req, res) => {
     }
 
     await task.save();
+
+    if (status === 'approved') {
+      await syncSharedReelSubmission(userId, taskId, task.campaignId, 'approve');
+    } else {
+      await syncSharedReelSubmission(userId, taskId, task.campaignId, 'reject');
+    }
+
     res.json({ success: true, message: `Submission ${status}` });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

@@ -18,7 +18,8 @@ function calculatePenalty(
   const accepted = new Date(acceptedAt);
   const cancelled = cancelledAt ? new Date(cancelledAt) : new Date();
   const minutesElapsed = (cancelled - accepted) / (1000 * 60);
-  const withinGrace = minutesElapsed <= penaltyThresholdMinutes;
+  // Grace: strictly before threshold minutes (at 10:00 min → penalty applies)
+  const withinGrace = minutesElapsed < penaltyThresholdMinutes;
   return {
     credits: withinGrace ? 0 : cancellationPenalty,
     minutesElapsed: Math.max(0, minutesElapsed),

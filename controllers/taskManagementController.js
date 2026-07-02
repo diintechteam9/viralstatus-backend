@@ -1,17 +1,18 @@
 const SharedReels = require('../models/SharedReels');
 const Campaign = require('../models/campaign');
-const Reel = require('../models/Reel');
-const CreditWallet = require('../models/CreditWallet');
 const reelController = require('./reelcontroller');
-const { calculatePenalty, getTimerStatus } = require('../utils/taskPenalty');
-const { getDailyQuota, recordDailyAccept, DEFAULT_DAILY_LIMIT } = require('../utils/dailyTaskLimit');
+const { getTimerStatus } = require('../utils/taskPenalty');
+const { getDailyQuota, DEFAULT_DAILY_LIMIT } = require('../utils/dailyTaskLimit');
+const {
+  acceptUserTask,
+  cancelUserTask,
+  buildTimerPayload,
+  findUserTaskIndex,
+  normalizeReelAcceptState,
+} = require('../services/userTaskService');
 
 function findReelIndex(sharedReels, reelId, campaignId) {
-  return sharedReels.reels.findIndex(
-    (reel) =>
-      (reel.reelId?.toString() === String(reelId) || reel._id?.toString() === String(reelId)) &&
-      (!campaignId || String(reel.campaignId) === String(campaignId))
-  );
+  return findUserTaskIndex(sharedReels.reels, reelId, campaignId);
 }
 
 async function getCampaignOr404(campaignId, res) {
@@ -21,16 +22,6 @@ async function getCampaignOr404(campaignId, res) {
     return null;
   }
   return campaign;
-}
-
-async function applyCreditPenalty(userId, amount) {
-  if (!amount || amount <= 0) return;
-  let wallet = await CreditWallet.findOne({ userId });
-  if (!wallet) {
-    wallet = new CreditWallet({ userId, totalBalance: 0 });
-  }
-  wallet.totalBalance = Math.max(0, (wallet.totalBalance || 0) - amount);
-  await wallet.save();
 }
 
 /** GET /api/pools/task/campaign/:campaignId */
@@ -45,15 +36,15 @@ exports.getCampaignTasks = async (req, res) => {
     for (const doc of docs) {
       for (const reel of doc.reels || []) {
         if (String(reel.campaignId) !== String(campaignId)) continue;
-        const timer = getTimerStatus(
-          reel.acceptedAt,
-          campaign.penaltyThresholdMinutes ?? 30
-        );
+        const timer = buildTimerPayload(reel, campaign);
         tasks.push({
           ...reel,
           userId: doc.googleId,
           reelId: reel.reelId,
           timer,
+          timerExpired: timer.timerExpired,
+          penaltyZone: timer.penaltyZone,
+          potentialPenalty: timer.potentialPenalty,
         });
       }
     }
@@ -82,9 +73,6 @@ exports.getTaskTimerStatus = async (req, res) => {
     if (!userId) {
       return res.status(400).json({ success: false, message: 'userId query required' });
     }
-    const campaign = campaignId
-      ? await Campaign.findById(campaignId)
-      : null;
     const shared = await SharedReels.findOne({ googleId: userId });
     if (!shared) {
       return res.status(404).json({ success: false, message: 'Task not found' });
@@ -94,14 +82,23 @@ exports.getTaskTimerStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Task not found' });
     }
     const reel = shared.reels[idx];
-    const threshold = campaign?.penaltyThresholdMinutes ?? 30;
-    const timer = getTimerStatus(reel.acceptedAt, threshold);
+    const resolvedCampaignId = campaignId || reel.campaignId;
+    const campaign = await Campaign.findById(resolvedCampaignId).lean();
+
+    const timer = buildTimerPayload(reel, campaign);
     res.json({
       success: true,
       taskId,
       userId,
+      campaignId: resolvedCampaignId,
       acceptedAt: reel.acceptedAt,
-      timerExpired: reel.timerExpired || timer.timerExpired,
+      isTaskAccepted: !!reel.isTaskAccepted,
+      TaskStatus: reel.TaskStatus,
+      timerExpired: timer.timerExpired,
+      penaltyZone: timer.penaltyZone,
+      potentialPenalty: timer.potentialPenalty,
+      cancellationPenalty: timer.cancellationPenalty,
+      penaltyThresholdMinutes: timer.penaltyThresholdMinutes,
       ...timer,
     });
   } catch (err) {
@@ -131,6 +128,7 @@ exports.bulkAcceptTasks = async (req, res) => {
       shared.reels[idx].TaskStatus = 'accepted';
       shared.reels[idx].isTaskAccepted = true;
       shared.reels[idx].acceptedAt = shared.reels[idx].acceptedAt || new Date();
+      shared.reels[idx].timerExpired = false;
       await shared.save();
       results.push({ userId, reelId, success: true });
     }
@@ -174,62 +172,18 @@ exports.bulkRejectTasks = async (req, res) => {
 exports.cancelTask = async (req, res) => {
   try {
     const { userId, reelId, campaignId, reason } = req.body;
-    if (!userId || !reelId || !campaignId) {
-      return res.status(400).json({
-        success: false,
-        message: 'userId, reelId, campaignId required',
-      });
-    }
-    const campaign = await getCampaignOr404(campaignId, res);
-    if (!campaign) return;
-    if (campaign.allowCancellation === false) {
-      return res.status(403).json({
-        success: false,
-        message: 'Cancellation is disabled for this campaign',
-      });
-    }
-
-    const shared = await SharedReels.findOne({ googleId: userId });
-    if (!shared) {
-      return res.status(404).json({ success: false, message: 'Task not found' });
-    }
-    const idx = findReelIndex(shared, reelId, campaignId);
-    if (idx === -1) {
-      return res.status(404).json({ success: false, message: 'Task not found' });
-    }
-
-    const reel = shared.reels[idx];
-    const threshold = campaign.penaltyThresholdMinutes ?? 10;
-    const penaltyAmount = campaign.cancellationPenalty ?? 2;
-    const cancelledAt = new Date();
-
-    let creditsPenalized = 0;
-    if (reel.isTaskAccepted && reel.acceptedAt) {
-      const penalty = calculatePenalty(
-        reel.acceptedAt,
-        cancelledAt,
-        threshold,
-        penaltyAmount
-      );
-      creditsPenalized = penalty.credits;
-      if (creditsPenalized > 0) {
-        await applyCreditPenalty(userId, creditsPenalized);
-      }
-    }
-
-    // Remove task from user — returns slot; client can reassign
-    shared.reels.splice(idx, 1);
-    await shared.save();
-
-    res.json({
-      success: true,
-      message:
-        creditsPenalized > 0
-          ? `Task cancelled. ${creditsPenalized} credit(s) deducted. Task returned to pool.`
-          : 'Task cancelled with no penalty. Task returned to pool.',
-      creditsPenalized,
-      penaltyApplied: creditsPenalized > 0,
-      returned: true,
+    const result = await cancelUserTask({ userId, reelId, campaignId, reason });
+    return res.status(result.status).json({
+      success: result.ok,
+      message: result.message,
+      creditsPenalized: result.creditsPenalized ?? 0,
+      penaltyApplied: result.penaltyApplied ?? false,
+      withinGrace: result.withinGrace,
+      timerExpired: result.timerExpired ?? false,
+      returned: result.returned ?? false,
+      quota: result.quota,
+      cancellationPenalty: result.cancellationPenalty,
+      penaltyThresholdMinutes: result.penaltyThresholdMinutes,
     });
   } catch (err) {
     console.error('cancelTask:', err);

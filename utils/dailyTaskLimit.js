@@ -1,31 +1,12 @@
 const SharedReels = require('../models/SharedReels');
-
-const DEFAULT_DAILY_LIMIT = 3;
-
-function startOfToday() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function countAcceptsToday(acceptLog = []) {
-  const todayStart = startOfToday();
-  return (acceptLog || []).filter(
-    (entry) => entry.acceptedAt && new Date(entry.acceptedAt) >= todayStart
-  ).length;
-}
+const { buildDailyQuota, DEFAULT_DAILY_LIMIT } = require('./userTaskHelpers');
 
 async function getDailyQuota(userId, limit = DEFAULT_DAILY_LIMIT) {
   const shared = await SharedReels.findOne({ googleId: userId }).lean();
-  const used = countAcceptsToday(shared?.acceptLog);
-  return {
-    used,
-    limit,
-    remaining: Math.max(0, limit - used),
-    canAccept: used < limit,
-  };
+  return buildDailyQuota(shared?.reels, limit);
 }
 
+/** Audit trail only — quota uses active accepted count, not this log */
 async function recordDailyAccept(userId, reelId, campaignId) {
   await SharedReels.findOneAndUpdate(
     { googleId: userId },
@@ -42,10 +23,25 @@ async function recordDailyAccept(userId, reelId, campaignId) {
   );
 }
 
+async function releaseAcceptSlot(userId, reelId, campaignId) {
+  const rid = String(reelId);
+  const cid = String(campaignId || '');
+  await SharedReels.updateOne(
+    { googleId: userId },
+    {
+      $pull: {
+        acceptLog: {
+          reelId: rid,
+          ...(cid ? { campaignId: cid } : {}),
+        },
+      },
+    }
+  );
+}
+
 module.exports = {
   DEFAULT_DAILY_LIMIT,
-  startOfToday,
-  countAcceptsToday,
   getDailyQuota,
   recordDailyAccept,
+  releaseAcceptSlot,
 };

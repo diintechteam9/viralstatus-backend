@@ -67,6 +67,11 @@ const sharedReelsSchema = new mongoose.Schema({
       creditsPenalized: { type: Number, default: 0 },
       timerExpired: { type: Boolean, default: false },
       cancellationReason: { type: String, default: '' },
+      submissionStatus: {
+        type: String,
+        enum: ['none', 'pending_review', 'approved', 'rejected', 'completed'],
+        default: 'none',
+      },
       taskCode: {
         type: String,
         default: ''
