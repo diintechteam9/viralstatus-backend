@@ -637,10 +637,12 @@ exports.getSharedReelsForUser = async (req, res) => {
     // Filter out tasks whose campaign has expired
     const now = new Date();
     const campaignIds = [...new Set(shared.reels.map(r => r.campaignId).filter(Boolean))];
+    // Single query — fetch all needed campaign fields at once
     const campaigns = await Campaign.find({ _id: { $in: campaignIds } })
-      .select('_id endDate campaignType userIds penaltyThresholdMinutes cancellationPenalty allowCancellation dailyTaskAcceptLimit')
+      .select('_id campaignName brandName description clientId campaignType supportedTaskTypes tNc goal views cutoff credits endDate startDate status isActive penaltyThresholdMinutes cancellationPenalty allowCancellation dailyTaskAcceptLimit autoApproval image categoryImage brandImage tags location userIds')
       .lean();
     const campaignMap = new Map(campaigns.map(c => [String(c._id), c]));
+    const fullCampaignMap = campaignMap; // same map — no duplicate query needed
     const expiredIds = new Set(
       campaigns.filter(c => c.endDate && new Date(c.endDate) < now).map(c => String(c._id))
     );
@@ -655,6 +657,8 @@ exports.getSharedReelsForUser = async (req, res) => {
 
     const reelsWithFreshUrls = await Promise.all(reelsToReturn.map(async (r) => {
       const campaign = campaignMap.get(String(r.campaignId));
+      const fullCampaign = fullCampaignMap.get(String(r.campaignId));
+
       const before = JSON.stringify({ a: r.isTaskAccepted, t: r.TaskStatus, at: r.acceptedAt });
       normalizeReelAcceptState(r);
       const after = JSON.stringify({ a: r.isTaskAccepted, t: r.TaskStatus, at: r.acceptedAt });
@@ -666,45 +670,133 @@ exports.getSharedReelsForUser = async (req, res) => {
       );
       const timer = buildTimerPayload(r, campaign);
 
+      // Determine if under review — cancel not allowed, edit allowed
+      const isUnderReview =
+        r.submissionStatus === 'pending_review' ||
+        (userRespEntry && userRespEntry.status === 'pending');
+
+      // allowCancellation: false if under review OR campaign disables it
+      const allowCancellation = !isUnderReview && timer.allowCancellation !== false;
+
+      // Fresh campaign image URL
+      let campaignImageUrl = '';
+      const imgKey = r.campaignImageKey || fullCampaign?.image?.key || '';
+      if (imgKey) {
+        try { campaignImageUrl = await getobject(imgKey); } catch (_) {}
+      }
+
+      // Fresh brand image URL
+      let brandImageUrl = '';
+      if (fullCampaign?.brandImage?.key) {
+        try { brandImageUrl = await getobject(fullCampaign.brandImage.key); } catch (_) {}
+      }
+
       return {
+        _id: r._id,
         reelId: r.reelId,
+        campaignTaskId: r.campaignTaskId || '',
+
+        campaignId: r.campaignId,
+        clientId: fullCampaign?.clientId || '',
+
+        campaignName: r.campaignName || fullCampaign?.campaignName || '',
+        brandName: fullCampaign?.brandName || '',
+
+        title: r.title || '',
+        description: fullCampaign?.description || '',
+
+        platform: fullCampaign?.supportedTaskTypes?.[0] || 'reels',
+        taskType: r.contentCategory || fullCampaign?.supportedTaskTypes?.[0] || 'reels',
+        contentCategory: r.contentCategory || 'reels',
+
+        campaignType: resolveReelCampaignType(r, campaign, userId, registeredCampaignIds, registeredCampaigns),
+        visibility: fullCampaign?.campaignType || 'private',
+
+        credits: r.credits || fullCampaign?.credits || 0,
+
+        status: userRespEntry ? userRespEntry.status : (isUnderReview ? 'pending' : 'pending'),
+        TaskStatus: r.TaskStatus || 'assigned',
+
+        proofRequired: fullCampaign?.tNc ? true : false,
+        targetUrl: fullCampaign?.goal || '',
+        targetCount: fullCampaign?.cutoff || 0,
+
         s3Key: r.s3Key,
         s3Url: r.s3Key ? await getobject(r.s3Key) : '',
-        campaignId: r.campaignId,
-        campaignName: r.campaignName || '',
-        credits: r.credits || 0,
-        title: r.title || '',
-        campaignImageKey: r.campaignImageKey || '',
-        campaignImageUrl: r.campaignImageKey ? await getobject(r.campaignImageKey) : '',
-        TaskStatus: r.TaskStatus || 'assigned',
+
+        campaignImageKey: imgKey,
+        campaignImageUrl,
+
+        brandImageKey: fullCampaign?.brandImage?.key || '',
+        brandImageUrl,
+
+        assignedTo: [],
+        completedBy: [],
+        submissions: userRespEntry ? [{
+          url: userRespEntry.urls,
+          submittedAt: userRespEntry.createdAt,
+          status: userRespEntry.status,
+          views: userRespEntry.views || 0,
+          likes: userRespEntry.likes || 0,
+          comments: userRespEntry.comments || 0,
+          creditAmount: userRespEntry.creditAmount || 0,
+          isCreditAccepted: userRespEntry.isCreditAccepted || false,
+        }] : [],
+
+        order: 0,
+        deadline: fullCampaign?.endDate || null,
+
         isTaskAccepted: !!r.isTaskAccepted,
         isTaskComplete: !!r.isTaskComplete,
+
+        alreadyCompleted: !!r.isTaskComplete,
+        alreadySubmitted: !!userRespEntry,
+
         acceptedAt: r.acceptedAt,
         cancelledAt: r.cancelledAt,
+
         penaltyApplied: !!r.penaltyApplied,
         creditsPenalized: r.creditsPenalized || 0,
+
         timerExpired: timer.timerExpired,
         penaltyZone: timer.penaltyZone,
-        safeToCancel: timer.safeToCancel,
+        safeToCancel: isUnderReview ? false : timer.safeToCancel,
         remainingMs: timer.remainingMs,
+
         potentialPenalty: timer.potentialPenalty,
         penaltyThresholdMinutes: timer.penaltyThresholdMinutes,
         cancellationPenalty: timer.cancellationPenalty,
-        allowCancellation: timer.allowCancellation !== false,
+        allowCancellation,
+
         submissionStatus: r.submissionStatus || 'none',
-        cancellationReason: r.cancellationReason || '',
-        _id: r._id,
-        contentCategory: r.contentCategory || 'reels',
-        campaignTaskId: r.campaignTaskId || '',
-        campaignType: resolveReelCampaignType(r, campaign, userId, registeredCampaignIds, registeredCampaigns),
-        status: userRespEntry ? userRespEntry.status : (r.submissionStatus === 'pending_review' ? 'pending' : 'pending'),
-        submissionReviewStatus: userRespEntry?.status || (r.submissionStatus === 'pending_review' ? 'pending' : null),
+        submissionReviewStatus: userRespEntry?.status || (isUnderReview ? 'pending' : null),
+
         submittedUrl: userRespEntry?.urls || null,
         submittedAt: userRespEntry?.createdAt || null,
+
         submissionViews: userRespEntry?.views || 0,
         submissionLikes: userRespEntry?.likes || 0,
         submissionComments: userRespEntry?.comments || 0,
+
+        cancellationReason: r.cancellationReason || '',
+
+        // Campaign meta for UI context
+        campaignStartDate: fullCampaign?.startDate || null,
+        campaignEndDate: fullCampaign?.endDate || null,
+        campaignStatus: fullCampaign?.status || '',
+        campaignGoal: fullCampaign?.goal || '',
+        campaignViews: fullCampaign?.views || '',
+        campaignTnc: fullCampaign?.tNc || '',
+        campaignTags: fullCampaign?.tags || [],
+        campaignLocation: fullCampaign?.location || '',
+        autoApproval: !!fullCampaign?.autoApproval,
+
+        // Edit allowed when under review
+        canEdit: isUnderReview,
+        isUnderReview,
+
         createdAt: r.createdAt,
+        updatedAt: r.updatedAt || r.createdAt,
       };
     }));
 
