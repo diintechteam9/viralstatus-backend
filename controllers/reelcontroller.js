@@ -722,7 +722,13 @@ exports.getSharedReelsForUser = async (req, res) => {
         status: userRespEntry ? userRespEntry.status : (isUnderReview ? 'pending' : 'pending'),
         TaskStatus: r.TaskStatus || 'assigned',
 
-        proofRequired: fullCampaign?.tNc ? true : false,
+        proofRequired: (() => {
+          const cat = r.contentCategory || 'reels';
+          if (['app_review', 'gmb_review'].includes(cat)) return 'screenshot';
+          if (cat === 'ugc') return 'video';
+          if (['reels', 'post'].includes(cat)) return 'url';
+          return 'none';
+        })(),
         targetUrl: fullCampaign?.goal || '',
         targetCount: fullCampaign?.cutoff || 0,
 
