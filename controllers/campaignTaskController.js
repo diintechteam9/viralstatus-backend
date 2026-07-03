@@ -98,9 +98,10 @@ exports.createTask = async (req, res) => {
   try {
     const {
       campaignId, clientId, title, description,
-      platform, taskType, targetUrl, targetCount,
+      platform, taskType, targetCount,
       credits, proofRequired, status, deadline, order, visibility,
       contentCategory,
+      appName, businessName, minRating, script, referenceVideoUrl,
     } = req.body;
 
     if (!campaignId || !title || !platform || !taskType || credits === undefined) {
@@ -114,10 +115,15 @@ exports.createTask = async (req, res) => {
       campaignId,
       clientId: clientId || campaign.clientId,
       title, description, platform, taskType,
-      targetUrl, targetCount, credits,
+      targetCount, credits,
       proofRequired, status, deadline, order,
-      visibility: visibility || (campaign.campaignType === 'public' ? 'public' : 'private'),
+      visibility: visibility || 'private',
       contentCategory: contentCategory || 'post',
+      appName: appName || '',
+      businessName: businessName || '',
+      minRating: minRating || '5',
+      script: script || '',
+      referenceVideoUrl: referenceVideoUrl || '',
     });
 
     res.status(201).json({ success: true, task });
@@ -372,7 +378,7 @@ exports.submitPublicTask = async (req, res) => {
 exports.reviewPublicSubmission = async (req, res) => {
   try {
     const { taskId }  = req.params;
-    const { userId, status } = req.body; // status: 'approved' | 'rejected'
+    const { userId, status, customCredits } = req.body;
 
     if (!['approved', 'rejected'].includes(status))
       return res.status(400).json({ success: false, message: 'status must be approved or rejected' });
@@ -389,12 +395,15 @@ exports.reviewPublicSubmission = async (req, res) => {
     if (status === 'approved' && !task.completedBy.includes(userId)) {
       task.completedBy.push(userId);
 
-      // Credits add karo user ke wallet me
+      // Custom credits override support — client approve karte waqt custom amount de sakta hai
+      const creditsToGive = customCredits ? Number(customCredits) : task.credits;
+      sub.creditsGiven = creditsToGive;
+
       try {
         const CreditWallet = require('../models/CreditWallet');
         await CreditWallet.findOneAndUpdate(
           { userId },
-          { $inc: { totalBalance: task.credits, acceptedCredits: task.credits } },
+          { $inc: { totalBalance: creditsToGive, acceptedCredits: creditsToGive } },
           { upsert: true }
         );
       } catch (e) {
@@ -442,7 +451,7 @@ exports.getPublicSubmissions = async (req, res) => {
 exports.updateTask = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const allowed = ['title','description','platform','taskType','targetUrl','targetCount','credits','proofRequired','status','deadline','order','visibility','contentCategory'];
+    const allowed = ['title','description','platform','taskType','targetUrl','targetCount','credits','proofRequired','status','deadline','order','visibility','contentCategory','appName','businessName','minRating','script','referenceVideoUrl'];
     const update = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];
@@ -611,6 +620,7 @@ exports.getSubmissionsByCategory = async (req, res) => {
           proofKey:        sub.proofKey || '',
           submittedAt:     sub.submittedAt,
           status:          sub.status || 'pending',
+          creditsGiven:    sub.creditsGiven || 0,
           taskId:          task._id,
           taskTitle:       task.title,
           contentCategory: task.contentCategory,
@@ -629,7 +639,7 @@ exports.getSubmissionsByCategory = async (req, res) => {
       pending:      submissions.filter(s => s.status === 'pending').length,
       approved:     submissions.filter(s => s.status === 'approved').length,
       rejected:     submissions.filter(s => s.status === 'rejected').length,
-      creditsGiven: submissions.filter(s => s.status === 'approved').reduce((sum, s) => sum + (s.credits || 0), 0),
+      creditsGiven: submissions.filter(s => s.status === 'approved').reduce((sum, s) => sum + (s.creditsGiven || s.credits || 0), 0),
     };
 
     res.json({ success: true, submissions, stats, taskCount: tasks.length });

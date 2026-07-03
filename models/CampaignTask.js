@@ -10,7 +10,7 @@ const campaignTaskSchema = new mongoose.Schema({
   platform: {
     type: String,
     required: true,
-    enum: ['instagram', 'youtube', 'both'],
+    enum: ['instagram', 'youtube', 'both', 'playstore', 'appstore'],
   },
 
   taskType: {
@@ -27,9 +27,20 @@ const campaignTaskSchema = new mongoose.Schema({
     index: true,
   },
 
-  targetUrl:   { type: String, default: '' },   // URL user must interact with
-  targetCount: { type: Number, default: 1 },    // e.g. get 100 views
-  credits:     { type: Number, required: true }, // credits on completion
+  targetUrl:   { type: String, default: '' },
+  targetCount: { type: Number, default: 1 },
+  credits:     { type: Number, required: true },
+
+  // App Review specific
+  appName:    { type: String, default: '' },
+  minRating:  { type: String, default: '5' },
+
+  // GMB Review specific
+  businessName: { type: String, default: '' },
+
+  // UGC specific
+  script:             { type: String, default: '' },
+  referenceVideoUrl:  { type: String, default: '' },
 
   proofRequired: {
     type: String,
@@ -54,11 +65,12 @@ const campaignTaskSchema = new mongoose.Schema({
 
   // For public task completions — proof submitted by users
   submissions: [{
-    userId:      { type: String, required: true },
-    proofUrl:    { type: String, default: '' },  // signed URL (may expire) or local URL
-    proofKey:    { type: String, default: '' },  // R2 key — use this to generate fresh URL
-    submittedAt: { type: Date, default: Date.now },
-    status:      { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+    userId:       { type: String, required: true },
+    proofUrl:     { type: String, default: '' },
+    proofKey:     { type: String, default: '' },
+    submittedAt:  { type: Date, default: Date.now },
+    status:       { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+    creditsGiven: { type: Number, default: 0 },
   }],
 
   deadline: { type: Date, default: null },
