@@ -10,13 +10,13 @@ const campaignTaskSchema = new mongoose.Schema({
   platform: {
     type: String,
     required: true,
-    enum: ['instagram', 'youtube', 'both', 'playstore', 'appstore'],
+    enum: ['instagram', 'youtube', 'both', 'playstore', 'appstore', 'reels'],
   },
 
   taskType: {
     type: String,
     required: true,
-    enum: ['like', 'comment', 'view', 'follow', 'upload_reel', 'share', 'save'],
+    enum: ['like', 'comment', 'view', 'follow', 'upload_reel', 'share', 'save', 'reels'],
   },
 
   /** Campaign content category: reels, post, ugc, app_review, gmb_review */
@@ -44,7 +44,7 @@ const campaignTaskSchema = new mongoose.Schema({
 
   proofRequired: {
     type: String,
-    enum: ['screenshot', 'url', 'none'],
+    enum: ['screenshot', 'url', 'video', 'none'],
     default: 'screenshot',
   },
 

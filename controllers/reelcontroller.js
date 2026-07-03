@@ -721,9 +721,8 @@ exports.getSharedReelsForUser = async (req, res) => {
       const taskType = campaignTask?.taskType || contentCategory;
       const platform = campaignTask?.platform || campaign?.supportedTaskTypes?.[0] || contentCategory;
 
-      // Task-specific fields from CampaignTask
       const taskDetails = campaignTask ? {
-        description: campaignTask.description || '',
+        instructions: campaignTask.description || '',
         targetUrl: campaignTask.targetUrl || '',
         targetCount: campaignTask.targetCount || 0,
         appName: campaignTask.appName || '',
@@ -732,14 +731,14 @@ exports.getSharedReelsForUser = async (req, res) => {
         script: campaignTask.script || '',
         referenceVideoUrl: campaignTask.referenceVideoUrl || '',
       } : {
-        description: campaign?.description || '',
-        targetUrl: campaign?.goal || '',
-        targetCount: campaign?.cutoff || 0,
-        appName: '',
-        businessName: '',
-        minRating: '',
-        script: '',
-        referenceVideoUrl: '',
+        instructions: r.description || campaign?.description || '',
+        targetUrl: r.targetUrl || campaign?.goal || '',
+        targetCount: r.targetCount || campaign?.cutoff || 0,
+        appName: r.appName || '',
+        businessName: r.businessName || '',
+        minRating: r.minRating || '',
+        script: r.script || '',
+        referenceVideoUrl: r.referenceVideoUrl || '',
       };
 
       return {
@@ -756,7 +755,14 @@ exports.getSharedReelsForUser = async (req, res) => {
         platform,
         proofRequired,
         credits: r.credits || campaign?.credits || 0,
-        ...taskDetails,
+        instructions: taskDetails.instructions,
+        targetUrl: taskDetails.targetUrl,
+        targetCount: taskDetails.targetCount,
+        appName: taskDetails.appName,
+        businessName: taskDetails.businessName,
+        minRating: taskDetails.minRating,
+        script: taskDetails.script,
+        referenceVideoUrl: taskDetails.referenceVideoUrl,
 
         // ─── Task Status ─────────────────────────────────────────────
         TaskStatus: r.TaskStatus || 'assigned',

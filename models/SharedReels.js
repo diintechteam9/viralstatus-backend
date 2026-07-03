@@ -47,6 +47,15 @@ const sharedReelsSchema = new mongoose.Schema({
         type: String,
         default: ''
       },
+      // Task-specific fields (from CampaignTask)
+      description: { type: String, default: '' },
+      targetUrl: { type: String, default: '' },
+      targetCount: { type: Number, default: 0 },
+      appName: { type: String, default: '' },
+      businessName: { type: String, default: '' },
+      minRating: { type: String, default: '' },
+      script: { type: String, default: '' },
+      referenceVideoUrl: { type: String, default: '' },
       isTaskComplete: {
         type: Boolean,
         default: false
