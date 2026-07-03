@@ -634,15 +634,14 @@ exports.getSharedReelsForUser = async (req, res) => {
         .filter(Boolean)
     );
 
-    // Filter out tasks whose campaign has expired
     const now = new Date();
     const campaignIds = [...new Set(shared.reels.map(r => r.campaignId).filter(Boolean))];
-    // Single query — fetch all needed campaign fields at once
+
     const campaigns = await Campaign.find({ _id: { $in: campaignIds } })
-      .select('_id campaignName brandName description clientId campaignType supportedTaskTypes tNc goal views cutoff credits endDate startDate status isActive penaltyThresholdMinutes cancellationPenalty allowCancellation dailyTaskAcceptLimit autoApproval image categoryImage brandImage tags location userIds')
+      .select('_id campaignName brandName description clientId campaignType supportedTaskTypes tNc goal views cutoff credits endDate startDate status penaltyThresholdMinutes cancellationPenalty allowCancellation autoApproval image brandImage tags location userIds')
       .lean();
     const campaignMap = new Map(campaigns.map(c => [String(c._id), c]));
-    const fullCampaignMap = campaignMap; // same map — no duplicate query needed
+
     const expiredIds = new Set(
       campaigns.filter(c => c.endDate && new Date(c.endDate) < now).map(c => String(c._id))
     );
@@ -651,16 +650,24 @@ exports.getSharedReelsForUser = async (req, res) => {
       r.TaskStatus !== 'rejected'
     );
 
-    // Fetch userResponse for this user
+    // Fetch all CampaignTask docs needed in one query
+    const CampaignTask = require('../models/CampaignTask');
+    const campaignTaskIds = [...new Set(
+      reelsToReturn.map(r => r.campaignTaskId).filter(id => id && mongoose.Types.ObjectId.isValid(id))
+    )];
+    const campaignTasks = campaignTaskIds.length
+      ? await CampaignTask.find({ _id: { $in: campaignTaskIds } }).lean()
+      : [];
+    const campaignTaskMap = new Map(campaignTasks.map(t => [String(t._id), t]));
+
     const userRespDoc = await UserResponse.findOne({ googleId: userId });
     const userResponses = userRespDoc && Array.isArray(userRespDoc.response) ? userRespDoc.response : [];
 
-    // Generate fresh S3 URLs for each reel and for campaign image, and add status from userResponse
     let legacyFixed = false;
 
     const reelsWithFreshUrls = await Promise.all(reelsToReturn.map(async (r) => {
       const campaign = campaignMap.get(String(r.campaignId));
-      const fullCampaign = fullCampaignMap.get(String(r.campaignId));
+      const campaignTask = r.campaignTaskId ? campaignTaskMap.get(String(r.campaignTaskId)) : null;
 
       const before = JSON.stringify({ a: r.isTaskAccepted, t: r.TaskStatus, at: r.acceptedAt });
       normalizeReelAcceptState(r);
@@ -675,28 +682,33 @@ exports.getSharedReelsForUser = async (req, res) => {
       );
       const timer = buildTimerPayload(r, campaign);
 
-      // Determine if under review — cancel not allowed, edit allowed
       const isUnderReview =
         r.submissionStatus === 'pending_review' ||
         (userRespEntry && userRespEntry.status === 'pending');
 
-      // allowCancellation: false if under review OR campaign disables it
       const allowCancellation = !isUnderReview && timer.allowCancellation !== false;
 
       // Fresh campaign image URL
       let campaignImageUrl = '';
-      const imgKey = r.campaignImageKey || fullCampaign?.image?.key || '';
+      const imgKey = r.campaignImageKey || campaign?.image?.key || '';
       if (imgKey) {
         try { campaignImageUrl = await getobject(imgKey); } catch (_) {}
       }
 
       // Fresh brand image URL
       let brandImageUrl = '';
-      if (fullCampaign?.brandImage?.key) {
-        try { brandImageUrl = await getobject(fullCampaign.brandImage.key); } catch (_) {}
+      if (campaign?.brandImage?.key) {
+        try { brandImageUrl = await getobject(campaign.brandImage.key); } catch (_) {}
       }
 
-      const proofRequired = (() => {
+      // Fresh reel media URL (only for reel-type tasks)
+      let s3Url = '';
+      if (r.s3Key) {
+        try { s3Url = await getobject(r.s3Key); } catch (_) {}
+      }
+
+      // proofRequired: from CampaignTask if available, else derive from contentCategory
+      const proofRequired = campaignTask?.proofRequired || (() => {
         const cat = r.contentCategory || 'reels';
         if (['app_review', 'gmb_review'].includes(cat)) return 'screenshot';
         if (cat === 'ugc') return 'video';
@@ -704,20 +716,47 @@ exports.getSharedReelsForUser = async (req, res) => {
         return 'none';
       })();
 
+      // taskType & platform: from CampaignTask if available
+      const contentCategory = r.contentCategory || campaignTask?.contentCategory || 'reels';
+      const taskType = campaignTask?.taskType || contentCategory;
+      const platform = campaignTask?.platform || campaign?.supportedTaskTypes?.[0] || contentCategory;
+
+      // Task-specific fields from CampaignTask
+      const taskDetails = campaignTask ? {
+        description: campaignTask.description || '',
+        targetUrl: campaignTask.targetUrl || '',
+        targetCount: campaignTask.targetCount || 0,
+        appName: campaignTask.appName || '',
+        businessName: campaignTask.businessName || '',
+        minRating: campaignTask.minRating || '',
+        script: campaignTask.script || '',
+        referenceVideoUrl: campaignTask.referenceVideoUrl || '',
+      } : {
+        description: campaign?.description || '',
+        targetUrl: campaign?.goal || '',
+        targetCount: campaign?.cutoff || 0,
+        appName: '',
+        businessName: '',
+        minRating: '',
+        script: '',
+        referenceVideoUrl: '',
+      };
+
       return {
-        // ─── Task Identity ───────────────────────────────────────────
+        // ─── Identity ────────────────────────────────────────────────
         _id: r._id,
         reelId: r.reelId,
         campaignTaskId: r.campaignTaskId || '',
         campaignId: r.campaignId,
 
         // ─── Task Content ────────────────────────────────────────────
-        title: r.title || '',
-        contentCategory: r.contentCategory || 'reels',
-        taskType: r.contentCategory || fullCampaign?.supportedTaskTypes?.[0] || 'reels',
-        platform: fullCampaign?.supportedTaskTypes?.[0] || 'reels',
+        title: r.title || campaignTask?.title || '',
+        contentCategory,
+        taskType,
+        platform,
         proofRequired,
-        credits: r.credits || fullCampaign?.credits || 0,
+        credits: r.credits || campaign?.credits || 0,
+        ...taskDetails,
 
         // ─── Task Status ─────────────────────────────────────────────
         TaskStatus: r.TaskStatus || 'assigned',
@@ -730,9 +769,9 @@ exports.getSharedReelsForUser = async (req, res) => {
         isUnderReview: !!isUnderReview,
         campaignType: resolveReelCampaignType(r, campaign, userId, registeredCampaignIds, registeredCampaigns),
 
-        // ─── Task Timestamps ─────────────────────────────────────────
-        acceptedAt: r.acceptedAt,
-        cancelledAt: r.cancelledAt,
+        // ─── Timestamps ──────────────────────────────────────────────
+        acceptedAt: r.acceptedAt || null,
+        cancelledAt: r.cancelledAt || null,
         cancellationReason: r.cancellationReason || '',
         createdAt: r.createdAt,
         updatedAt: r.updatedAt || r.createdAt,
@@ -749,45 +788,38 @@ exports.getSharedReelsForUser = async (req, res) => {
         penaltyThresholdMinutes: timer.penaltyThresholdMinutes,
         cancellationPenalty: timer.cancellationPenalty,
 
-        // ─── Reel Media ──────────────────────────────────────────────
-        s3Key: r.s3Key,
-        s3Url: r.s3Key ? await getobject(r.s3Key) : '',
+        // ─── Reel Media (only for reels/post tasks) ──────────────────
+        s3Key: r.s3Key || '',
+        s3Url,
 
-        // ─── Campaign Details ────────────────────────────────────────
+        // ─── Campaign ────────────────────────────────────────────────
         campaign: {
-          _id: fullCampaign?._id || r.campaignId,
-          campaignName: r.campaignName || fullCampaign?.campaignName || '',
-          brandName: fullCampaign?.brandName || '',
-          clientId: fullCampaign?.clientId || '',
-          description: fullCampaign?.description || '',
-          goal: fullCampaign?.goal || '',
-          views: fullCampaign?.views || '',
-          credits: fullCampaign?.credits || 0,
-          cutoff: fullCampaign?.cutoff || 0,
-          tNc: fullCampaign?.tNc || '',
-          tags: fullCampaign?.tags || [],
-          location: fullCampaign?.location || '',
-          status: fullCampaign?.status || '',
-          campaignType: fullCampaign?.campaignType || 'private',
-          supportedTaskTypes: fullCampaign?.supportedTaskTypes || ['reels'],
-          autoApproval: !!fullCampaign?.autoApproval,
-          startDate: fullCampaign?.startDate || null,
-          endDate: fullCampaign?.endDate || null,
-          image: {
-            key: imgKey,
-            url: campaignImageUrl,
-          },
-          brandImage: {
-            key: fullCampaign?.brandImage?.key || '',
-            url: brandImageUrl,
-          },
+          _id: campaign?._id || r.campaignId,
+          campaignName: campaign?.campaignName || r.campaignName || '',
+          brandName: campaign?.brandName || '',
+          clientId: campaign?.clientId || '',
+          description: campaign?.description || '',
+          goal: campaign?.goal || '',
+          views: campaign?.views || '',
+          credits: campaign?.credits || 0,
+          cutoff: campaign?.cutoff || 0,
+          tNc: campaign?.tNc || '',
+          tags: campaign?.tags || [],
+          location: campaign?.location || '',
+          status: campaign?.status || '',
+          campaignType: campaign?.campaignType || 'private',
+          supportedTaskTypes: campaign?.supportedTaskTypes || [],
+          autoApproval: !!campaign?.autoApproval,
+          startDate: campaign?.startDate || null,
+          endDate: campaign?.endDate || null,
+          image: { key: imgKey, url: campaignImageUrl },
+          brandImage: { key: campaign?.brandImage?.key || '', url: brandImageUrl },
         },
 
-        // ─── Submission (latest) ─────────────────────────────────────
+        // ─── Submission ───────────────────────────────────────────────
         submission: userRespEntry ? {
           url: userRespEntry.urls,
           status: userRespEntry.status,
-          submissionReviewStatus: userRespEntry.status,
           submittedAt: userRespEntry.createdAt,
           views: userRespEntry.views || 0,
           likes: userRespEntry.likes || 0,
@@ -795,20 +827,6 @@ exports.getSharedReelsForUser = async (req, res) => {
           creditAmount: userRespEntry.creditAmount || 0,
           isCreditAccepted: userRespEntry.isCreditAccepted || false,
         } : null,
-
-        // ─── Flat fields kept for backward compatibility ──────────────
-        campaignName: r.campaignName || fullCampaign?.campaignName || '',
-        brandName: fullCampaign?.brandName || '',
-        description: fullCampaign?.description || '',
-        campaignImageKey: imgKey,
-        campaignImageUrl,
-        brandImageKey: fullCampaign?.brandImage?.key || '',
-        brandImageUrl,
-        deadline: fullCampaign?.endDate || null,
-        targetUrl: fullCampaign?.goal || '',
-        targetCount: fullCampaign?.cutoff || 0,
-        submissionReviewStatus: userRespEntry?.status || null,
-        status: userRespEntry ? userRespEntry.status : 'pending',
       };
     }));
 
@@ -817,7 +835,7 @@ exports.getSharedReelsForUser = async (req, res) => {
       await shared.save();
     }
     res.status(200).json({ success: true, reels: reelsWithFreshUrls });
-  } catch (err) { 
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
