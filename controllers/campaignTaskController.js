@@ -124,7 +124,9 @@ exports.createTask = async (req, res) => {
       campaignId,
       clientId: clientId || campaign.clientId,
       title, description, platform, taskType,
-      targetCount, credits,
+      targetCount: contentCategory === 'post' ? 0 : targetCount,
+      targetUrl: contentCategory === 'post' ? '' : (req.body.targetUrl || ''),
+      credits,
       proofRequired, status, deadline, order,
       visibility: visibility || 'private',
       contentCategory: contentCategory || 'post',
@@ -464,6 +466,12 @@ exports.updateTask = async (req, res) => {
     const update = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];
+    }
+    // post category ke liye targetUrl aur targetCount ignore
+    const existingTask = await CampaignTask.findById(taskId).lean();
+    if (existingTask?.contentCategory === 'post') {
+      delete update.targetUrl;
+      delete update.targetCount;
     }
     const task = await CampaignTask.findByIdAndUpdate(taskId, update, { new: true });
     if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
