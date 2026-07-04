@@ -693,6 +693,9 @@ exports.getSharedReelsForUser = async (req, res) => {
       );
       const timer = buildTimerPayload(r, campaign);
 
+      // contentCategory must be defined before ugcSub check
+      const contentCategory = r.contentCategory || campaignTask?.contentCategory || 'reels';
+
       // For UGC tasks, check UGCSubmission instead of UserResponse
       const ugcSub = (r.contentCategory === 'ugc' || contentCategory === 'ugc')
         ? ugcSubmissionMap.get(String(r.campaignId))
@@ -735,7 +738,6 @@ exports.getSharedReelsForUser = async (req, res) => {
       })();
 
       // taskType & platform: from CampaignTask if available
-      const contentCategory = r.contentCategory || campaignTask?.contentCategory || 'reels';
       const taskType = campaignTask?.taskType || contentCategory;
       const platform = campaignTask?.platform || campaign?.supportedTaskTypes?.[0] || contentCategory;
 
