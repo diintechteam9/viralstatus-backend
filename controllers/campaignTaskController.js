@@ -519,13 +519,21 @@ exports.assignTask = async (req, res) => {
 
     const campaign = await Campaign.findById(task.campaignId).lean();
 
-    let targetUserIds = userIds;
-    if (assignToAll || (task.visibility === 'public' && (!Array.isArray(userIds) || userIds.length === 0))) {
-      targetUserIds = await resolveTargetUserIds(campaign || {}, []);
+    let targetUserIds = Array.isArray(userIds) && userIds.length > 0 ? userIds : [];
+
+    // Public task ya assignToAll — sare registered users ko assign karo
+    const isPublicTask = task.visibility === 'public';
+    const isPublicCampaign = campaign?.campaignType === 'public';
+
+    if (assignToAll || isPublicTask || (isPublicCampaign && targetUserIds.length === 0)) {
+      const MobileUser = require('../models/MobileUser');
+      const allUsers = await MobileUser.find({ googleId: { $exists: true, $ne: null, $ne: '' } })
+        .select('googleId').lean();
+      targetUserIds = allUsers.map((u) => u.googleId).filter(Boolean);
     }
 
     if (!Array.isArray(targetUserIds) || targetUserIds.length === 0)
-      return res.status(400).json({ success: false, message: 'No users to assign' });
+      return res.status(400).json({ success: false, message: 'No users to assign. For private tasks, provide userIds.' });
 
     const assignedCount = await assignCampaignTaskToUsers(
       task,
