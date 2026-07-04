@@ -115,6 +115,14 @@ exports.uploadUGCVideo = [
         console.log(`[UGC Credits] userId=${userId} earned ${creditsEarned} credits for ${videoDuration}s video`);
       }
 
+      // Update SharedReels submissionStatus to pending_review for this UGC task
+      const SharedReels = require('../models/SharedReels');
+      await SharedReels.updateOne(
+        { googleId: userId, 'reels.campaignId': campaignId, 'reels.contentCategory': 'ugc' },
+        { $set: { 'reels.$[elem].submissionStatus': 'pending_review', 'reels.$[elem].isTaskComplete': true } },
+        { arrayFilters: [{ 'elem.campaignId': campaignId, 'elem.contentCategory': 'ugc' }] }
+      );
+
       const enriched = await buildUGCFormResponse(campaignId, userId);
 
       res.json({
@@ -158,6 +166,15 @@ exports.updateUGCSubmissionStatus = async (req, res) => {
     }
     const submission = await UGCSubmission.findByIdAndUpdate(submissionId, { status }, { new: true });
     if (!submission) return res.status(404).json({ success: false, message: 'Submission not found' });
+
+    // Sync SharedReels submissionStatus
+    const SharedReels = require('../models/SharedReels');
+    const newSubmissionStatus = status === 'approved' ? 'approved' : status === 'rejected' ? 'rejected' : 'pending_review';
+    await SharedReels.updateOne(
+      { googleId: submission.userId, 'reels.campaignId': String(submission.campaignId), 'reels.contentCategory': 'ugc' },
+      { $set: { 'reels.$[elem].submissionStatus': newSubmissionStatus } },
+      { arrayFilters: [{ 'elem.campaignId': String(submission.campaignId), 'elem.contentCategory': 'ugc' }] }
+    );
 
     const data = await buildUGCFormResponse(submission.campaignId, submission.userId);
 

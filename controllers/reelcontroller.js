@@ -22,6 +22,7 @@ const {
   buildTimerPayload,
   normalizeReelAcceptState,
 } = require('../services/userTaskService');
+const UGCSubmission = require('../models/UGCSubmission');
 
 // ─── Fast Multi Upload: Step 1 — Get batch presigned PUT URLs ───────────────
 exports.getPresignedUrls = async (req, res) => {
@@ -663,6 +664,16 @@ exports.getSharedReelsForUser = async (req, res) => {
     const userRespDoc = await UserResponse.findOne({ googleId: userId });
     const userResponses = userRespDoc && Array.isArray(userRespDoc.response) ? userRespDoc.response : [];
 
+    // Fetch all UGC submissions for this user in one query
+    const ugcCampaignIds = reelsToReturn
+      .filter(r => r.contentCategory === 'ugc')
+      .map(r => String(r.campaignId))
+      .filter(Boolean);
+    const ugcSubmissions = ugcCampaignIds.length
+      ? await UGCSubmission.find({ userId: String(userId), campaignId: { $in: ugcCampaignIds } }).lean()
+      : [];
+    const ugcSubmissionMap = new Map(ugcSubmissions.map(s => [String(s.campaignId), s]));
+
     let legacyFixed = false;
 
     const reelsWithFreshUrls = await Promise.all(reelsToReturn.map(async (r) => {
@@ -682,8 +693,15 @@ exports.getSharedReelsForUser = async (req, res) => {
       );
       const timer = buildTimerPayload(r, campaign);
 
+      // For UGC tasks, check UGCSubmission instead of UserResponse
+      const ugcSub = (r.contentCategory === 'ugc' || contentCategory === 'ugc')
+        ? ugcSubmissionMap.get(String(r.campaignId))
+        : null;
+      const hasUgcSubmission = !!ugcSub;
+
       const isUnderReview =
         r.submissionStatus === 'pending_review' ||
+        (ugcSub && ugcSub.status === 'pending') ||
         (userRespEntry && userRespEntry.status === 'pending');
 
       const allowCancellation = !isUnderReview && timer.allowCancellation !== false;
@@ -770,7 +788,7 @@ exports.getSharedReelsForUser = async (req, res) => {
         isTaskAccepted: !!r.isTaskAccepted,
         isTaskComplete: !!r.isTaskComplete,
         alreadyCompleted: !!r.isTaskComplete,
-        alreadySubmitted: !!userRespEntry,
+        alreadySubmitted: hasUgcSubmission || !!userRespEntry,
         canEdit: !!isUnderReview,
         isUnderReview: !!isUnderReview,
         campaignType: resolveReelCampaignType(r, campaign, userId, registeredCampaignIds, registeredCampaigns),
@@ -823,16 +841,35 @@ exports.getSharedReelsForUser = async (req, res) => {
         },
 
         // ─── Submission ───────────────────────────────────────────────
-        submission: userRespEntry ? {
-          url: userRespEntry.urls,
-          status: userRespEntry.status,
-          submittedAt: userRespEntry.createdAt,
-          views: userRespEntry.views || 0,
-          likes: userRespEntry.likes || 0,
-          comments: userRespEntry.comments || 0,
-          creditAmount: userRespEntry.creditAmount || 0,
-          isCreditAccepted: userRespEntry.isCreditAccepted || false,
-        } : null,
+        submission: (() => {
+          // UGC tasks — use UGCSubmission collection
+          if ((r.contentCategory === 'ugc' || contentCategory === 'ugc')) {
+            const ugcSub = ugcSubmissionMap.get(String(r.campaignId));
+            if (!ugcSub) return null;
+            return {
+              _id: ugcSub._id,
+              status: ugcSub.status,
+              videoKey: ugcSub.videoKey,
+              videoUrl: ugcSub.videoUrl,
+              videoDuration: ugcSub.videoDuration,
+              creditsEarned: ugcSub.creditsEarned,
+              creditsAwarded: ugcSub.creditsAwarded,
+              submittedAt: ugcSub.createdAt,
+              updatedAt: ugcSub.updatedAt,
+            };
+          }
+          // URL-based tasks (reels, post, app_review, gmb_review)
+          return userRespEntry ? {
+            url: userRespEntry.urls,
+            status: userRespEntry.status,
+            submittedAt: userRespEntry.createdAt,
+            views: userRespEntry.views || 0,
+            likes: userRespEntry.likes || 0,
+            comments: userRespEntry.comments || 0,
+            creditAmount: userRespEntry.creditAmount || 0,
+            isCreditAccepted: userRespEntry.isCreditAccepted || false,
+          } : null;
+        })(),
       };
     }));
 
