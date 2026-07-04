@@ -64,6 +64,14 @@ const ta1000seriesRoutes = require('./routes/ta1000series');
 const videomergeta1000seriesRoutes = require('./routes/videomergeta1000series');
 const creditWalletRoutes = require("./routes/creditWalletRoute");
 
+// ── New feature routes ────────────────────────────────────────────────────────
+const kycRoutes          = require('./routes/kycRoutes');
+const withdrawRoutes     = require('./routes/withdrawRoutes');
+const testimonialRoutes  = require('./routes/testimonialRoutes');
+const activityRoutes     = require('./routes/activityRoutes');
+const bannerRoutes       = require('./routes/bannerRoutes');
+const taskPaginationRoute= require('./routes/taskPaginationRoute');
+
 // for whatsapp
 const requestedTemplateRoutes = require("./routes/whatsapp/requestedTemplateRoutes");
 const createRequestedTemplateRoutes = require("./routes/whatsapp/createRequestedTemplateRoute");
@@ -332,6 +340,7 @@ app.use('/api/auth/user/campaign', campaignRoutes);
 app.use('/api/campaign-tasks', require('./routes/campaignTaskRoutes'));
 app.use('/api/reels-tutorials', require('./routes/reelsTutorialRoutes'));
 app.use('/api/ugc', ugcRoutes);
+app.use('/api/ugc-prompter', require('./routes/ugcPrompterRoutes'));
 app.use('/api/news-blog', newsBlogRoutes);
 app.use('/api/news-blog-tasks', newsBlogTaskRoutes);
 app.use('/api/image-proxy', require('./routes/imageProxyRoute'));
@@ -346,6 +355,14 @@ app.use('/api/image-pools', imagePoolRoutes);
 //credit Routes
 app.use('/api/user/creditwallet', creditWalletRoutes);
 app.use('/api/user/creditWallet', creditWalletRoutes);
+
+// ── New feature routes ────────────────────────────────────────────────────────
+app.use('/api/kyc',          kycRoutes);
+app.use('/api/withdraw',     withdrawRoutes);
+app.use('/api/testimonials', testimonialRoutes);
+app.use('/api/activity',     activityRoutes);
+app.use('/api/banners',      bannerRoutes);
+app.use('/api/tasks',        taskPaginationRoute);
 
 
 // TA1000Series Routes

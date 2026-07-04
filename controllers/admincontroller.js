@@ -517,6 +517,103 @@ const getBusinessLogoUrl = async (req, res) => {
   }
 };
 
+// ── GET /api/admin/users — list all mobile users (admin only) ─────────────────
+const getAllMobileUsers = async (req, res) => {
+  try {
+    const MobileUser = require('../models/MobileUser');
+    const {
+      search = '',
+      clientId = '',
+      page = 1,
+      limit = 50,
+    } = req.query;
+
+    const filter = {};
+    if (clientId) filter.clientId = clientId;
+    if (search.trim()) {
+      const q = search.trim();
+      filter.$or = [
+        { name:   { $regex: q, $options: 'i' } },
+        { email:  { $regex: q, $options: 'i' } },
+        { mobile: { $regex: q, $options: 'i' } },
+      ];
+    }
+
+    const skip  = (Math.max(1, Number(page)) - 1) * Math.min(100, Number(limit));
+    const take  = Math.min(100, Number(limit));
+    const total = await MobileUser.countDocuments(filter);
+
+    const users = await MobileUser
+      .find(filter)
+      .select('name email mobile city clientId clientCode profileImageUrl registrationStep emailVerified createdAt lastLoginAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(take)
+      .lean();
+
+    res.json({ success: true, users, total, page: Number(page), limit: take });
+  } catch (err) {
+    console.error('[Admin] getAllMobileUsers error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── POST /api/admin/switch-user/:userId — impersonate a mobile user ──────────
+// Creates a short-lived token that logs admin into the user portal as that user.
+// Token carries switchedByAdmin flag so the frontend can show a banner.
+const switchToUser = async (req, res) => {
+  try {
+    const MobileUser = require('../models/MobileUser');
+    const { userId } = req.params;
+
+    const user = await MobileUser.findById(userId).lean();
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const clientDoc = user.clientId
+      ? await Client.findById(user.clientId).lean()
+      : null;
+
+    // Issue a short-lived (2h) impersonation token
+    const impersonationToken = jwt.sign(
+      {
+        id:              user._id,
+        email:           user.email,
+        role:            'mobileuser',
+        clientId:        clientDoc?.clientId     || '',
+        clientObjectId:  String(user.clientId)   || '',
+        // Audit fields — carried in token, never stored to DB
+        switchedByAdmin: true,
+        adminId:         String(req.user.id),
+        adminEmail:      req.user.email,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '2h' }
+    );
+
+    const userData = {
+      role:     'mobileuser',
+      name:     user.name  || '',
+      email:    user.email || '',
+      clientId: clientDoc?.clientId || '',
+      userId:   String(user._id),
+      googleId: user.googleId || '',
+      // Flags for frontend banner
+      switchedByAdmin: true,
+      adminEmail:      req.user.email,
+    };
+
+    res.json({
+      success: true,
+      token:    impersonationToken,
+      userData,
+      message: `Switched to ${user.name || user.email}`,
+    });
+  } catch (err) {
+    console.error('[Admin] switchToUser error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 module.exports = {
   registerAdmin,
   registerclient,
@@ -527,5 +624,7 @@ module.exports = {
   updateClient,
   getClientToken,
   uploadBusinessLogo,
-  getBusinessLogoUrl
+  getBusinessLogoUrl,
+  getAllMobileUsers,
+  switchToUser,
 };

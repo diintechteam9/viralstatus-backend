@@ -9,7 +9,9 @@ const {
   updateClient,
   getClientToken,
   uploadBusinessLogo,
-  getBusinessLogoUrl
+  getBusinessLogoUrl,
+  getAllMobileUsers,
+  switchToUser,
 } = require("../controllers/admincontroller");
 const { authenticate, authorize } = require('../middleware/authenticate');
 const router = express.Router();
@@ -27,5 +29,9 @@ router.put('/updateclient/:id', authenticate, authorize('admin', 'super_admin'),
 router.get('/get-client-token/:clientId', authenticate, authorize('admin', 'super_admin'), getClientToken);
 router.post('/upload-business-logo', authenticate, authorize('admin', 'super_admin'), uploadBusinessLogo);
 router.post('/get-business-logo-url', authenticate, authorize('admin', 'super_admin'), getBusinessLogoUrl);
+
+// ── Switch User (Impersonation) — admin only ─────────────────────────────────
+router.get('/users',              authenticate, authorize('admin', 'super_admin'), getAllMobileUsers);
+router.post('/switch-user/:userId', authenticate, authorize('admin', 'super_admin'), switchToUser);
 
 module.exports = router;
