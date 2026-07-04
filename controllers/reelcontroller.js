@@ -730,15 +730,19 @@ exports.getSharedReelsForUser = async (req, res) => {
 
       // proofRequired: from CampaignTask if available, else derive from contentCategory
       const proofRequired = campaignTask?.proofRequired || (() => {
-        const cat = r.contentCategory || 'reels';
-        if (['app_review', 'gmb_review'].includes(cat)) return 'screenshot';
+        const cat = contentCategory;
         if (cat === 'ugc') return 'video';
+        if (['app_review', 'gmb_review'].includes(cat)) return 'screenshot';
         if (['reels', 'post'].includes(cat)) return 'url';
         return 'none';
       })();
 
       // taskType & platform: from CampaignTask if available
-      const taskType = campaignTask?.taskType || contentCategory;
+      const taskType = (() => {
+        const raw = campaignTask?.taskType || contentCategory;
+        if (raw === 'upload_reel' || raw === 'ugc') return 'Upload Video';
+        return raw;
+      })();
       const platform = campaignTask?.platform || campaign?.supportedTaskTypes?.[0] || contentCategory;
 
       const taskDetails = campaignTask ? {
