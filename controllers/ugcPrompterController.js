@@ -11,18 +11,10 @@ function getGroq() {
 // ── GET all prompts for a client ─────────────────────────────────────────────
 exports.getPrompts = async (req, res) => {
   try {
-    const { clientId, campaignId, status, category } = req.query;
-    if (!clientId) return res.status(400).json({ success: false, message: 'clientId required' });
+    const clientId = String(req.user.clientId || req.user.id);
+    const { campaignId, status, category } = req.query;
 
-    // Build an OR filter: match by MongoDB ObjectId (clientId field) OR clientCode string
-    // This handles both client dashboard (sends _id) and mobile users (may send clientObjectId)
-    const orConditions = [{ clientId }];
-    // If it looks like a MongoDB ObjectId, also try it directly
-    if (/^[a-f0-9]{24}$/i.test(String(clientId).trim())) {
-      orConditions.push({ clientId: String(clientId).trim() });
-    }
-
-    const filter = orConditions.length > 1 ? { $or: orConditions } : { clientId };
+    const filter = { clientId };
     if (campaignId) filter.campaignId = campaignId;
     if (status)     filter.status     = status;
     if (category)   filter.category   = category;
@@ -49,14 +41,16 @@ exports.getPromptById = async (req, res) => {
 exports.createPrompt = async (req, res) => {
   try {
     const {
-      clientId, campaignId, title, category, platform, tone,
+      campaignId, title, category, platform, tone,
       duration, brandName, productName, keyPoints, prompt,
       script, hashtags, status, isAiGenerated,
     } = req.body;
 
-    if (!clientId || !title || !prompt) {
-      return res.status(400).json({ success: false, message: 'clientId, title, prompt are required' });
+    if (!title || !prompt) {
+      return res.status(400).json({ success: false, message: 'title, prompt are required' });
     }
+
+    const clientId = String(req.user.clientId || req.user.id);
 
     const doc = await UGCPrompter.create({
       clientId, campaignId: campaignId || '',
@@ -116,10 +110,8 @@ exports.generatePrompt = async (req, res) => {
       topic = '',
       brandName = '', productName = '', category = 'testimonial',
       tone = 'casual', platform = 'instagram', duration = 30,
-      keyPoints = [], clientId,
+      keyPoints = [],
     } = req.body;
-
-    if (!clientId) return res.status(400).json({ success: false, message: 'clientId required' });
 
     const brand   = brandName   || 'our brand';
     const product = productName || topic || 'our product';
