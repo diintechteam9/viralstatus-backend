@@ -20,7 +20,23 @@ exports.getPrompts = async (req, res) => {
     if (category)   filter.category   = category;
 
     const prompts = await UGCPrompter.find(filter).sort({ createdAt: -1 }).lean();
-    res.json({ success: true, prompts });
+    
+    // Return only required fields
+    const cleanedPrompts = prompts.map(p => ({
+      _id: p._id,
+      clientId: p.clientId,
+      title: p.title,
+      category: p.category,
+      tone: p.tone,
+      duration: p.duration,
+      script: p.script,
+      status: p.status,
+      isAiGenerated: p.isAiGenerated,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
+    }));
+    
+    res.json({ success: true, prompts: cleanedPrompts });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -31,7 +47,21 @@ exports.getPromptById = async (req, res) => {
   try {
     const prompt = await UGCPrompter.findById(req.params.id).lean();
     if (!prompt) return res.status(404).json({ success: false, message: 'Prompt not found' });
-    res.json({ success: true, prompt });
+    
+    // Return only required fields
+    res.json({
+      success: true,
+      prompt: {
+        _id: prompt._id,
+        title: prompt.title,
+        category: prompt.category,
+        tone: prompt.tone,
+        duration: prompt.duration,
+        script: prompt.script,
+        status: prompt.status,
+        createdAt: prompt.createdAt,
+      }
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
