@@ -23,7 +23,7 @@ const ugcPrompterSchema = new mongoose.Schema({
   brandName:   { type: String, default: '' },
   productName: { type: String, default: '' },
   keyPoints:   { type: [String], default: [] },  // bullet points to cover
-  prompt:      { type: String, required: true }, // generated/manual prompt text
+  prompt:      { type: String, default: '' },
   script:      { type: String, default: '' },    // optional full script
   hashtags:    { type: [String], default: [] },
   status:      {
