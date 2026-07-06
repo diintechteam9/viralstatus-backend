@@ -65,7 +65,24 @@ exports.createPrompt = async (req, res) => {
       isAiGenerated: !!isAiGenerated,
     });
 
-    res.status(201).json({ success: true, prompt: doc });
+    res.status(201).json({
+      success: true,
+      prompt: {
+        _id: doc._id,
+        clientId: doc.clientId,
+        title: doc.title,
+        category: doc.category,
+        tone: doc.tone,
+        duration: doc.duration,
+        keyPoints: doc.keyPoints,
+        script: doc.script,
+        hashtags: doc.hashtags,
+        status: doc.status,
+        isAiGenerated: doc.isAiGenerated,
+        createdAt: doc.createdAt,
+        updatedAt: doc.updatedAt,
+      }
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
