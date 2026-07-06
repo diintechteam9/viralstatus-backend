@@ -729,12 +729,12 @@ exports.getSharedReelsForUser = async (req, res) => {
       }
 
       // proofRequired: from CampaignTask if available, else derive from contentCategory
-      const proofRequired = campaignTask?.proofRequired || (() => {
+      const proofRequired = (() => {
         const cat = contentCategory;
         if (cat === 'ugc') return 'video';
         if (['app_review', 'gmb_review'].includes(cat)) return 'screenshot';
         if (['reels', 'post'].includes(cat)) return 'url';
-        return 'none';
+        return campaignTask?.proofRequired || 'none';
       })();
 
       // taskType & platform: from CampaignTask if available
