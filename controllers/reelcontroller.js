@@ -620,11 +620,15 @@ function resolveReelCampaignType(reel, campaign, userId, registeredCampaignIds, 
 
 //to store in db
 exports.getSharedReelsForUser = async (req, res) => {
-  const { userId } = req.params; // userId is googleId
+  const { userId } = req.params;
+  const page  = Math.max(1, parseInt(req.query.page)  || 1);
+  const limit = Math.min(50, parseInt(req.query.limit) || 20);
+  const skip  = (page - 1) * limit;
+
   try {
     const shared = await SharedReels.findOne({ googleId: userId });
     if (!shared || !Array.isArray(shared.reels)) {
-      return res.json({ success: true, reels: [] });
+      return res.json({ success: true, reels: [], total: 0, page, limit, totalPages: 0 });
     }
 
     const regDoc = await RegisteredCampaign.findOne({ userId }).lean();
@@ -646,10 +650,13 @@ exports.getSharedReelsForUser = async (req, res) => {
     const expiredIds = new Set(
       campaigns.filter(c => c.endDate && new Date(c.endDate) < now).map(c => String(c._id))
     );
-    const reelsToReturn = shared.reels.filter(r =>
+    const allFilteredReels = shared.reels.filter(r =>
       !expiredIds.has(String(r.campaignId)) &&
       r.TaskStatus !== 'rejected'
     );
+    const total      = allFilteredReels.length;
+    const totalPages = Math.ceil(total / limit);
+    const reelsToReturn = allFilteredReels.slice(skip, skip + limit);
 
     // Fetch all CampaignTask docs needed in one query
     const CampaignTask = require('../models/CampaignTask');
@@ -883,7 +890,7 @@ exports.getSharedReelsForUser = async (req, res) => {
       shared.reels.forEach((r) => normalizeReelAcceptState(r));
       await shared.save();
     }
-    res.status(200).json({ success: true, reels: reelsWithFreshUrls });
+    res.status(200).json({ success: true, reels: reelsWithFreshUrls, total, page, limit, totalPages });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
