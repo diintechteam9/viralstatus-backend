@@ -16,9 +16,11 @@ async function refreshUrl(b) {
 // ── GET /api/banners ───────────────────────────────────────────────
 exports.getBanners = async (req, res) => {
   try {
-    const clientId = req.user?.clientId || null;
     const filter = { isActive: true };
-    if (clientId) filter.clientId = clientId;
+
+    // clientId filter sirf client/admin role ke liye — mobile user ko sab banners milenge
+    const role = req.user?.role;
+    if (role === 'client') filter.clientId = String(req.user.clientId || req.user.id);
 
     const banners = await Banner.find(filter).sort({ order: 1, createdAt: -1 }).lean();
     await Promise.all(banners.map(refreshUrl));
