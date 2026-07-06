@@ -23,10 +23,11 @@ async function uploadDoc(file, userId, docType) {
   return { key, url };
 }
 
-// ── GET /api/kyc/:userId — get KYC status ────────────────────────────────────
+// ── GET /api/kyc/me — get KYC status (userId from token) ───────────────────
 exports.getKYC = async (req, res) => {
   try {
-    const kyc = await KYC.findOne({ userId: req.params.userId }).lean();
+    const userId = String(req.user.id);
+    const kyc = await KYC.findOne({ userId }).lean();
     if (!kyc) return res.json({ success: true, kyc: null, status: 'pending' });
     // Refresh presigned URLs
     if (kyc.panImageKey)    kyc.panImageUrl     = await getobject(kyc.panImageKey).catch(() => kyc.panImageUrl);
@@ -49,14 +50,13 @@ exports.submitKYC = [
   ]),
   async (req, res) => {
     try {
+      const userId = String(req.user.id);
       const {
-        userId, fullName, dateOfBirth, gender,
+        fullName, dateOfBirth, gender,
         address, city, state, pincode,
         bankName, accountNumber, ifscCode, accountHolder, upiId,
         panNumber, aadharNumber,
       } = req.body;
-
-      if (!userId) return res.status(400).json({ success: false, message: 'userId required' });
 
       let existing = await KYC.findOne({ userId });
       if (existing && existing.status === 'approved') {

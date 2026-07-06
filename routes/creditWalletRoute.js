@@ -1,12 +1,12 @@
 const express = require('express');
-const router = express.Router();
-const creditWalletController = require('../controllers/creditWalletController');
+const router  = express.Router();
+const ctrl    = require('../controllers/creditWalletController');
+const { authenticate, authorize } = require('../middleware/authenticate');
 
-// Sync wallet with approved user responses
-router.post('/sync/:userId', creditWalletController.syncCreditWallet);
+const mobileOnly = [authenticate, authorize('mobileuser')];
 
-// Fetch wallet info
-router.get('/:userId', creditWalletController.getCreditWallet);
+// Auth required — userId extracted from token in controller
+router.post('/sync', ...mobileOnly, ctrl.syncCreditWallet);
+router.get('/',      ...mobileOnly, ctrl.getCreditWallet);
 
 module.exports = router;
-

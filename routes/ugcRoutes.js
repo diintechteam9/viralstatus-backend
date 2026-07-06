@@ -1,23 +1,27 @@
 const express = require('express');
-const router = express.Router();
-const ugc = require('../controllers/ugcController');
+const router  = express.Router();
+const ugc     = require('../controllers/ugcController');
 const { authenticate, authorize } = require('../middleware/authenticate');
 
-// Client: save/get UGC form
-router.post('/form/:campaignId', authenticate, authorize('client', 'admin', 'super_admin'), ugc.saveUGCForm);
-router.get('/form/:campaignId/:userId', ugc.getUGCForm);
-router.get('/form/:campaignId', ugc.getUGCForm);
+const clientOnly = [authenticate, authorize('client', 'admin', 'super_admin')];
+const mobileOnly = [authenticate, authorize('mobileuser')];
 
-// User: upload UGC video
-router.post('/submit', ugc.uploadUGCVideo);
+// Client: save UGC form
+router.post('/form/:campaignId', ...clientOnly, ugc.saveUGCForm);
 
-// User: get own submission
-router.get('/submission/:campaignId/:userId', ugc.getUserUGCSubmission);
+// User: get UGC form + context — userId from token
+router.get('/form/:campaignId',  ...mobileOnly, ugc.getUGCForm);
+
+// User: upload UGC video — userId from token
+router.post('/submit',           ...mobileOnly, ugc.uploadUGCVideo);
+
+// User: get own submission — userId from token
+router.get('/submission/:campaignId', ...mobileOnly, ugc.getUserUGCSubmission);
 
 // Client: get all submissions for a campaign
-router.get('/submissions/:campaignId', authenticate, authorize('client', 'admin', 'super_admin'), ugc.getUGCSubmissions);
+router.get('/submissions/:campaignId', ...clientOnly, ugc.getUGCSubmissions);
 
 // Client: approve/reject submission
-router.patch('/submission/:submissionId/status', authenticate, authorize('client', 'admin', 'super_admin'), ugc.updateUGCSubmissionStatus);
+router.patch('/submission/:submissionId/status', ...clientOnly, ugc.updateUGCSubmissionStatus);
 
 module.exports = router;

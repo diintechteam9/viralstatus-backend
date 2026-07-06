@@ -4,15 +4,15 @@ const ctrl    = require('../controllers/reelsTutorialController');
 const { authenticate, authorize } = require('../middleware/authenticate');
 
 const clientOnly = [authenticate, authorize('client', 'admin', 'super_admin')];
-const readAccess = [authenticate, authorize('client', 'admin', 'super_admin', 'mobileuser')];
+const mobileOnly = [authenticate, authorize('mobileuser')];
 
-// Public read (for user task detail page — no auth needed)
-router.get('/',    ctrl.listTutorials);
-router.get('/:id', ctrl.getTutorial);
+// User — auth required
+router.get('/',    ...mobileOnly, ctrl.listTutorials);
+router.get('/:id', ...mobileOnly, ctrl.getTutorial);
 
-// Client write — multipart handled inside controller
-router.post('/',        ...clientOnly, ctrl.createTutorial);
-router.patch('/:id',    ...clientOnly, ctrl.updateTutorial);
-router.delete('/:id',   ...clientOnly, ctrl.deleteTutorial);
+// Client write
+router.post('/',     ...clientOnly, ctrl.createTutorial);
+router.patch('/:id', ...clientOnly, ctrl.updateTutorial);
+router.delete('/:id',...clientOnly, ctrl.deleteTutorial);
 
 module.exports = router;

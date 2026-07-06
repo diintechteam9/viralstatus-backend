@@ -4,7 +4,7 @@ const Campaign = require('../models/campaign');
 const UGCSubmission = require('../models/UGCSubmission');
 
 exports.syncCreditWallet = async (req, res) => {
-  const { userId } = req.params;
+  const userId = String(req.user.id);
   try {
     let userResponse = await UserResponse.findOne({ googleId: userId });
     if (!userResponse && userId.match(/^[0-9a-fA-F]{24}$/)) {
@@ -65,7 +65,7 @@ exports.syncCreditWallet = async (req, res) => {
 
 // Fetch CreditWallet info for a user
 exports.getCreditWallet = async (req, res) => {
-  const { userId } = req.params;
+  const userId = String(req.user.id);
   try {
     let wallet = await CreditWallet.findOne({ userId });
     if (!wallet) {

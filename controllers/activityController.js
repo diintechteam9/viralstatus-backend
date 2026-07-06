@@ -7,10 +7,9 @@ const Campaign    = require('../models/campaign');
 // ── GET /api/activity — live activity feed ───────────────────────────────────
 exports.getLiveActivity = async (req, res) => {
   try {
-    const { clientId, type, page = 1, limit = 30 } = req.query;
+    const { type, page = 1, limit = 30 } = req.query;
     const filter = {};
-    if (clientId) filter.$or = [{ clientId }, { clientId: '' }];
-    if (type)     filter.type = type;
+    if (type) filter.type = type;
 
     const skip  = (Number(page) - 1) * Number(limit);
     const total = await Activity.countDocuments(filter);
@@ -28,7 +27,7 @@ exports.getLiveActivity = async (req, res) => {
 //          totalCampaigns (joined by user), totalTasksCompleted
 exports.getHomeStats = async (req, res) => {
   try {
-    const { userId } = req.params;
+    const userId = String(req.user.id);
     if (!userId) return res.status(400).json({ success: false, message: 'userId required' });
 
     // ── Wallet (earnings) ──────────────────────────────────────────────────

@@ -3,10 +3,12 @@ const router  = express.Router();
 const ctrl    = require('../controllers/activityController');
 const { authenticate, authorize } = require('../middleware/authenticate');
 
-// Home screen stats — user calls with their userId
-router.get('/stats/:userId', ctrl.getHomeStats);
+const mobileOnly = [authenticate, authorize('mobileuser')];
 
-// Live activity feed — public read (android home)
-router.get('/', ctrl.getLiveActivity);
+// User home stats — userId from token
+router.get('/stats', ...mobileOnly, ctrl.getHomeStats);
+
+// Live activity feed — auth required
+router.get('/', ...mobileOnly, ctrl.getLiveActivity);
 
 module.exports = router;

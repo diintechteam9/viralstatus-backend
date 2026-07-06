@@ -16,7 +16,7 @@ async function refreshVideoUrl(t) {
 // ── GET /api/reels-tutorials ─────────────────────────────────────────────────
 exports.listTutorials = async (req, res) => {
   try {
-    const { clientId } = req.query;
+    const clientId = req.user?.clientId || null;
     const filter = { isActive: true };
     if (clientId) filter.clientId = clientId;
 
@@ -24,6 +24,7 @@ exports.listTutorials = async (req, res) => {
     await Promise.all(tutorials.map(refreshVideoUrl));
     res.json({ success: true, tutorials });
   } catch (err) {
+    console.error('[ReelsTutorial] listTutorials error:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -32,10 +33,11 @@ exports.listTutorials = async (req, res) => {
 exports.getTutorial = async (req, res) => {
   try {
     const t = await ReelsTutorial.findById(req.params.id).lean();
-    if (!t) return res.status(404).json({ success: false, message: 'Not found' });
+    if (!t) return res.status(404).json({ success: false, message: 'Tutorial not found' });
     await refreshVideoUrl(t);
     res.json({ success: true, tutorial: t });
   } catch (err) {
+    console.error('[ReelsTutorial] getTutorial error:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -46,9 +48,11 @@ exports.createTutorial = [
   upload.single('video'),
   async (req, res) => {
     try {
-      const { clientId, title, description } = req.body;
-      if (!clientId || !title?.trim())
-        return res.status(400).json({ success: false, message: 'clientId and title are required' });
+      const { title, description } = req.body;
+      const clientId = req.user?.clientId || req.user?.id?.toString() || 'admin';
+      
+      if (!title?.trim())
+        return res.status(400).json({ success: false, message: 'title is required' });
 
       let videoKey = '';
       let videoUrl = '';
@@ -74,7 +78,7 @@ exports.createTutorial = [
         isActive:    true,
       });
 
-      res.status(201).json({ success: true, tutorial });
+      res.status(201).json({ success: true, tutorial, message: 'Tutorial created' });
     } catch (err) {
       console.error('[ReelsTutorial] create error:', err.message);
       res.status(500).json({ success: false, message: err.message });
@@ -112,7 +116,7 @@ exports.updateTutorial = [
       }
 
       await existing.save();
-      res.json({ success: true, tutorial: existing.toObject() });
+      res.json({ success: true, tutorial: existing.toObject(), message: 'Tutorial updated' });
     } catch (err) {
       console.error('[ReelsTutorial] update error:', err.message);
       res.status(500).json({ success: false, message: err.message });
@@ -128,8 +132,9 @@ exports.deleteTutorial = async (req, res) => {
     if (t.videoKey) {
       try { await s3Client.send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET, Key: t.videoKey })); } catch {}
     }
-    res.json({ success: true, message: 'Tutorial deleted' });
+    res.json({ success: true, message: 'Tutorial deleted successfully' });
   } catch (err) {
+    console.error('[ReelsTutorial] delete error:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };

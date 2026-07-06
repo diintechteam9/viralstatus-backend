@@ -56,7 +56,7 @@ exports.saveUGCForm = async (req, res) => {
 exports.getUGCForm = async (req, res) => {
   try {
     const { campaignId } = req.params;
-    const userId = req.params.userId || req.query.userId || null;
+    const userId = req.user ? String(req.user.id) : null;
 
     const data = await buildUGCFormResponse(campaignId, userId);
 
@@ -76,9 +76,10 @@ exports.uploadUGCVideo = [
   upload.single('video'),
   async (req, res) => {
     try {
-      const { campaignId, userId } = req.body;
-      if (!campaignId || !userId || !req.file) {
-        return res.status(400).json({ success: false, message: 'campaignId, userId and video file are required' });
+      const userId     = String(req.user.id);
+      const { campaignId } = req.body;
+      if (!campaignId || !req.file) {
+        return res.status(400).json({ success: false, message: 'campaignId and video file are required' });
       }
 
       // Get video duration before uploading
@@ -191,7 +192,8 @@ exports.updateUGCSubmissionStatus = async (req, res) => {
 // ── User: Get their own UGC submission for a campaign ────────────────────────
 exports.getUserUGCSubmission = async (req, res) => {
   try {
-    const { campaignId, userId } = req.params;
+    const { campaignId } = req.params;
+    const userId = String(req.user.id);
     const data = await buildUGCFormResponse(campaignId, userId);
 
     res.json({

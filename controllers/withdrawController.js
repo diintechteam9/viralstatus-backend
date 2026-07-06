@@ -9,9 +9,10 @@ const MIN_WITHDRAW = 100; // minimum credits to withdraw
 // ── POST /api/withdraw — user requests withdrawal ────────────────────────────
 exports.requestWithdraw = async (req, res) => {
   try {
-    const { userId, amount, method } = req.body;
-    if (!userId || !amount || !method) {
-      return res.status(400).json({ success: false, message: 'userId, amount, method required' });
+    const userId = String(req.user.id);
+    const { amount, method } = req.body;
+    if (!amount || !method) {
+      return res.status(400).json({ success: false, message: 'amount, method required' });
     }
     if (!['bank', 'upi'].includes(method)) {
       return res.status(400).json({ success: false, message: 'method must be bank or upi' });
@@ -77,10 +78,10 @@ exports.requestWithdraw = async (req, res) => {
   }
 };
 
-// ── GET /api/withdraw/:userId — user's withdrawal history ────────────────────
+// ── GET /api/withdraw/history — user's withdrawal history ───────────────────
 exports.getUserWithdrawals = async (req, res) => {
   try {
-    const { userId } = req.params;
+    const userId = String(req.user.id);
     const { page = 1, limit = 20 } = req.query;
     const skip  = (Number(page) - 1) * Number(limit);
     const total = await WithdrawRequest.countDocuments({ userId });
