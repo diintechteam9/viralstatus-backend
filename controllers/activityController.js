@@ -68,7 +68,7 @@ exports.getHomeStats = async (req, res) => {
         totalLikes,
         totalComments,
         totalTasks,
-        totalTasksCompleted,
+        totalCampaigns,
       },
     });
   } catch (err) {
