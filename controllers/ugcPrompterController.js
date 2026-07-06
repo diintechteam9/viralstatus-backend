@@ -261,16 +261,42 @@ RULES:
       parsed.hashtags = [brand.toLowerCase().replace(/\s+/g, ''), 'ugc', 'ugccreator'];
     }
 
+    const generatedData = {
+      title:        parsed.title || `${brand} — ${category} (${duration}s)`,
+      instructions: parsed.instructions || '',
+      script:       parsed.script || '',
+      category,
+      tone,
+      duration,
+      isAiGenerated: true,
+    };
+
+    // Auto-save to database
+    const clientId = String(req.user.clientId || req.user.id);
+    const savedPrompt = await UGCPrompter.create({
+      clientId,
+      campaignId: '',
+      title: generatedData.title,
+      category: generatedData.category,
+      platform: platform || 'instagram',
+      tone: generatedData.tone,
+      duration: generatedData.duration,
+      brandName: brand,
+      productName: product,
+      keyPoints: Array.isArray(keyPoints) ? keyPoints : [],
+      prompt: parsed.prompt || '',
+      script: generatedData.script,
+      hashtags: parsed.hashtags || [],
+      status: 'active',
+      isAiGenerated: true,
+    });
+
     res.json({
       success: true,
-      generated: {
-        title:        parsed.title || `${brand} — ${category} (${duration}s)`,
-        instructions: parsed.instructions || '',
-        script:       parsed.script || '',
-        category,
-        tone,
-        duration,
-        isAiGenerated: true,
+      generated: generatedData,
+      saved: {
+        _id: savedPrompt._id,
+        title: savedPrompt.title,
       },
     });
   } catch (err) {
