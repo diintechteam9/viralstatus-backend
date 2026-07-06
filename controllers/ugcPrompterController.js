@@ -46,8 +46,8 @@ exports.createPrompt = async (req, res) => {
       script, hashtags, status, isAiGenerated,
     } = req.body;
 
-    if (!title || !prompt) {
-      return res.status(400).json({ success: false, message: 'title, prompt are required' });
+    if (!title) {
+      return res.status(400).json({ success: false, message: 'title is required' });
     }
 
     const clientId = String(req.user.clientId || req.user.id);
@@ -108,7 +108,7 @@ exports.generatePrompt = async (req, res) => {
   try {
     const {
       topic = '',
-      brandName = '', productName = '', category = 'testimonial',
+      script = '', category = 'testimonial',
       tone = 'casual', platform = 'instagram', duration = 30,
       keyPoints = [],
     } = req.body;
