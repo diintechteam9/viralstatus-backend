@@ -342,6 +342,7 @@ app.use('/api/campaign-tasks', require('./routes/campaignTaskRoutes'));
 app.use('/api/reels-tutorials', require('./routes/reelsTutorialRoutes'));
 app.use('/api/ugc', ugcRoutes);
 app.use('/api/ugc-prompter', require('./routes/ugcPrompterRoutes'));
+app.use('/api/ugc-video',    require('./routes/ugcVideoRoutes'));
 app.use('/api/news-blog', newsBlogRoutes);
 app.use('/api/news-blog-tasks', newsBlogTaskRoutes);
 app.use('/api/image-proxy', require('./routes/imageProxyRoute'));

@@ -1,11 +1,15 @@
 const express = require('express');
 const router  = express.Router();
 const ctrl    = require('../controllers/ugcPrompterController');
+const videoCtrl = require('../controllers/ugcVideoController');
 const { authenticate, authorize } = require('../middleware/authenticate');
 
 const allAccess = authorize('client', 'admin', 'super_admin', 'mobileuser');
 
 router.post('/generate', authenticate, allAccess, ctrl.generatePrompt);
+
+// Public script view for users (mobileuser)
+router.get('/public/:promptId', authenticate, allAccess, videoCtrl.getPromptForUser);
 
 router.get('/',    authenticate, allAccess, ctrl.getPrompts);
 router.get('/:id', authenticate, allAccess, ctrl.getPromptById);
