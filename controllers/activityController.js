@@ -51,10 +51,12 @@ exports.getHomeStats = async (req, res) => {
     const userResp = await UserResponse.findOne({ googleId: userId }).lean();
     let totalViews = 0;
     let totalLikes = 0;
+    let totalComments = 0;
     if (userResp?.response) {
       for (const r of userResp.response) {
-        totalViews += Number(r.views || 0);
-        totalLikes += Number(r.likes || 0);
+        totalViews    += Number(r.views    || 0);
+        totalLikes    += Number(r.likes    || 0);
+        totalComments += Number(r.comments || 0);
       }
     }
 
@@ -62,14 +64,10 @@ exports.getHomeStats = async (req, res) => {
       success: true,
       stats: {
         totalEarnings:       wallet?.totalBalance      || 0,
-        pendingCredits:      wallet?.pendingCredits    || 0,
-        acceptedCredits:     wallet?.acceptedCredits   || 0,
-        totalWithdrawn:      wallet?.totalWithdrawn    || 0,
         totalViews,
         totalLikes,
+        totalComments,
         totalTasks,
-        totalTaskRecords,
-        totalCampaigns,
         totalTasksCompleted,
       },
     });
