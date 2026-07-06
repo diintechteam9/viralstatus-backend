@@ -65,12 +65,13 @@ const videomergeta1000seriesRoutes = require('./routes/videomergeta1000series');
 const creditWalletRoutes = require("./routes/creditWalletRoute");
 
 // ── New feature routes ────────────────────────────────────────────────────────
-const kycRoutes          = require('./routes/kycRoutes');
-const withdrawRoutes     = require('./routes/withdrawRoutes');
-const testimonialRoutes  = require('./routes/testimonialRoutes');
-const activityRoutes     = require('./routes/activityRoutes');
-const bannerRoutes       = require('./routes/bannerRoutes');
-const taskPaginationRoute= require('./routes/taskPaginationRoute');
+const kycRoutes              = require('./routes/kycRoutes');
+const withdrawRoutes         = require('./routes/withdrawRoutes');
+const testimonialRoutes      = require('./routes/testimonialRoutes');
+const activityRoutes         = require('./routes/activityRoutes');
+const bannerRoutes           = require('./routes/bannerRoutes');
+const taskPaginationRoute    = require('./routes/taskPaginationRoute');
+const transactionHistoryRoutes = require('./routes/transactionHistoryRoutes');
 
 // for whatsapp
 const requestedTemplateRoutes = require("./routes/whatsapp/requestedTemplateRoutes");
@@ -357,12 +358,13 @@ app.use('/api/user/creditwallet', creditWalletRoutes);
 app.use('/api/user/creditWallet', creditWalletRoutes);
 
 // ── New feature routes ────────────────────────────────────────────────────────
-app.use('/api/kyc',          kycRoutes);
-app.use('/api/withdraw',     withdrawRoutes);
-app.use('/api/testimonials', testimonialRoutes);
-app.use('/api/activity',     activityRoutes);
-app.use('/api/banners',      bannerRoutes);
-app.use('/api/tasks',        taskPaginationRoute);
+app.use('/api/kyc',                  kycRoutes);
+app.use('/api/withdraw',             withdrawRoutes);
+app.use('/api/testimonials',         testimonialRoutes);
+app.use('/api/activity',             activityRoutes);
+app.use('/api/banners',              bannerRoutes);
+app.use('/api/tasks',                taskPaginationRoute);
+app.use('/api/transaction-history',  transactionHistoryRoutes);
 
 
 // TA1000Series Routes
