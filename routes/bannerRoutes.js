@@ -5,9 +5,10 @@ const { authenticate, authorize } = require('../middleware/authenticate');
 
 const clientOnly = [authenticate, authorize('client', 'admin', 'super_admin')];
 const mobileOnly = [authenticate, authorize('mobileuser')];
+const clientOrMobile = [authenticate, authorize('client', 'admin', 'super_admin', 'mobileuser')];
 
-// User — fetch banners for home screen
-router.get('/', ...mobileOnly, ctrl.getBanners);
+// User/Client/Admin — fetch banners
+router.get('/', ...clientOrMobile, ctrl.getBanners);
 
 // Client / Admin — manage banners
 router.post('/',     ...clientOnly, ctrl.createBanner);
