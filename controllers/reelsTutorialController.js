@@ -16,9 +16,16 @@ async function refreshVideoUrl(t) {
 // ── GET /api/reels-tutorials ─────────────────────────────────────────────────
 exports.listTutorials = async (req, res) => {
   try {
+    const userRole = req.user?.role;
     const clientId = req.user?.clientId || null;
     const filter = { isActive: true };
-    if (clientId) filter.clientId = clientId;
+    
+    // Clients see only their own tutorials
+    // Mobile users see all tutorials
+    if (userRole === 'client' || userRole === 'admin' || userRole === 'super_admin') {
+      if (clientId) filter.clientId = clientId;
+    }
+    // Mobile users don't filter by clientId - they see all tutorials
 
     const tutorials = await ReelsTutorial.find(filter).sort({ createdAt: -1 }).lean();
     await Promise.all(tutorials.map(refreshVideoUrl));

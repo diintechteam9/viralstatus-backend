@@ -5,10 +5,11 @@ const { authenticate, authorize } = require('../middleware/authenticate');
 
 const clientOnly = [authenticate, authorize('client', 'admin', 'super_admin')];
 const mobileOnly = [authenticate, authorize('mobileuser')];
+const clientOrMobile = [authenticate, authorize('client', 'admin', 'super_admin', 'mobileuser')];
 
 // User — auth required
-router.get('/',    ...mobileOnly, ctrl.listTutorials);
-router.get('/:id', ...mobileOnly, ctrl.getTutorial);
+router.get('/',    ...clientOrMobile, ctrl.listTutorials);
+router.get('/:id', ...clientOrMobile, ctrl.getTutorial);
 
 // Client write
 router.post('/',     ...clientOnly, ctrl.createTutorial);

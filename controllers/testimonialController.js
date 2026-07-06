@@ -15,7 +15,7 @@ exports.createTestimonial = async (req, res) => {
     }
 
     // Get user info
-    const user = await MobileUser.findOne({ googleId: userId })
+    const user = await MobileUser.findById(userId)
       .select('name city profileImageUrl').lean();
 
     const testimonial = await Testimonial.create({
