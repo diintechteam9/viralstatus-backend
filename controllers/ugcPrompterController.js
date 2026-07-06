@@ -113,8 +113,8 @@ exports.generatePrompt = async (req, res) => {
       keyPoints = [],
     } = req.body;
 
-    const brand   = brandName   || 'our brand';
-    const product = productName || topic || 'our product';
+    const brand   = topic || 'our brand';
+    const product = topic || 'our product';
     const kp      = Array.isArray(keyPoints) && keyPoints.length
       ? keyPoints.filter(p => p.trim()).map((p, i) => `${i + 1}. ${p}`).join('\n')
       : '';
@@ -227,9 +227,6 @@ RULES:
         platform,
         tone,
         duration,
-        brandName,
-        productName: product,
-        keyPoints: Array.isArray(keyPoints) ? keyPoints.filter(k => k.trim()) : [],
         isAiGenerated: true,
       },
     });
