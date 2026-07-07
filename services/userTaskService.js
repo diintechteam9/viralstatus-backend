@@ -132,11 +132,10 @@ async function cancelUserTask({ userId, reelId, campaignId, reason }) {
 
   await releaseAcceptSlot(userId, reel.reelId || reelId, resolvedCampaignId);
 
-  // cancelCount increment karo
   const newCancelCount = (shared.reels[idx].cancelCount || 0) + 1;
   const isThirdCancel = newCancelCount >= 3;
 
-  // Agar 3rd ya usse zyada cancel hai to penalty force karo
+  // Force penalty on 3rd+ cancel even if within grace period
   let finalPenaltyResult = penaltyResult;
   if (isThirdCancel && !penaltyResult.penaltyApplied) {
     const forcedCredits = penaltyResult.cancellationPenalty || 2;
@@ -148,39 +147,50 @@ async function cancelUserTask({ userId, reelId, campaignId, reason }) {
     };
   }
 
-  // TaskStatus 'assigned' set karo — task pool mein wapas aaye
-  shared.reels[idx].TaskStatus = 'assigned';
-  shared.reels[idx].isTaskAccepted = false;
-  shared.reels[idx].isTaskComplete = false;
-  shared.reels[idx].cancelledAt = null;
-  shared.reels[idx].cancellationReason = '';
-  shared.reels[idx].penaltyApplied = finalPenaltyResult.penaltyApplied;
-  shared.reels[idx].creditsPenalized = finalPenaltyResult.creditsPenalized;
-  shared.reels[idx].cancelCount = newCancelCount;
-  shared.reels[idx].acceptedAt = null;
-  shared.reels[idx].inProgressAt = null;
-  shared.reels[idx].submissionStatus = 'none';
-  await shared.save();
+  const taskSubdocId = shared.reels[idx]._id;
+
+  if (finalPenaltyResult.penaltyApplied) {
+    // Penalty applied — remove task from user's list entirely
+    await SharedReels.updateOne(
+      { googleId: userId },
+      { $pull: { reels: { _id: taskSubdocId } } }
+    );
+  } else {
+    // No penalty — reset task back to assigned so user can re-accept
+    shared.reels[idx].TaskStatus = 'assigned';
+    shared.reels[idx].isTaskAccepted = false;
+    shared.reels[idx].isTaskComplete = false;
+    shared.reels[idx].cancelledAt = null;
+    shared.reels[idx].cancellationReason = '';
+    shared.reels[idx].penaltyApplied = false;
+    shared.reels[idx].creditsPenalized = 0;
+    shared.reels[idx].cancelCount = newCancelCount;
+    shared.reels[idx].acceptedAt = null;
+    shared.reels[idx].inProgressAt = null;
+    shared.reels[idx].submissionStatus = 'none';
+    await shared.save();
+  }
 
   const quota = await getDailyQuota(userId, finalPenaltyResult.dailyTaskAcceptLimit ?? DEFAULT_DAILY_LIMIT);
 
   const warningMessage = isThirdCancel
-    ? `⚠️ Warning: Aapne yeh task 3 baar cancel kiya hai. ${finalPenaltyResult.creditsPenalized} credit(s) penalty ke roop mein kat gaye hain.`
+    ? `Warning: You have cancelled this task 3 times. ${finalPenaltyResult.creditsPenalized} credit(s) have been deducted as penalty and the task has been removed.`
     : null;
 
   return {
     ok: true,
     status: 200,
     message: finalPenaltyResult.penaltyApplied
-      ? `Task cancelled. ${finalPenaltyResult.creditsPenalized} credit(s) deducted. Task returned to pool.`
+      ? `Task cancelled. ${finalPenaltyResult.creditsPenalized} credit(s) deducted as penalty. Task removed from your list.`
       : 'Task cancelled with no penalty. Task returned to pool.',
     warning: warningMessage,
     cancelCount: newCancelCount,
+    taskRemoved: finalPenaltyResult.penaltyApplied,
     creditsPenalized: finalPenaltyResult.creditsPenalized,
     penaltyApplied: finalPenaltyResult.penaltyApplied,
     withinGrace: finalPenaltyResult.withinGrace,
     timerExpired: finalPenaltyResult.penaltyApplied,
-    returned: true,
+    returned: !finalPenaltyResult.penaltyApplied,
     quota,
     cancellationPenalty: finalPenaltyResult.cancellationPenalty,
     penaltyThresholdMinutes: finalPenaltyResult.penaltyThresholdMinutes,

@@ -238,6 +238,7 @@ exports.cancelTask = async (req, res) => {
       message: result.message,
       warning: result.warning || null,
       cancelCount: result.cancelCount ?? 0,
+      taskRemoved: result.taskRemoved ?? false,
       creditsPenalized: result.creditsPenalized ?? 0,
       penaltyApplied: result.penaltyApplied ?? false,
       withinGrace: result.withinGrace,
