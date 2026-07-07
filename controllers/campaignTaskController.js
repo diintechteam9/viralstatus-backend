@@ -308,37 +308,81 @@ exports.getTasksByCampaign = async (req, res) => {
   }
 };
 
-// GET /api/campaign-tasks/public/all  — saare active public tasks (kisi bhi user ke liye)
+// GET /api/campaign-tasks/public/all
 exports.getPublicTasks = async (req, res) => {
   try {
-    const { userId } = req.query; // optional — to check if already completed
-    const tasks = await CampaignTask.find({ visibility: 'public', status: 'active' })
-      .sort({ createdAt: -1 })
-      .lean();
+    const { userId } = req.query;
+    const { getobject } = require('../utils/r2');
+    const now = new Date();
 
-    // Campaign info attach karo (name, image)
-    const campaignIds = [...new Set(tasks.map(t => t.campaignId))];
-    const campaigns   = await Campaign.find({ _id: { $in: campaignIds } }).lean();
-    const campMap     = {};
-    campaigns.forEach(c => { campMap[String(c._id)] = c; });
+    // Step 1: tasks explicitly marked visibility:public
+    const explicitPublicTasks = await CampaignTask.find({ visibility: 'public', status: 'active' }).lean();
 
-    const enriched = tasks.map(t => {
-      const camp = campMap[t.campaignId] || {};
-      return {
-        ...t,
-        contentCategory: t.contentCategory || 'post',
-        campaignName:     camp.campaignName || '',
-        campaignImageUrl: camp.image?.url   || '',
-        brandName:        camp.brandName    || '',
-        alreadyCompleted: userId ? (t.completedBy || []).includes(userId) : false,
-        alreadySubmitted: userId
-          ? (t.submissions || []).some(s => s.userId === userId)
-          : false,
-      };
-    });
+    // Step 2: tasks belonging to public campaigns
+    const publicCampaigns = await Campaign.find({
+      campaignType: 'public',
+      status: 'Active',
+      $or: [{ endDate: null }, { endDate: { $gt: now } }],
+    }).lean();
+    const publicCampaignIds = publicCampaigns.map(c => String(c._id));
+
+    const publicCampaignTasks = publicCampaignIds.length
+      ? await CampaignTask.find({
+          campaignId: { $in: publicCampaignIds },
+          status: 'active',
+          visibility: { $ne: 'public' }, // avoid duplicates
+        }).lean()
+      : [];
+
+    const allTasks = [...explicitPublicTasks, ...publicCampaignTasks];
+    if (!allTasks.length) return res.json({ success: true, tasks: [] });
+
+    // Build campaign map
+    const campaignIds = [...new Set(allTasks.map(t => t.campaignId))];
+    const campaigns = await Campaign.find({ _id: { $in: campaignIds } }).lean();
+    const campMap = new Map(campaigns.map(c => [String(c._id), c]));
+
+    // Filter out expired campaigns
+    const enriched = await Promise.all(
+      allTasks
+        .filter(t => {
+          const camp = campMap.get(String(t.campaignId));
+          if (!camp) return false;
+          if (camp.endDate && new Date(camp.endDate) < now) return false;
+          return true;
+        })
+        .map(async t => {
+          const camp = campMap.get(String(t.campaignId)) || {};
+
+          // Fresh signed image URL
+          let campaignImageUrl = camp.image?.url || '';
+          if (camp.image?.key) {
+            try { campaignImageUrl = await getobject(camp.image.key); } catch (_) {}
+          }
+
+          const alreadyCompleted = userId ? (t.completedBy || []).includes(userId) : false;
+          const alreadySubmitted = userId
+            ? (t.submissions || []).some(s => s.userId === userId && s.status !== 'rejected')
+            : false;
+
+          return {
+            ...t,
+            contentCategory: t.contentCategory || 'post',
+            campaignName:     camp.campaignName || '',
+            campaignImageUrl,
+            brandName:        camp.brandName    || '',
+            campaignType:     camp.campaignType || 'public',
+            startDate:        camp.startDate    || null,
+            endDate:          camp.endDate      || null,
+            alreadyCompleted,
+            alreadySubmitted,
+          };
+        })
+    );
 
     res.json({ success: true, tasks: enriched });
   } catch (err) {
+    console.error('getPublicTasks:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
