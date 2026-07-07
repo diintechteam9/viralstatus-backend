@@ -315,27 +315,48 @@ exports.getPublicTasks = async (req, res) => {
     const { getobject } = require('../utils/r2');
     const now = new Date();
 
-    // Only fetch tasks from public campaigns
+    // Fetch tasks from public campaigns OR tasks with visibility:public
+    const explicitPublicTasks = await CampaignTask.find({ visibility: 'public', status: 'active' }).lean();
+
     const publicCampaigns = await Campaign.find({
       campaignType: 'public',
       status: 'Active',
       $or: [{ endDate: null }, { endDate: { $gt: now } }],
     }).lean();
     const publicCampaignIds = publicCampaigns.map(c => String(c._id));
-    const campMap = new Map(publicCampaigns.map(c => [String(c._id), c]));
 
-    if (!publicCampaignIds.length) return res.json({ success: true, tasks: [] });
+    const publicCampaignTasks = publicCampaignIds.length
+      ? await CampaignTask.find({
+          campaignId: { $in: publicCampaignIds },
+          status: 'active',
+          visibility: { $ne: 'public' },
+        }).lean()
+      : [];
 
-    const allTasks = await CampaignTask.find({
-      campaignId: { $in: publicCampaignIds },
-      status: 'active',
-    }).lean();
+    // Merge and deduplicate by _id
+    const taskMap = new Map();
+    for (const t of [...explicitPublicTasks, ...publicCampaignTasks]) {
+      taskMap.set(String(t._id), t);
+    }
+    const allTasks = [...taskMap.values()];
 
     if (!allTasks.length) return res.json({ success: true, tasks: [] });
 
+    // Build campaign map for all tasks
+    const campaignIds = [...new Set(allTasks.map(t => String(t.campaignId)))];
+    const allCampaigns = await Campaign.find({ _id: { $in: campaignIds } }).lean();
+    const campMap = new Map(allCampaigns.map(c => [String(c._id), c]));
+
     const enriched = await Promise.all(
-      allTasks.map(async t => {
-        const camp = campMap.get(String(t.campaignId)) || {};
+      allTasks
+        .filter(t => {
+          const camp = campMap.get(String(t.campaignId));
+          if (!camp) return false;
+          if (camp.endDate && new Date(camp.endDate) < now) return false;
+          return true;
+        })
+        .map(async t => {
+          const camp = campMap.get(String(t.campaignId)) || {};
 
         let campaignImageUrl = camp.image?.url || '';
         if (camp.image?.key) {
