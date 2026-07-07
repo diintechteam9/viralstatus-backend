@@ -11,6 +11,8 @@ const UserResponse = require('../models/userResponse');
 const userResponse = require('../models/userResponse');
 const Campaign = require('../models/campaign');
 const RegisteredCampaign = require('../models/RegisteredCampaign');
+const CreditWallet = require('../models/CreditWallet');
+const TransactionHistory = require('../models/TransactionHistory');
 const getYoutubeStats = require('../utils/getYoutubeStats');
 const { getPostStats, detectPlatform, extractYoutubeId } = require('../utils/socialPostStats');
 const telegramAlerts = require('../utils/telegramAlerts');
@@ -939,6 +941,30 @@ exports.addUserResponseUrl = async (req, res) => {
 
     await syncSharedReelSubmission(userId, reelId, campaignId, 'submit');
 
+    // Write pending transaction so history shows submission immediately
+    try {
+      if (creditAmount > 0) {
+        const wallet = await CreditWallet.findOne({ userId }).lean();
+        await TransactionHistory.create({
+          userId,
+          type: 'earning',
+          amount: creditAmount,
+          description: `Task submitted for review: ${campaign.campaignName}`,
+          referenceType: 'campaign',
+          referenceId: String(campaignId),
+          status: 'pending',
+          meta: {
+            campaignId: String(campaignId),
+            taskId: String(reelId || ''),
+            reason: 'Awaiting view count cutoff or manual approval',
+          },
+          balanceAfter: wallet?.totalBalance || 0,
+        });
+      }
+    } catch (txErr) {
+      console.error('[addUserResponseUrl] transaction history write failed:', txErr.message);
+    }
+
     const profile = await resolveOneUserProfile(userId);
     telegramAlerts
       .alertUserEarn({
@@ -1024,6 +1050,35 @@ async function syncCampaignResponseStats(campaignId) {
           entry.isCreditAccepted = true;
           entry.status = 'approved';
           approvedEntries.push({ url: entry.urls, views: latestViews });
+
+          // Write earning to wallet + transaction history
+          try {
+            const creditAmount = entry.creditAmount || 0;
+            if (creditAmount > 0) {
+              const wallet = await CreditWallet.findOneAndUpdate(
+                { userId: userResponse.googleId },
+                { $inc: { totalBalance: creditAmount, acceptedCredits: creditAmount } },
+                { new: true, upsert: true }
+              );
+              await TransactionHistory.create({
+                userId: userResponse.googleId,
+                type: 'campaign_reward',
+                amount: creditAmount,
+                description: `Task completed: views target reached (${latestViews} views)`,
+                referenceType: 'campaign',
+                referenceId: String(entry.campaignId),
+                status: 'completed',
+                meta: {
+                  campaignId: String(entry.campaignId),
+                  taskId: String(entry.reelId || ''),
+                  reason: `Views cutoff reached: ${latestViews}/${entry.cutoff}`,
+                },
+                balanceAfter: wallet.totalBalance,
+              });
+            }
+          } catch (creditErr) {
+            console.error('[syncCampaignResponseStats] credit write failed:', creditErr.message);
+          }
         }
 
         entries.push({

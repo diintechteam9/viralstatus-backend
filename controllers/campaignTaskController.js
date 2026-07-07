@@ -2,6 +2,7 @@ const CampaignTask = require('../models/CampaignTask');
 const Campaign     = require('../models/campaign');
 const SharedReels  = require('../models/SharedReels');
 const UGCForm      = require('../models/UGCForm');
+const TransactionHistory = require('../models/TransactionHistory');
 const { buildTaskTemplate } = require('../utils/campaignTaskFactory');
 const { VALID_TASK_TYPE_IDS } = require('../utils/campaignTaskTypes');
 const { syncSharedReelSubmission } = require('../services/userTaskService');
@@ -412,11 +413,26 @@ exports.reviewPublicSubmission = async (req, res) => {
 
       try {
         const CreditWallet = require('../models/CreditWallet');
-        await CreditWallet.findOneAndUpdate(
+        const wallet = await CreditWallet.findOneAndUpdate(
           { userId },
           { $inc: { totalBalance: creditsToGive, acceptedCredits: creditsToGive } },
-          { upsert: true }
+          { new: true, upsert: true }
         );
+        await TransactionHistory.create({
+          userId,
+          type: 'campaign_reward',
+          amount: creditsToGive,
+          description: `Task completed: ${task.title}`,
+          referenceType: 'task',
+          referenceId: String(task._id),
+          status: 'completed',
+          meta: {
+            campaignId: String(task.campaignId),
+            taskId: String(task._id),
+            reason: 'Task submission approved by client',
+          },
+          balanceAfter: wallet.totalBalance,
+        });
       } catch (e) {
         console.error('Credit wallet update failed:', e.message);
       }
