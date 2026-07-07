@@ -1,6 +1,7 @@
 const SharedReels = require('../models/SharedReels');
 const Campaign = require('../models/campaign');
 const CreditWallet = require('../models/CreditWallet');
+const TransactionHistory = require('../models/TransactionHistory');
 const {
   findUserTaskIndex,
   normalizeReelAcceptState,
@@ -15,14 +16,36 @@ const {
 } = require('../utils/userTaskHelpers');
 const { getDailyQuota, recordDailyAccept, releaseAcceptSlot, DEFAULT_DAILY_LIMIT } = require('../utils/dailyTaskLimit');
 
-async function applyCreditPenalty(userId, amount) {
+async function applyCreditPenalty(userId, amount, meta = {}) {
   if (!amount || amount <= 0) return;
-  let wallet = await CreditWallet.findOne({ userId });
-  if (!wallet) {
-    wallet = new CreditWallet({ userId, totalBalance: 0 });
+
+  const wallet = await CreditWallet.findOneAndUpdate(
+    { userId },
+    { $inc: { totalBalance: -amount } },
+    { new: true, upsert: true }
+  );
+  const balanceAfter = Math.max(0, wallet.totalBalance);
+
+  // Sync wallet if it went below 0
+  if (wallet.totalBalance < 0) {
+    await CreditWallet.updateOne({ userId }, { $set: { totalBalance: 0 } });
   }
-  wallet.totalBalance = Math.max(0, (wallet.totalBalance || 0) - amount);
-  await wallet.save();
+
+  await TransactionHistory.create({
+    userId,
+    type: 'penalty',
+    amount: -amount,
+    description: meta.description || 'Task cancellation penalty',
+    referenceType: 'task',
+    referenceId: meta.taskId || '',
+    status: 'completed',
+    meta: {
+      campaignId: meta.campaignId || '',
+      taskId: meta.taskId || '',
+      reason: meta.reason || 'Task cancelled after penalty threshold',
+    },
+    balanceAfter,
+  });
 }
 
 async function loadCampaign(campaignId) {
@@ -127,7 +150,12 @@ async function cancelUserTask({ userId, reelId, campaignId, reason }) {
 
   const penaltyResult = computeCancelPenalty(reel, campaign);
   if (penaltyResult.creditsPenalized > 0) {
-    await applyCreditPenalty(userId, penaltyResult.creditsPenalized);
+    await applyCreditPenalty(userId, penaltyResult.creditsPenalized, {
+      campaignId: resolvedCampaignId,
+      taskId: reel.reelId || reelId,
+      reason: 'Task cancelled after penalty threshold exceeded',
+      description: `Penalty for cancelling task: ${reel.title || reelId}`,
+    });
   }
 
   await releaseAcceptSlot(userId, reel.reelId || reelId, resolvedCampaignId);
@@ -139,7 +167,12 @@ async function cancelUserTask({ userId, reelId, campaignId, reason }) {
   let finalPenaltyResult = penaltyResult;
   if (isThirdCancel && !penaltyResult.penaltyApplied) {
     const forcedCredits = penaltyResult.cancellationPenalty || 2;
-    await applyCreditPenalty(userId, forcedCredits);
+    await applyCreditPenalty(userId, forcedCredits, {
+      campaignId: resolvedCampaignId,
+      taskId: reel.reelId || reelId,
+      reason: 'Task cancelled 3 or more times',
+      description: `Penalty for cancelling task 3+ times: ${reel.title || reelId}`,
+    });
     finalPenaltyResult = {
       ...penaltyResult,
       creditsPenalized: forcedCredits,
