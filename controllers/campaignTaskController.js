@@ -418,7 +418,7 @@ exports.getPublicTasks = async (req, res) => {
             return null;
           })();
 
-          const { campaignType: _ct, assignedTo: _at, completedBy: _cb, submissions: _subs, ...taskData } = t;
+          const { campaignType: _ct, assignedTo: _at, completedBy: _cb, submissions: _subs, status: _st, ...taskData } = t;
           return {
             ...taskData,
             contentCategory,
