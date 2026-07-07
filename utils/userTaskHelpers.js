@@ -45,6 +45,12 @@ function normalizeReelAcceptState(reel) {
 
 function isActivelyAccepted(reel) {
   if (!reel || reel.isTaskComplete) return false;
+  // UGC/app_review/gmb_review tasks that are in_progress (submitted, awaiting review)
+  // should NOT block the quota — user has already submitted, nothing more to do
+  if (
+    ['ugc', 'app_review', 'gmb_review'].includes(reel.contentCategory) &&
+    reel.TaskStatus === 'in_progress'
+  ) return false;
   normalizeReelAcceptState(reel);
   return (
     !!reel.isTaskAccepted &&
