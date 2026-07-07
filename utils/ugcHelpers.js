@@ -74,26 +74,35 @@ function buildCampaignPayload(campaign) {
   };
 }
 
-function findUserAssignment(sharedDoc, campaignId) {
+function findUserAssignment(sharedDoc, campaignId, campaignTaskId = null) {
   if (!sharedDoc?.reels?.length) return null;
-  const reels = sharedDoc.reels.filter((r) => String(r.campaignId) === String(campaignId));
+  let reels = sharedDoc.reels.filter((r) => String(r.campaignId) === String(campaignId));
   if (!reels.length) return null;
 
-  const earliest = reels.reduce((a, b) =>
-    new Date(a.createdAt) <= new Date(b.createdAt) ? a : b
-  );
+  // If campaignTaskId provided, find that specific task
+  if (campaignTaskId) {
+    const specific = reels.find((r) => String(r.campaignTaskId) === String(campaignTaskId));
+    if (specific) reels = [specific];
+  }
+
+  // Pick the most recent active (non-rejected) task, fallback to earliest
+  const active = reels.filter((r) => r.TaskStatus !== 'rejected');
+  const target = active.length
+    ? active.reduce((a, b) => new Date(a.createdAt) >= new Date(b.createdAt) ? a : b)
+    : reels.reduce((a, b) => new Date(a.createdAt) <= new Date(b.createdAt) ? a : b);
 
   return {
-    assignedAt: earliest.createdAt,
-    assignedAtFormatted: formatDateTimeIST(earliest.createdAt),
-    assignedOn: formatDateIST(earliest.createdAt),
-    taskStatus: earliest.TaskStatus || 'assigned',
-    isTaskComplete: !!earliest.isTaskComplete,
-    isTaskAccepted: !!earliest.isTaskAccepted,
-    credits: earliest.credits ?? null,
-    reelId: earliest.reelId,
-    title: earliest.title || '',
-    taskCode: earliest.taskCode || '',
+    assignedAt: target.createdAt,
+    assignedAtFormatted: formatDateTimeIST(target.createdAt),
+    assignedOn: formatDateIST(target.createdAt),
+    taskStatus: target.TaskStatus || 'assigned',
+    isTaskComplete: !!target.isTaskComplete,
+    isTaskAccepted: !!target.isTaskAccepted,
+    credits: target.credits ?? null,
+    reelId: target.reelId,
+    campaignTaskId: target.campaignTaskId || '',
+    title: target.title || '',
+    taskCode: target.taskCode || '',
   };
 }
 
@@ -121,7 +130,7 @@ function buildSubmissionPayload(submission) {
 /**
  * Full UGC context for mobile: form + campaign + assignment + submission + credits.
  */
-async function buildUGCFormResponse(campaignId, userId = null) {
+async function buildUGCFormResponse(campaignId, userId = null, campaignTaskId = null) {
   const [form, campaign] = await Promise.all([
     UGCForm.findOne({ campaignId: String(campaignId) }).lean(),
     Campaign.findById(campaignId).lean(),
@@ -131,13 +140,27 @@ async function buildUGCFormResponse(campaignId, userId = null) {
   let submission = null;
 
   if (userId) {
-    const [sharedDoc, subDoc] = await Promise.all([
-      SharedReels.findOne({ googleId: String(userId) }).lean(),
-      UGCSubmission.findOne({ campaignId: String(campaignId), userId: String(userId) }).lean(),
-    ]);
-    assignment = findUserAssignment(sharedDoc, campaignId);
-    if (subDoc) {
-      submission = await refreshSubmissionVideoUrl({ ...subDoc });
+    const sharedDoc = await SharedReels.findOne({ googleId: String(userId) }).lean();
+    assignment = findUserAssignment(sharedDoc, campaignId, campaignTaskId);
+
+    // Resolve campaignTaskId from assignment if not passed directly
+    const resolvedTaskId = campaignTaskId || assignment?.campaignTaskId;
+
+    if (resolvedTaskId) {
+      // Scope submission to specific task assignment
+      const subDoc = await UGCSubmission.findOne({
+        campaignTaskId: String(resolvedTaskId),
+        userId: String(userId),
+      }).lean();
+      if (subDoc) submission = await refreshSubmissionVideoUrl({ ...subDoc });
+    } else {
+      // Fallback: get latest non-rejected submission for this campaign
+      const subDoc = await UGCSubmission.findOne({
+        campaignId: String(campaignId),
+        userId: String(userId),
+        status: { $ne: 'rejected' },
+      }).sort({ createdAt: -1 }).lean();
+      if (subDoc) submission = await refreshSubmissionVideoUrl({ ...subDoc });
     }
   }
 

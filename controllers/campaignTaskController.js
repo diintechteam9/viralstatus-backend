@@ -360,8 +360,11 @@ exports.submitPublicTask = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Task not available for this user' });
     }
 
-    const alreadySubmitted = task.submissions.some(s => s.userId === userId);
+    const alreadySubmitted = task.submissions.some(s => s.userId === userId && s.status !== 'rejected');
     if (alreadySubmitted) return res.status(400).json({ success: false, message: 'Already submitted' });
+
+    // Remove old rejected submission if re-submitting
+    task.submissions = task.submissions.filter(s => !(s.userId === userId && s.status === 'rejected'));
 
     task.submissions.push({
       userId,
@@ -443,7 +446,16 @@ exports.reviewPublicSubmission = async (req, res) => {
     if (status === 'approved') {
       await syncSharedReelSubmission(userId, taskId, task.campaignId, 'approve');
     } else {
-      await syncSharedReelSubmission(userId, taskId, task.campaignId, 'reject');
+      // Rejected — reset task to accepted so user can re-submit
+      await SharedReels.updateOne(
+        { googleId: userId, 'reels.campaignTaskId': String(taskId) },
+        { $set: {
+          'reels.$[elem].submissionStatus': 'rejected',
+          'reels.$[elem].TaskStatus': 'accepted',
+          'reels.$[elem].isTaskComplete': false,
+        }},
+        { arrayFilters: [{ 'elem.campaignTaskId': String(taskId) }] }
+      );
     }
 
     res.json({ success: true, message: `Submission ${status}` });

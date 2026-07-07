@@ -673,15 +673,15 @@ exports.getSharedReelsForUser = async (req, res) => {
     const userRespDoc = await UserResponse.findOne({ googleId: userId });
     const userResponses = userRespDoc && Array.isArray(userRespDoc.response) ? userRespDoc.response : [];
 
-    // Fetch all UGC submissions for this user in one query
-    const ugcCampaignIds = reelsToReturn
-      .filter(r => r.contentCategory === 'ugc')
-      .map(r => String(r.campaignId))
+    // Fetch all UGC submissions for this user in one query — scoped by campaignTaskId
+    const ugcTaskIds = reelsToReturn
+      .filter(r => r.contentCategory === 'ugc' && r.campaignTaskId)
+      .map(r => String(r.campaignTaskId))
       .filter(Boolean);
-    const ugcSubmissions = ugcCampaignIds.length
-      ? await UGCSubmission.find({ userId: String(userId), campaignId: { $in: ugcCampaignIds } }).lean()
+    const ugcSubmissions = ugcTaskIds.length
+      ? await UGCSubmission.find({ userId: String(userId), campaignTaskId: { $in: ugcTaskIds } }).lean()
       : [];
-    const ugcSubmissionMap = new Map(ugcSubmissions.map(s => [String(s.campaignId), s]));
+    const ugcSubmissionMap = new Map(ugcSubmissions.map(s => [String(s.campaignTaskId), s]));
 
     let legacyFixed = false;
 
@@ -705,9 +705,9 @@ exports.getSharedReelsForUser = async (req, res) => {
       // contentCategory must be defined before ugcSub check
       const contentCategory = r.contentCategory || campaignTask?.contentCategory || 'reels';
 
-      // For UGC tasks, check UGCSubmission instead of UserResponse
+      // For UGC tasks, check UGCSubmission scoped to this specific campaignTaskId
       const ugcSub = (r.contentCategory === 'ugc' || contentCategory === 'ugc')
-        ? ugcSubmissionMap.get(String(r.campaignId))
+        ? ugcSubmissionMap.get(String(r.campaignTaskId))
         : null;
       const hasUgcSubmission = !!ugcSub;
 
@@ -858,9 +858,9 @@ exports.getSharedReelsForUser = async (req, res) => {
 
         // ─── Submission ───────────────────────────────────────────────
         submission: (() => {
-          // UGC tasks — use UGCSubmission collection
+          // UGC tasks — use UGCSubmission scoped to this campaignTaskId
           if ((r.contentCategory === 'ugc' || contentCategory === 'ugc')) {
-            const ugcSub = ugcSubmissionMap.get(String(r.campaignId));
+            const ugcSub = ugcSubmissionMap.get(String(r.campaignTaskId));
             if (!ugcSub) return null;
             return {
               _id: ugcSub._id,

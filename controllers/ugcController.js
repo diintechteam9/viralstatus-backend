@@ -1,6 +1,7 @@
 const UGCForm = require('../models/UGCForm');
 const UGCSubmission = require('../models/UGCSubmission');
 const CreditWallet = require('../models/CreditWallet');
+const TransactionHistory = require('../models/TransactionHistory');
 const { s3Client } = require('../utils/r2');
 const { PutObjectCommand } = require('@aws-sdk/client-s3');
 const { getobject } = require('../utils/r2');
@@ -77,9 +78,9 @@ exports.uploadUGCVideo = [
   async (req, res) => {
     try {
       const userId     = String(req.user.id);
-      const { campaignId } = req.body;
-      if (!campaignId || !req.file) {
-        return res.status(400).json({ success: false, message: 'campaignId and video file are required' });
+      const { campaignId, campaignTaskId } = req.body;
+      if (!campaignId || !campaignTaskId || !req.file) {
+        return res.status(400).json({ success: false, message: 'campaignId, campaignTaskId and video file are required' });
       }
 
       // Get video duration before uploading
@@ -96,39 +97,27 @@ exports.uploadUGCVideo = [
       }));
       const videoUrl = await getobject(key);
 
-      // Check if already submitted (to avoid double credits)
-      const existing = await UGCSubmission.findOne({ campaignId, userId });
-      const alreadyAwarded = existing?.creditsAwarded || false;
-
+      // Upsert submission scoped to this specific task assignment
+      // creditsAwarded stays false until client approves
       const submission = await UGCSubmission.findOneAndUpdate(
-        { campaignId, userId },
-        { videoKey: key, videoUrl, status: 'pending', videoDuration, creditsEarned, creditsAwarded: true },
+        { campaignTaskId, userId },
+        { campaignId, campaignTaskId, videoKey: key, videoUrl, status: 'pending', videoDuration, creditsEarned, creditsAwarded: false },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
 
-      // Add credits to wallet only if not already awarded
-      if (!alreadyAwarded && creditsEarned > 0) {
-        await CreditWallet.findOneAndUpdate(
-          { userId },
-          { $inc: { totalBalance: creditsEarned, pendingCredits: creditsEarned, totalCampaigns: 1 } },
-          { upsert: true, new: true }
-        );
-        console.log(`[UGC Credits] userId=${userId} earned ${creditsEarned} credits for ${videoDuration}s video`);
-      }
-
-      // Update SharedReels submissionStatus to pending_review for this UGC task
+      // Update SharedReels submissionStatus scoped to this specific task
       const SharedReels = require('../models/SharedReels');
       await SharedReels.updateOne(
-        { googleId: userId, 'reels.campaignId': campaignId, 'reels.contentCategory': 'ugc' },
-        { $set: { 'reels.$[elem].submissionStatus': 'pending_review', 'reels.$[elem].isTaskComplete': true } },
-        { arrayFilters: [{ 'elem.campaignId': campaignId, 'elem.contentCategory': 'ugc' }] }
+        { googleId: userId, 'reels.campaignTaskId': campaignTaskId },
+        { $set: { 'reels.$[elem].submissionStatus': 'pending_review', 'reels.$[elem].TaskStatus': 'in_progress' } },
+        { arrayFilters: [{ 'elem.campaignTaskId': campaignTaskId }] }
       );
 
       const enriched = await buildUGCFormResponse(campaignId, userId);
 
       res.json({
         success: true,
-        message: `UGC video submitted! You earned ${creditsEarned} credits for ${videoDuration}s video.`,
+        message: `UGC video submitted successfully. Credits will be awarded after client approval.`,
         creditsEarned,
         videoDuration,
         submission: buildSubmissionPayload(submission.toObject()),
@@ -168,16 +157,49 @@ exports.updateUGCSubmissionStatus = async (req, res) => {
     const submission = await UGCSubmission.findByIdAndUpdate(submissionId, { status }, { new: true });
     if (!submission) return res.status(404).json({ success: false, message: 'Submission not found' });
 
-    // Sync SharedReels submissionStatus
     const SharedReels = require('../models/SharedReels');
-    const newSubmissionStatus = status === 'approved' ? 'approved' : status === 'rejected' ? 'rejected' : 'pending_review';
-    await SharedReels.updateOne(
-      { googleId: submission.userId, 'reels.campaignId': String(submission.campaignId), 'reels.contentCategory': 'ugc' },
-      { $set: { 'reels.$[elem].submissionStatus': newSubmissionStatus } },
-      { arrayFilters: [{ 'elem.campaignId': String(submission.campaignId), 'elem.contentCategory': 'ugc' }] }
-    );
 
-    const data = await buildUGCFormResponse(submission.campaignId, submission.userId);
+    if (status === 'approved') {
+      // Award credits only on approval
+      if (!submission.creditsAwarded && submission.creditsEarned > 0) {
+        const wallet = await CreditWallet.findOneAndUpdate(
+          { userId: submission.userId },
+          { $inc: { totalBalance: submission.creditsEarned, acceptedCredits: submission.creditsEarned } },
+          { new: true, upsert: true }
+        );
+        await UGCSubmission.findByIdAndUpdate(submissionId, { creditsAwarded: true });
+        await TransactionHistory.create({
+          userId: submission.userId,
+          type: 'campaign_reward',
+          amount: submission.creditsEarned,
+          description: `UGC task approved: ${submission.videoDuration}s video`,
+          referenceType: 'task',
+          referenceId: String(submission.campaignTaskId),
+          status: 'completed',
+          meta: {
+            campaignId: String(submission.campaignId),
+            taskId: String(submission.campaignTaskId),
+            reason: 'UGC submission approved by client',
+          },
+          balanceAfter: wallet.totalBalance,
+        });
+      }
+      // Mark SharedReels task as completed
+      await SharedReels.updateOne(
+        { googleId: submission.userId, 'reels.campaignTaskId': String(submission.campaignTaskId) },
+        { $set: { 'reels.$[elem].submissionStatus': 'approved', 'reels.$[elem].isTaskComplete': true, 'reels.$[elem].TaskStatus': 'completed' } },
+        { arrayFilters: [{ 'elem.campaignTaskId': String(submission.campaignTaskId) }] }
+      );
+    } else {
+      // Rejected — reset task so user can re-submit
+      await SharedReels.updateOne(
+        { googleId: submission.userId, 'reels.campaignTaskId': String(submission.campaignTaskId) },
+        { $set: { 'reels.$[elem].submissionStatus': 'rejected', 'reels.$[elem].TaskStatus': 'accepted', 'reels.$[elem].isTaskComplete': false } },
+        { arrayFilters: [{ 'elem.campaignTaskId': String(submission.campaignTaskId) }] }
+      );
+    }
+
+    const data = await buildUGCFormResponse(submission.campaignId, submission.userId, String(submission.campaignTaskId));
 
     res.json({
       success: true,
