@@ -315,69 +315,52 @@ exports.getPublicTasks = async (req, res) => {
     const { getobject } = require('../utils/r2');
     const now = new Date();
 
-    // Step 1: tasks explicitly marked visibility:public
-    const explicitPublicTasks = await CampaignTask.find({ visibility: 'public', status: 'active' }).lean();
-
-    // Step 2: tasks belonging to public campaigns
+    // Only fetch tasks from public campaigns
     const publicCampaigns = await Campaign.find({
       campaignType: 'public',
       status: 'Active',
       $or: [{ endDate: null }, { endDate: { $gt: now } }],
     }).lean();
     const publicCampaignIds = publicCampaigns.map(c => String(c._id));
+    const campMap = new Map(publicCampaigns.map(c => [String(c._id), c]));
 
-    const publicCampaignTasks = publicCampaignIds.length
-      ? await CampaignTask.find({
-          campaignId: { $in: publicCampaignIds },
-          status: 'active',
-          visibility: { $ne: 'public' }, // avoid duplicates
-        }).lean()
-      : [];
+    if (!publicCampaignIds.length) return res.json({ success: true, tasks: [] });
 
-    const allTasks = [...explicitPublicTasks, ...publicCampaignTasks];
+    const allTasks = await CampaignTask.find({
+      campaignId: { $in: publicCampaignIds },
+      status: 'active',
+    }).lean();
+
     if (!allTasks.length) return res.json({ success: true, tasks: [] });
 
-    // Build campaign map
-    const campaignIds = [...new Set(allTasks.map(t => t.campaignId))];
-    const campaigns = await Campaign.find({ _id: { $in: campaignIds } }).lean();
-    const campMap = new Map(campaigns.map(c => [String(c._id), c]));
-
-    // Filter out expired campaigns
     const enriched = await Promise.all(
-      allTasks
-        .filter(t => {
-          const camp = campMap.get(String(t.campaignId));
-          if (!camp) return false;
-          if (camp.endDate && new Date(camp.endDate) < now) return false;
-          return true;
-        })
-        .map(async t => {
-          const camp = campMap.get(String(t.campaignId)) || {};
+      allTasks.map(async t => {
+        const camp = campMap.get(String(t.campaignId)) || {};
 
-          // Fresh signed image URL
-          let campaignImageUrl = camp.image?.url || '';
-          if (camp.image?.key) {
-            try { campaignImageUrl = await getobject(camp.image.key); } catch (_) {}
-          }
+        let campaignImageUrl = camp.image?.url || '';
+        if (camp.image?.key) {
+          try { campaignImageUrl = await getobject(camp.image.key); } catch (_) {}
+        }
 
-          const alreadyCompleted = userId ? (t.completedBy || []).includes(userId) : false;
-          const alreadySubmitted = userId
-            ? (t.submissions || []).some(s => s.userId === userId && s.status !== 'rejected')
-            : false;
+        const alreadyCompleted = userId ? (t.completedBy || []).includes(userId) : false;
+        const alreadySubmitted = userId
+          ? (t.submissions || []).some(s => s.userId === userId && s.status !== 'rejected')
+          : false;
 
-          return {
-            ...t,
-            contentCategory: t.contentCategory || 'post',
-            campaignName:     camp.campaignName || '',
-            campaignImageUrl,
-            brandName:        camp.brandName    || '',
-            campaignType:     camp.campaignType || 'public',
-            startDate:        camp.startDate    || null,
-            endDate:          camp.endDate      || null,
-            alreadyCompleted,
-            alreadySubmitted,
-          };
-        })
+        const { campaignType: _ct, ...taskData } = t;
+        return {
+          ...taskData,
+          contentCategory: t.contentCategory || 'post',
+          campaignName:     camp.campaignName || '',
+          campaignImageUrl,
+          brandName:        camp.brandName    || '',
+          startDate:        camp.startDate    || null,
+          endDate:          camp.endDate      || null,
+          isPublicTask:     true,
+          alreadyCompleted,
+          alreadySubmitted,
+        };
+      })
     );
 
     res.json({ success: true, tasks: enriched });
