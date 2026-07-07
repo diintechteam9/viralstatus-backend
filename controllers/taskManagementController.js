@@ -236,6 +236,8 @@ exports.cancelTask = async (req, res) => {
     return res.status(result.status).json({
       success: result.ok,
       message: result.message,
+      warning: result.warning || null,
+      cancelCount: result.cancelCount ?? 0,
       creditsPenalized: result.creditsPenalized ?? 0,
       penaltyApplied: result.penaltyApplied ?? false,
       withinGrace: result.withinGrace,

@@ -821,6 +821,7 @@ exports.getSharedReelsForUser = async (req, res) => {
         allowCancellation,
         penaltyApplied: !!r.penaltyApplied,
         creditsPenalized: r.creditsPenalized || 0,
+        cancelCount: r.cancelCount || 0,
         potentialPenalty: timer.potentialPenalty ?? 0,
         penaltyThresholdMinutes: timer.penaltyThresholdMinutes,
         cancellationPenalty: timer.cancellationPenalty,
