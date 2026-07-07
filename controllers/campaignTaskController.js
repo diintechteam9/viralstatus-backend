@@ -313,39 +313,45 @@ exports.getPublicTasks = async (req, res) => {
   try {
     const { userId } = req.query;
     const { getobject } = require('../utils/r2');
+    const { buildTimerPayload } = require('../services/userTaskService');
+    const UGCSubmission = require('../models/UGCSubmission');
     const now = new Date();
 
-    // Fetch tasks from public campaigns OR tasks with visibility:public
+    // Source 1: tasks explicitly marked visibility:public
     const explicitPublicTasks = await CampaignTask.find({ visibility: 'public', status: 'active' }).lean();
-
+    // Source 2: tasks from public campaigns
     const publicCampaigns = await Campaign.find({
-      campaignType: 'public',
-      status: 'Active',
+      campaignType: 'public', status: 'Active',
       $or: [{ endDate: null }, { endDate: { $gt: now } }],
     }).lean();
     const publicCampaignIds = publicCampaigns.map(c => String(c._id));
-
     const publicCampaignTasks = publicCampaignIds.length
-      ? await CampaignTask.find({
-          campaignId: { $in: publicCampaignIds },
-          status: 'active',
-          visibility: { $ne: 'public' },
-        }).lean()
+      ? await CampaignTask.find({ campaignId: { $in: publicCampaignIds }, status: 'active', visibility: { $ne: 'public' } }).lean()
       : [];
 
-    // Merge and deduplicate by _id
     const taskMap = new Map();
-    for (const t of [...explicitPublicTasks, ...publicCampaignTasks]) {
-      taskMap.set(String(t._id), t);
-    }
+    for (const t of [...explicitPublicTasks, ...publicCampaignTasks]) taskMap.set(String(t._id), t);
     const allTasks = [...taskMap.values()];
-
     if (!allTasks.length) return res.json({ success: true, tasks: [] });
 
-    // Build campaign map for all tasks
     const campaignIds = [...new Set(allTasks.map(t => String(t.campaignId)))];
     const allCampaigns = await Campaign.find({ _id: { $in: campaignIds } }).lean();
     const campMap = new Map(allCampaigns.map(c => [String(c._id), c]));
+
+    // User-specific data
+    let userReelMap = new Map();
+    let ugcSubmissionMap = new Map();
+    if (userId) {
+      const shared = await SharedReels.findOne({ googleId: userId }).lean();
+      if (shared?.reels) {
+        for (const r of shared.reels) {
+          if (r.campaignTaskId) userReelMap.set(String(r.campaignTaskId), r);
+        }
+      }
+      const taskIds = allTasks.map(t => String(t._id));
+      const ugcSubs = await UGCSubmission.find({ userId: String(userId), campaignTaskId: { $in: taskIds } }).lean();
+      for (const s of ugcSubs) ugcSubmissionMap.set(String(s.campaignTaskId), s);
+    }
 
     const enriched = await Promise.all(
       allTasks
@@ -357,31 +363,123 @@ exports.getPublicTasks = async (req, res) => {
         })
         .map(async t => {
           const camp = campMap.get(String(t.campaignId)) || {};
+          const taskIdStr = String(t._id);
+          const userReel = userReelMap.get(taskIdStr) || null;
+          const ugcSub = ugcSubmissionMap.get(taskIdStr) || null;
 
-        let campaignImageUrl = camp.image?.url || '';
-        if (camp.image?.key) {
-          try { campaignImageUrl = await getobject(camp.image.key); } catch (_) {}
-        }
+          let campaignImageUrl = '';
+          const imgKey = camp.image?.key || '';
+          if (imgKey) { try { campaignImageUrl = await getobject(imgKey); } catch (_) {} }
 
-        const alreadyCompleted = userId ? (t.completedBy || []).includes(userId) : false;
-        const alreadySubmitted = userId
-          ? (t.submissions || []).some(s => s.userId === userId && s.status !== 'rejected')
-          : false;
+          let brandImageUrl = '';
+          if (camp.brandImage?.key) { try { brandImageUrl = await getobject(camp.brandImage.key); } catch (_) {} }
 
-        const { campaignType: _ct, ...taskData } = t;
-        return {
-          ...taskData,
-          contentCategory: t.contentCategory || 'post',
-          campaignName:     camp.campaignName || '',
-          campaignImageUrl,
-          brandName:        camp.brandName    || '',
-          startDate:        camp.startDate    || null,
-          endDate:          camp.endDate      || null,
-          isPublicTask:     true,
-          alreadyCompleted,
-          alreadySubmitted,
-        };
-      })
+          const timer = userReel ? buildTimerPayload(userReel, camp) : {
+            timerExpired: false, penaltyZone: false, safeToCancel: true, remainingMs: 0,
+            allowCancellation: true, potentialPenalty: 0,
+            penaltyThresholdMinutes: camp.penaltyThresholdMinutes || 10,
+            cancellationPenalty: camp.cancellationPenalty || 2,
+          };
+
+          const contentCategory = t.contentCategory || 'post';
+          const taskType = (() => {
+            const raw = t.taskType || contentCategory;
+            if (raw === 'upload_reel' || raw === 'ugc') return 'Upload Video';
+            return raw;
+          })();
+          const proofRequired = (() => {
+            if (contentCategory === 'ugc') return 'video';
+            if (['app_review', 'gmb_review'].includes(contentCategory)) return 'screenshot';
+            if (['reels', 'post'].includes(contentCategory)) return 'url';
+            return t.proofRequired || 'none';
+          })();
+
+          const isUnderReview = ugcSub?.status === 'pending' ||
+            (t.submissions || []).some(s => s.userId === userId && s.status === 'pending');
+          const alreadyCompleted = userId ? (t.completedBy || []).includes(userId) : false;
+          const alreadySubmitted = userId
+            ? (!!ugcSub && ugcSub.status !== 'rejected') || (t.submissions || []).some(s => s.userId === userId && s.status !== 'rejected')
+            : false;
+
+          const submission = (() => {
+            if (ugcSub) return {
+              _id: ugcSub._id, status: ugcSub.status,
+              videoKey: ugcSub.videoKey, videoUrl: ugcSub.videoUrl,
+              videoDuration: ugcSub.videoDuration, creditsEarned: ugcSub.creditsEarned,
+              creditsAwarded: ugcSub.creditsAwarded,
+              submittedAt: ugcSub.createdAt, updatedAt: ugcSub.updatedAt,
+            };
+            const sub = (t.submissions || []).find(s => s.userId === userId);
+            if (sub) return {
+              _id: sub._id, status: sub.status,
+              proofUrl: sub.proofUrl || '', proofKey: sub.proofKey || '',
+              creditsGiven: sub.creditsGiven || 0, submittedAt: sub.submittedAt,
+            };
+            return null;
+          })();
+
+          const { campaignType: _ct, ...taskData } = t;
+          return {
+            ...taskData,
+            contentCategory,
+            taskType,
+            proofRequired,
+            instructions: t.description || '',
+            // Task Status
+            TaskStatus: userReel?.TaskStatus || 'assigned',
+            submissionStatus: userReel?.submissionStatus || 'none',
+            isTaskAccepted: userReel ? !!userReel.isTaskAccepted : false,
+            isTaskComplete: userReel ? !!userReel.isTaskComplete : false,
+            alreadyCompleted,
+            alreadySubmitted,
+            canEdit: !!isUnderReview,
+            isUnderReview: !!isUnderReview,
+            isPublicTask: true,
+            // Timestamps
+            acceptedAt: userReel?.acceptedAt || null,
+            cancelledAt: userReel?.cancelledAt || null,
+            cancellationReason: userReel?.cancellationReason || '',
+            // Timer & Penalty
+            timerExpired: timer.timerExpired,
+            penaltyZone: timer.penaltyZone,
+            safeToCancel: isUnderReview ? false : timer.safeToCancel,
+            remainingMs: timer.remainingMs ?? 0,
+            allowCancellation: !isUnderReview && timer.allowCancellation !== false,
+            penaltyApplied: userReel ? !!userReel.penaltyApplied : false,
+            creditsPenalized: userReel?.creditsPenalized || 0,
+            cancelCount: userReel?.cancelCount || 0,
+            potentialPenalty: timer.potentialPenalty ?? 0,
+            penaltyThresholdMinutes: timer.penaltyThresholdMinutes,
+            cancellationPenalty: timer.cancellationPenalty,
+            // Media
+            s3Key: userReel?.s3Key || '',
+            s3Url: '',
+            // Campaign object
+            campaign: {
+              _id: camp._id || t.campaignId,
+              campaignName: camp.campaignName || '',
+              brandName: camp.brandName || '',
+              clientId: camp.clientId || '',
+              description: camp.description || '',
+              goal: camp.goal || '',
+              views: camp.views || '',
+              credits: camp.credits || 0,
+              cutoff: camp.cutoff || 0,
+              tNc: camp.tNc || '',
+              tags: camp.tags || [],
+              location: camp.location || '',
+              status: camp.status || '',
+              campaignType: camp.campaignType || 'private',
+              supportedTaskTypes: camp.supportedTaskTypes || [],
+              autoApproval: !!camp.autoApproval,
+              startDate: camp.startDate || null,
+              endDate: camp.endDate || null,
+              image: { key: imgKey, url: campaignImageUrl },
+              brandImage: { key: camp.brandImage?.key || '', url: brandImageUrl },
+            },
+            submission,
+          };
+        })
     );
 
     res.json({ success: true, tasks: enriched });
