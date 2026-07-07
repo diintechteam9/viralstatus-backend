@@ -34,6 +34,11 @@ exports.getPrompts = async (req, res) => {
       isAiGenerated: p.isAiGenerated,
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
+      prompt: p.prompt,
+      platform: p.platform,
+      brandName: p.brandName,
+      productName: p.productName,
+      keyPoints: p.keyPoints,
     }));
     
     res.json({ success: true, prompts: cleanedPrompts });
@@ -60,6 +65,11 @@ exports.getPromptById = async (req, res) => {
         script: prompt.script,
         status: prompt.status,
         createdAt: prompt.createdAt,
+        prompt: prompt.prompt,
+        platform: prompt.platform,
+        brandName: prompt.brandName,
+        productName: prompt.productName,
+        keyPoints: prompt.keyPoints,
       }
     });
   } catch (err) {
@@ -284,7 +294,7 @@ RULES:
       brandName: brand,
       productName: product,
       keyPoints: Array.isArray(keyPoints) ? keyPoints : [],
-      prompt: parsed.prompt || '',
+      prompt: parsed.instructions || parsed.prompt || '',
       script: generatedData.script,
       hashtags: parsed.hashtags || [],
       status: 'active',

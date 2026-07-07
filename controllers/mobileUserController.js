@@ -680,36 +680,74 @@ const googleAuth = async (req, res) => {
 
     const client = await validateClientId(clientId);
 
-    // Verify Google ID token
+    // Verify Google ID token or exchange authorization code
     let payload;
-    try {
-      // Try strict verification first
-      const ticket = await googleOAuthClient.verifyIdToken({
-        idToken: credential,
-        audience: [
-          process.env.GOOGLE_CLIENT_ID,
-          process.env.GOOGLE_ANDROID_CLIENT_ID,
-        ].filter(Boolean),
-      });
-      payload = ticket.getPayload();
-    } catch (strictErr) {
-      // Fallback: decode without audience check (handles multi-client scenarios)
+    const isJwt = typeof credential === 'string' && credential.includes('.') && credential.startsWith('eyJ');
+
+    if (!isJwt) {
+      // It's likely an authorization code (serverAuthCode) — exchange it
       try {
-        const decoded = require('jsonwebtoken').decode(credential);
-        if (!decoded || !decoded.email || !decoded.sub) {
+        const oauthClientForExchange = new OAuth2Client(
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.CLIENT_SECRET,
+          'postmessage'
+        );
+        const { tokens } = await oauthClientForExchange.getToken(credential);
+        if (!tokens.id_token) {
+          throw new Error('No id_token returned from authorization code exchange.');
+        }
+        const ticket = await oauthClientForExchange.verifyIdToken({
+          idToken: tokens.id_token,
+          audience: [
+            process.env.GOOGLE_CLIENT_ID,
+            process.env.GOOGLE_ANDROID_CLIENT_ID,
+          ].filter(Boolean),
+        });
+        payload = ticket.getPayload();
+      } catch (exchangeErr) {
+        console.error('Failed to exchange Google auth code:', exchangeErr);
+        // If it was just a malformed code or token, attempt a direct jsonwebtoken decode as final fallback
+        try {
+          const decoded = require('jsonwebtoken').decode(credential);
+          if (decoded && decoded.email && decoded.sub) {
+            payload = decoded;
+          } else {
+            return res.status(401).json({ success: false, message: 'Google authentication failed: ' + exchangeErr.message });
+          }
+        } catch {
+          return res.status(401).json({ success: false, message: 'Google authentication failed: ' + exchangeErr.message });
+        }
+      }
+    } else {
+      // It's an ID Token (JWT)
+      try {
+        const ticket = await googleOAuthClient.verifyIdToken({
+          idToken: credential,
+          audience: [
+            process.env.GOOGLE_CLIENT_ID,
+            process.env.GOOGLE_ANDROID_CLIENT_ID,
+          ].filter(Boolean),
+        });
+        payload = ticket.getPayload();
+      } catch (strictErr) {
+        // Fallback: decode without audience check (handles multi-client scenarios)
+        try {
+          const decoded = require('jsonwebtoken').decode(credential);
+          if (!decoded || !decoded.email || !decoded.sub) {
+            return res.status(401).json({ success: false, message: 'Invalid Google token' });
+          }
+          // Verify token is not expired
+          if (decoded.exp && decoded.exp < Math.floor(Date.now() / 1000)) {
+            return res.status(401).json({ success: false, message: 'Google token expired. Please sign in again.' });
+          }
+          // Verify issuer
+          if (!decoded.iss || !decoded.iss.includes('accounts.google.com')) {
+            return res.status(401).json({ success: false, message: 'Invalid Google token issuer' });
+          }
+          payload = decoded;
+        } catch {
           return res.status(401).json({ success: false, message: 'Invalid Google token' });
         }
-        // Verify token is not expired
-        if (decoded.exp && decoded.exp < Math.floor(Date.now() / 1000)) {
-          return res.status(401).json({ success: false, message: 'Google token expired. Please sign in again.' });
-        }
-        // Verify issuer
-        if (!decoded.iss || !decoded.iss.includes('accounts.google.com')) {
-          return res.status(401).json({ success: false, message: 'Invalid Google token issuer' });
-        }
-        payload = decoded;
-      } catch {
-        return res.status(401).json({ success: false, message: 'Invalid Google token' });
       }
     }
 

@@ -77,10 +77,24 @@ exports.submitVideo = async (req, res) => {
 // ── GET /api/ugc-video
 // User ke apne saare submitted videos — with signed URLs
 // Query: promptId (optional filter)
+// Role-based: mobileuser gets own videos, client gets all videos for their prompts
 exports.getUserVideos = async (req, res) => {
   try {
-    const userId = String(req.user.id);
-    const filter = { userId };
+    const userId   = String(req.user.id);
+    const clientId = String(req.user.clientId || req.user.id);
+    const role     = req.user.role;
+
+    let filter = {};
+
+    // If mobileuser - get only their videos
+    if (role === 'mobileuser') {
+      filter.userId = userId;
+    }
+    // If client - get all videos for their prompts
+    else if (role === 'client' || role === 'appclient') {
+      filter.clientId = clientId;
+    }
+
     if (req.query.promptId) filter.promptId = req.query.promptId;
 
     const videos = await UGCVideo.find(filter)
@@ -99,12 +113,63 @@ exports.getUserVideos = async (req, res) => {
   }
 };
 
+// ── PATCH /api/ugc-video/:id
+// Client approve/reject video
+// Body: { status: 'approved' | 'rejected' }
+exports.updateVideoStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!status || !['approved', 'rejected', 'pending'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status' });
+    }
+
+    const clientId = String(req.user.clientId || req.user.id);
+    const role = req.user.role;
+
+    // Only client/appclient can update status
+    if (role !== 'client' && role !== 'appclient') {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const doc = await UGCVideo.findOne({ _id: req.params.id, clientId });
+    if (!doc) return res.status(404).json({ success: false, message: 'Video not found' });
+
+    doc.status = status;
+    await doc.save();
+
+    res.json({
+      success: true,
+      video: {
+        _id: doc._id,
+        status: doc.status,
+        updatedAt: doc.updatedAt,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // ── DELETE /api/ugc-video/:id
 // User apna video delete kare
 exports.deleteVideo = async (req, res) => {
   try {
     const userId = String(req.user.id);
-    const doc    = await UGCVideo.findOne({ _id: req.params.id, userId });
+    const role = req.user.role;
+
+    let filter = { _id: req.params.id };
+
+    // mobileuser can only delete their own videos
+    if (role === 'mobileuser') {
+      filter.userId = userId;
+    }
+    // client can delete any video from their prompts
+    else if (role === 'client' || role === 'appclient') {
+      const clientId = String(req.user.clientId || req.user.id);
+      filter.clientId = clientId;
+    }
+
+    const doc = await UGCVideo.findOne(filter);
     if (!doc) return res.status(404).json({ success: false, message: 'Video not found' });
 
     // Delete from R2
