@@ -57,17 +57,59 @@ async function loadCampaign(campaignId) {
  * Unified accept — used by POST /task/accept and legacy Android routes.
  */
 async function acceptUserTask({ userId, reelId, campaignId }) {
-  const shared = await SharedReels.findOne({ googleId: userId });
+  let shared = await SharedReels.findOne({ googleId: userId });
   if (!shared) {
-    return { ok: false, status: 404, message: 'User shared reels not found' };
+    shared = await SharedReels.create({ googleId: userId, reels: [] });
   }
 
   let idx = findUserTaskIndex(shared.reels, reelId, campaignId);
   if (idx === -1) {
     idx = findUserTaskIndex(shared.reels, reelId, null);
   }
+
+  // Public task — auto-add to SharedReels if not already present
   if (idx === -1) {
-    return { ok: false, status: 404, message: 'Task not found for this user' };
+    const CampaignTask = require('../models/CampaignTask');
+    const task = await CampaignTask.findById(reelId).lean();
+    if (!task) {
+      return { ok: false, status: 404, message: 'Task not found for this user' };
+    }
+    const isPublic = task.visibility === 'public';
+    const camp = await loadCampaign(task.campaignId);
+    const isPublicCampaign = camp?.campaignType === 'public';
+    if (!isPublic && !isPublicCampaign) {
+      return { ok: false, status: 404, message: 'Task not found for this user' };
+    }
+    // Auto-add public task to user's SharedReels
+    const now = new Date();
+    const taskIdStr = String(task._id);
+    shared.reels.push({
+      reelId: taskIdStr,
+      campaignTaskId: taskIdStr,
+      contentCategory: task.contentCategory || 'post',
+      s3Key: '', s3Url: '',
+      campaignId: task.campaignId,
+      campaignName: camp?.campaignName || task.title,
+      credits: task.credits,
+      title: task.title,
+      campaignImageKey: camp?.image?.key || '',
+      description: task.description || '',
+      targetUrl: task.targetUrl || '',
+      targetCount: task.targetCount || 0,
+      appName: task.appName || '',
+      businessName: task.businessName || '',
+      minRating: task.minRating || '',
+      script: task.script || '',
+      referenceVideoUrl: task.referenceVideoUrl || '',
+      isTaskComplete: false,
+      isTaskAccepted: false,
+      TaskStatus: 'assigned',
+      acceptedAt: null,
+      campaignType: 'public',
+      createdAt: now,
+    });
+    await shared.save();
+    idx = shared.reels.length - 1;
   }
 
   const reel = shared.reels[idx];
