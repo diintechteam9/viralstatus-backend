@@ -1233,6 +1233,172 @@ exports.updateTaskCompleted = async (req, res) => {
   }
 };
 
+// ─── Unified Task Submit ─────────────────────────────────────────────────────
+// POST /api/pools/task/submit
+// Supports all 5 task types: reels, post, ugc, app_review, gmb_review
+// Content-Type: multipart/form-data (ugc) OR application/json (others)
+exports.submitTask = [
+  // multer: only parse file if present, skip for JSON tasks
+  (() => {
+    const multer = require('multer');
+    return multer({ limits: { fileSize: 200 * 1024 * 1024 } }).single('video');
+  })(),
+  async (req, res) => {
+    try {
+      const userId        = req.body.userId;
+      const campaignId    = req.body.campaignId;
+      const campaignTaskId = req.body.campaignTaskId || req.body.reelId;
+      const reelId        = req.body.reelId || campaignTaskId;
+      const contentCategory = req.body.contentCategory;
+      const url           = req.body.url;           // reels / post
+      const proofUrl      = req.body.proofUrl;      // app_review / gmb_review
+      const proofKey      = req.body.proofKey || '';
+
+      if (!userId || !campaignId || !contentCategory) {
+        return res.status(400).json({ success: false, message: 'userId, campaignId, contentCategory are required' });
+      }
+
+      // ── UGC: video file upload ──────────────────────────────────────────────
+      if (contentCategory === 'ugc') {
+        if (!campaignTaskId || !req.file) {
+          return res.status(400).json({ success: false, message: 'campaignTaskId and video file are required for ugc' });
+        }
+        const { s3Client, getobject } = require('../utils/r2');
+        const { PutObjectCommand } = require('@aws-sdk/client-s3');
+        const UGCSubmission = require('../models/UGCSubmission');
+        const ffmpeg = require('fluent-ffmpeg');
+        const ffprobeStatic = require('ffprobe-static');
+        const os = require('os');
+        const path = require('path');
+        const fs = require('fs');
+        ffmpeg.setFfprobePath(ffprobeStatic.path);
+
+        const videoDuration = await new Promise((resolve) => {
+          const tmp = path.join(os.tmpdir(), `ugc_${Date.now()}.mp4`);
+          fs.writeFileSync(tmp, req.file.buffer);
+          ffmpeg.ffprobe(tmp, (err, meta) => {
+            fs.unlink(tmp, () => {});
+            resolve(err ? 0 : Math.floor(meta?.format?.duration || 0));
+          });
+        });
+
+        const ext = (req.file.originalname || 'video.mp4').split('.').pop() || 'mp4';
+        const key = `ugc/${campaignId}/${userId}_${Date.now()}.${ext}`;
+        await s3Client.send(new PutObjectCommand({
+          Bucket: process.env.R2_BUCKET,
+          Key: key,
+          Body: req.file.buffer,
+          ContentType: req.file.mimetype,
+        }));
+        const videoUrl = await getobject(key);
+        const creditsEarned = videoDuration;
+
+        const submission = await UGCSubmission.findOneAndUpdate(
+          { campaignTaskId, userId },
+          { campaignId, campaignTaskId, videoKey: key, videoUrl, status: 'pending', videoDuration, creditsEarned, creditsAwarded: false },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+        await SharedReels.updateOne(
+          { googleId: userId, 'reels.campaignTaskId': campaignTaskId },
+          { $set: { 'reels.$[elem].submissionStatus': 'pending_review', 'reels.$[elem].TaskStatus': 'in_progress' } },
+          { arrayFilters: [{ 'elem.campaignTaskId': campaignTaskId }] }
+        );
+        return res.json({
+          success: true,
+          message: 'UGC video submitted. Credits awarded after approval.',
+          creditsEarned,
+          videoDuration,
+          submission: { _id: submission._id, status: submission.status, videoUrl, videoDuration, creditsEarned },
+        });
+      }
+
+      // ── app_review / gmb_review: screenshot proof ───────────────────────────
+      if (contentCategory === 'app_review' || contentCategory === 'gmb_review') {
+        const taskId = campaignTaskId;
+        if (!taskId) return res.status(400).json({ success: false, message: 'campaignTaskId required for review tasks' });
+
+        const CampaignTask = require('../models/CampaignTask');
+        const task = await CampaignTask.findById(taskId);
+        if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
+
+        const isAssigned = (task.assignedTo || []).includes(userId);
+        if (task.visibility !== 'public' && !isAssigned) {
+          return res.status(400).json({ success: false, message: 'Task not available for this user' });
+        }
+        const alreadySubmitted = task.submissions.some(s => s.userId === userId && s.status !== 'rejected');
+        if (alreadySubmitted) return res.status(400).json({ success: false, message: 'Already submitted' });
+
+        task.submissions = task.submissions.filter(s => !(s.userId === userId && s.status === 'rejected'));
+        task.submissions.push({ userId, proofUrl: proofUrl || '', proofKey, submittedAt: new Date(), status: 'pending' });
+        await task.save();
+        await syncSharedReelSubmission(userId, taskId, task.campaignId, 'submit');
+
+        return res.json({
+          success: true,
+          message: 'Proof submitted. Pending review.',
+          TaskStatus: 'in_progress',
+          submissionStatus: 'pending_review',
+        });
+      }
+
+      // ── reels / post: URL submission ────────────────────────────────────────
+      if (contentCategory === 'reels' || contentCategory === 'post') {
+        if (!url) return res.status(400).json({ success: false, message: 'url is required for reels/post tasks' });
+
+        const campaign = await Campaign.findById(campaignId);
+        if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
+
+        const creditAmount = campaign.credits || 0;
+        const cutoff = campaign.cutoff || 0;
+        let views = 0, likes = 0, comments = 0;
+        try {
+          const stats = await getPostStats(url);
+          views    = parseInt(stats.views    || 0, 10);
+          likes    = parseInt(stats.likes    || 0, 10);
+          comments = parseInt(stats.comments || 0, 10);
+        } catch (_) {}
+
+        let userResponse = await UserResponse.findOne({ googleId: userId });
+        const entry = { urls: url, campaignId, reelId, isTaskCompleted: false, views, likes, comments, cutoff, isCreditAccepted: false, creditAmount, status: 'pending' };
+        if (!userResponse) {
+          userResponse = new UserResponse({ googleId: userId, response: [entry] });
+        } else {
+          userResponse.response.push(entry);
+        }
+        await userResponse.save();
+        await syncSharedReelSubmission(userId, reelId, campaignId, 'submit');
+
+        try {
+          if (creditAmount > 0) {
+            const wallet = await CreditWallet.findOne({ userId }).lean();
+            await TransactionHistory.create({
+              userId, type: 'earning', amount: creditAmount,
+              description: `Task submitted for review: ${campaign.campaignName}`,
+              referenceType: 'campaign', referenceId: String(campaignId), status: 'pending',
+              meta: { campaignId: String(campaignId), taskId: String(reelId || ''), reason: 'Awaiting approval' },
+              balanceAfter: wallet?.totalBalance || 0,
+            });
+          }
+        } catch (_) {}
+
+        const profile = await resolveOneUserProfile(userId);
+        telegramAlerts.alertUserEarn({
+          userName: profile.name, email: profile.email, mobile: profile.mobile,
+          credits: creditAmount, campaignName: campaign.campaignName, videoUrl: url,
+          note: 'Pending review — credits after approval',
+        }).catch(() => {});
+
+        return res.json({ success: true, userResponse });
+      }
+
+      return res.status(400).json({ success: false, message: `Unknown contentCategory: ${contentCategory}` });
+    } catch (err) {
+      console.error('[submitTask]', err);
+      res.status(500).json({ success: false, message: err.message });
+    }
+  },
+];
+
 // Legacy Android — delegates to unified accept
 exports.updateTaskAccepted = async (req, res) => {
   const { userId, reelId } = req.params;

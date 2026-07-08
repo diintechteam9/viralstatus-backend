@@ -36,6 +36,7 @@ router.delete('/reels', reelController.deleteMultipleReels);
 router.post('/reels/approved/:campaignId', reelController.approveCreditsForUser);
 
 // Task management
+router.post('/task/submit', reelController.submitTask);
 router.post('/task/accept', reelController.acceptTask);
 router.post('/task/reject', reelController.rejectTask);
 router.post('/task/bulk-assign', taskManagementController.bulkAssignTasks);
