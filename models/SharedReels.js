@@ -91,6 +91,12 @@ const sharedReelsSchema = new mongoose.Schema({
         enum: ['public', 'private'],
         default: 'private'
       },
+      targetViews: { type: Number, default: 0 },
+      targetLikes: { type: Number, default: 0 },
+      targetComments: { type: Number, default: 0 },
+      currentViews: { type: Number, default: 0 },
+      currentLikes: { type: Number, default: 0 },
+      currentComments: { type: Number, default: 0 },
       createdAt: {
         type: Date,
         default: Date.now

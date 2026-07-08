@@ -25,6 +25,7 @@ const {
   normalizeReelAcceptState,
 } = require('../services/userTaskService');
 const UGCSubmission = require('../models/UGCSubmission');
+const CampaignTask = require('../models/CampaignTask');
 
 // ─── Fast Multi Upload: Step 1 — Get batch presigned PUT URLs ───────────────
 exports.getPresignedUrls = async (req, res) => {
@@ -865,6 +866,12 @@ exports.getSharedReelsForUser = async (req, res) => {
         minRating: taskDetails.minRating,
         script: taskDetails.script,
         referenceVideoUrl: taskDetails.referenceVideoUrl,
+        targetViews: campaignTask?.targetViews || r.targetViews || 0,
+        targetLikes: campaignTask?.targetLikes || r.targetLikes || 0,
+        targetComments: campaignTask?.targetComments || r.targetComments || 0,
+        currentViews: r.currentViews || 0,
+        currentLikes: r.currentLikes || 0,
+        currentComments: r.currentComments || 0,
 
         // ─── Task Status ─────────────────────────────────────────────
         TaskStatus: r.TaskStatus || 'assigned',
@@ -1368,6 +1375,13 @@ exports.submitTask = [
         await userResponse.save();
         await syncSharedReelSubmission(userId, reelId, campaignId, 'submit');
 
+        // Check if reel task target is reached
+        const { checkAndCompleteReelTask } = require('../utils/reelTaskHelpers');
+        let targetCompletion = null;
+        if (contentCategory === 'reels' && campaignTaskId) {
+          targetCompletion = await checkAndCompleteReelTask(userId, campaignTaskId, campaignId, views, likes, comments);
+        }
+
         try {
           if (creditAmount > 0) {
             const wallet = await CreditWallet.findOne({ userId }).lean();
@@ -1385,10 +1399,14 @@ exports.submitTask = [
         telegramAlerts.alertUserEarn({
           userName: profile.name, email: profile.email, mobile: profile.mobile,
           credits: creditAmount, campaignName: campaign.campaignName, videoUrl: url,
-          note: 'Pending review — credits after approval',
+          note: targetCompletion?.completed ? `Task auto-completed! ${targetCompletion.completionPercent}% target reached. ${targetCompletion.creditsAwarded} credits awarded.` : 'Pending review — credits after approval',
         }).catch(() => {});
 
-        return res.json({ success: true, userResponse });
+        return res.json({ 
+          success: true, 
+          userResponse,
+          targetCompletion: targetCompletion || undefined,
+        });
       }
 
       return res.status(400).json({ success: false, message: `Unknown contentCategory: ${contentCategory}` });

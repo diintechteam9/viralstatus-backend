@@ -38,13 +38,21 @@ router.get('/client/:clientId', campaignController.getCampaignsByClientId);
 router.get('/data/:campaignId', campaignController.getCamapignData);
 router.get('/videos/:campaignId', campaignController.getCampaignResponseUrls);
 
+router.get('/response/data/:userId', campaignController.getUserDashboardStats);
+router.get('/response/campaign/data/:userId', campaignController.getUserCampaignData);
+
+// GeoJSON map data (BEFORE generic :campaignId routes)
+router.get('/:campaignId/geojson', campaignController.getParticipantGeoJSON);
+
+// Location-based participant filtering (BEFORE generic :campaignId routes)
+router.get('/:campaignId/location/stats', campaignController.getParticipantLocationStats);
+router.get('/:campaignId/location/filter', campaignController.getParticipantsWithLocationFilters);
+
 // Update campaign (after static path segments above)
 router.put('/:campaignId', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.updateCampaign);
 
 // Delete campaign
 router.delete('/:campaignId', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.deleteCampaign);
-router.get('/response/data/:userId', campaignController.getUserDashboardStats);
-router.get('/response/campaign/data/:userId', campaignController.getUserCampaignData);
 
 // Get campaign by ID
 router.get('/:campaignId', async (req, res) => {

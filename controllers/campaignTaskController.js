@@ -3,6 +3,8 @@ const Campaign     = require('../models/campaign');
 const SharedReels  = require('../models/SharedReels');
 const UGCForm      = require('../models/UGCForm');
 const TransactionHistory = require('../models/TransactionHistory');
+const UserResponse = require('../models/userResponse');
+const CreditWallet = require('../models/CreditWallet');
 const { buildTaskTemplate } = require('../utils/campaignTaskFactory');
 const { VALID_TASK_TYPE_IDS } = require('../utils/campaignTaskTypes');
 const { syncSharedReelSubmission } = require('../services/userTaskService');
@@ -78,10 +80,15 @@ async function assignCampaignTaskToUsers(task, userIds, assignmentScope, campaig
             credits: task.credits,
             title: task.title,
             campaignImageKey: campaign?.image?.key || '',
-            // Task-specific fields stored at assignment time
             description: task.description || '',
             targetUrl: task.targetUrl || '',
             targetCount: task.targetCount || 0,
+            targetViews: task.targetViews || 0,
+            targetLikes: task.targetLikes || 0,
+            targetComments: task.targetComments || 0,
+            currentViews: 0,
+            currentLikes: 0,
+            currentComments: 0,
             appName: task.appName || '',
             businessName: task.businessName || '',
             minRating: task.minRating || '',
@@ -112,6 +119,7 @@ exports.createTask = async (req, res) => {
       credits, proofRequired, status, deadline, order, visibility,
       contentCategory,
       appName, businessName, minRating, script, referenceVideoUrl,
+      targetViews, targetLikes, targetComments,
     } = req.body;
 
     if (!campaignId || !title || !platform || !taskType || credits === undefined) {
@@ -127,6 +135,9 @@ exports.createTask = async (req, res) => {
       title, description, platform, taskType,
       targetCount: contentCategory === 'post' ? 0 : targetCount,
       targetUrl: contentCategory === 'post' ? '' : (req.body.targetUrl || ''),
+      targetViews: contentCategory === 'reels' ? (targetViews || 0) : 0,
+      targetLikes: contentCategory === 'reels' ? (targetLikes || 0) : 0,
+      targetComments: contentCategory === 'reels' ? (targetComments || 0) : 0,
       credits,
       proofRequired, status, deadline, order,
       visibility: visibility || 'private',
@@ -547,24 +558,72 @@ exports.reviewPublicSubmission = async (req, res) => {
     if (!['approved', 'rejected'].includes(status))
       return res.status(400).json({ success: false, message: 'status must be approved or rejected' });
 
-    const task = await CampaignTask.findById(taskId);
-    if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
-
+    // taskId could be either CampaignTask._id OR reelId (from UserResponse)
+    // Try CampaignTask first
+    let task = await CampaignTask.findById(taskId);
+    
+    // If not found, search by reelId in UserResponse
+    if (!task) {
+      const userResp = await UserResponse.findOne({ 'response.reelId': taskId });
+      if (!userResp) {
+        return res.status(404).json({ success: false, message: 'Task or submission not found' });
+      }
+      
+      // Handle UserResponse (reels/post) submission
+      const respIndex = userResp.response.findIndex(r => String(r.reelId) === String(taskId) && r.userId === userId);
+      if (respIndex === -1) {
+        return res.status(404).json({ success: false, message: 'Submission not found' });
+      }
+      
+      const resp = userResp.response[respIndex];
+      resp.status = status;
+      
+      if (status === 'approved') {
+        resp.isCreditAccepted = true;
+        const creditAmount = resp.creditAmount || 0;
+        
+        try {
+          const wallet = await CreditWallet.findOneAndUpdate(
+            { userId },
+            { $inc: { totalBalance: creditAmount, acceptedCredits: creditAmount } },
+            { new: true, upsert: true }
+          );
+          await TransactionHistory.create({
+            userId,
+            type: 'campaign_reward',
+            amount: creditAmount,
+            description: `Task completed: Post submission approved`,
+            referenceType: 'task',
+            referenceId: String(taskId),
+            status: 'completed',
+            meta: {
+              campaignId: String(resp.campaignId),
+              taskId: String(taskId),
+              reason: 'Post submission approved by client',
+            },
+            balanceAfter: wallet.totalBalance,
+          });
+        } catch (e) {
+          console.error('Credit wallet update failed:', e.message);
+        }
+      }
+      
+      await userResp.save();
+      return res.json({ success: true, message: `Submission ${status}` });
+    }
+    
+    // Handle CampaignTask (app_review/gmb_review) submission
     const sub = task.submissions.find(s => s.userId === userId);
     if (!sub) return res.status(404).json({ success: false, message: 'Submission not found' });
 
     sub.status = status;
 
-    // Agar approved to completedBy me add karo
     if (status === 'approved' && !task.completedBy.includes(userId)) {
       task.completedBy.push(userId);
-
-      // Custom credits override support — client approve karte waqt custom amount de sakta hai
       const creditsToGive = customCredits ? Number(customCredits) : task.credits;
       sub.creditsGiven = creditsToGive;
 
       try {
-        const CreditWallet = require('../models/CreditWallet');
         const wallet = await CreditWallet.findOneAndUpdate(
           { userId },
           { $inc: { totalBalance: creditsToGive, acceptedCredits: creditsToGive } },
@@ -595,7 +654,6 @@ exports.reviewPublicSubmission = async (req, res) => {
     if (status === 'approved') {
       await syncSharedReelSubmission(userId, taskId, task.campaignId, 'approve');
     } else {
-      // Rejected — reset task to accepted so user can re-submit
       await SharedReels.updateOne(
         { googleId: userId, 'reels.campaignTaskId': String(taskId) },
         { $set: {
@@ -609,6 +667,7 @@ exports.reviewPublicSubmission = async (req, res) => {
 
     res.json({ success: true, message: `Submission ${status}` });
   } catch (err) {
+    console.error('reviewPublicSubmission:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -807,11 +866,12 @@ exports.getSubmissionsByCategory = async (req, res) => {
 
     const tasks = await CampaignTask.find(filter).lean();
     const { getobject } = require('../utils/r2');
+    const UserResponse = require('../models/userResponse');
     const submissions = [];
 
+    // Source 1: CampaignTask.submissions (app_review, gmb_review)
     for (const task of tasks) {
       for (const sub of task.submissions || []) {
-        // Generate fresh signed URL from R2 key if available
         let proofUrl = sub.proofUrl || '';
         if (sub.proofKey) {
           try { proofUrl = await getobject(sub.proofKey); } catch {}
@@ -834,6 +894,41 @@ exports.getSubmissionsByCategory = async (req, res) => {
       }
     }
 
+    // Source 2: UserResponse (reels, post)
+    if (!contentCategory || contentCategory === 'reels' || contentCategory === 'post') {
+      const userResponses = await UserResponse.find({ 'response.campaignId': String(campaignId) }).lean();
+      for (const userResp of userResponses) {
+        for (const resp of userResp.response || []) {
+          if (String(resp.campaignId) !== String(campaignId)) continue;
+          
+          const task = tasks.find(t => String(t._id) === String(resp.reelId));
+          const cat = task?.contentCategory || 'post';
+          
+          if (contentCategory && cat !== contentCategory) continue;
+          
+          submissions.push({
+            userId:          userResp.googleId,
+            proofUrl:        resp.urls || '',
+            proofKey:        '',
+            submittedAt:     resp.createdAt || new Date(),
+            status:          resp.status || 'pending',
+            creditsGiven:    resp.isCreditAccepted ? (resp.creditAmount || 0) : 0,
+            taskId:          resp.reelId,
+            taskTitle:       resp.campaignName || '',
+            contentCategory: cat,
+            credits:         resp.creditAmount || 0,
+            platform:        'instagram',
+            taskType:        'post',
+            visibility:      'private',
+            views:           resp.views || 0,
+            likes:           resp.likes || 0,
+            comments:        resp.comments || 0,
+            cutoff:          resp.cutoff || 0,
+          });
+        }
+      }
+    }
+
     submissions.sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
 
     const stats = {
@@ -846,6 +941,7 @@ exports.getSubmissionsByCategory = async (req, res) => {
 
     res.json({ success: true, submissions, stats, taskCount: tasks.length });
   } catch (err) {
+    console.error('getSubmissionsByCategory:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 };

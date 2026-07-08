@@ -827,6 +827,154 @@ exports.getUserDashboardStats = async (req, res) => {
   }
 };
 
+// Get participants with location filters
+exports.getParticipantsWithLocationFilters = async (req, res) => {
+  try {
+    const { campaignId } = req.params;
+    const { pincode, city, state, latitude, longitude, radiusKm, groupBy } = req.query;
+
+    const campaign = await Campaign.findById(campaignId);
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+
+    const userIds = campaign.userIds || [];
+    if (userIds.length === 0) {
+      return res.json({
+        success: true,
+        participants: [],
+        stats: { total: 0, byCity: {}, byPincode: {}, byState: {}, withLocation: 0, withoutLocation: 0 }
+      });
+    }
+
+    const locationService = require('../services/locationFilterService');
+
+    // Build filter object
+    const filters = {};
+    if (pincode) filters.pincode = pincode;
+    if (city) filters.city = city;
+    if (state) filters.state = state;
+    if (latitude && longitude && radiusKm) {
+      filters.latitude = parseFloat(latitude);
+      filters.longitude = parseFloat(longitude);
+      filters.radiusKm = parseFloat(radiusKm);
+    }
+
+    let participants;
+    if (Object.keys(filters).length > 0) {
+      participants = await locationService.filterParticipantsByLocation(userIds, filters);
+    } else {
+      participants = await locationService.filterParticipantsByLocation(userIds, {});
+    }
+
+    // Get location stats
+    const stats = await locationService.getLocationStats(userIds);
+
+    // Group if requested
+    let result = participants;
+    if (groupBy && ['city', 'pincode', 'state'].includes(groupBy)) {
+      const grouped = await locationService.getParticipantsByLocation(userIds, groupBy);
+      result = grouped;
+    }
+
+    res.json({
+      success: true,
+      participants: result,
+      stats,
+      filterApplied: Object.keys(filters).length > 0,
+      totalFiltered: Array.isArray(result) ? result.length : Object.values(result).reduce((sum, arr) => sum + arr.length, 0)
+    });
+  } catch (err) {
+    console.error('getParticipantsWithLocationFilters:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Get location statistics for campaign participants
+exports.getParticipantLocationStats = async (req, res) => {
+  try {
+    const { campaignId } = req.params;
+
+    const campaign = await Campaign.findById(campaignId);
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+
+    const userIds = campaign.userIds || [];
+    const locationService = require('../services/locationFilterService');
+    const stats = await locationService.getLocationStats(userIds);
+
+    res.json({
+      success: true,
+      campaignId,
+      stats
+    });
+  } catch (err) {
+    console.error('getParticipantLocationStats:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Get GeoJSON map data for campaign participants
+exports.getParticipantGeoJSON = async (req, res) => {
+  try {
+    const { campaignId } = req.params;
+
+    const campaign = await Campaign.findById(campaignId);
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+
+    const userIds = campaign.userIds || [];
+    if (userIds.length === 0) {
+      return res.json({
+        success: true,
+        type: 'FeatureCollection',
+        features: [],
+        bounds: null,
+        center: null
+      });
+    }
+
+    const geoJsonService = require('../services/geoJsonService');
+    const MobileUser = require('../models/MobileUser');
+
+    // Get all participants with location data
+    const participants = await MobileUser.find({ googleId: { $in: userIds } }).lean();
+    const pincodes = participants
+      .map(p => p.pincode)
+      .filter(Boolean);
+
+    if (pincodes.length === 0) {
+      return res.json({
+        success: true,
+        type: 'FeatureCollection',
+        features: [],
+        bounds: null,
+        center: null
+      });
+    }
+
+    // Get GeoJSON features for these pincodes
+    const features = await geoJsonService.getFeaturesByPincodes(pincodes);
+    const bounds = await geoJsonService.getBoundsForPincodes(pincodes);
+    const center = await geoJsonService.getCenterForPincodes(pincodes);
+
+    res.json({
+      success: true,
+      type: 'FeatureCollection',
+      features,
+      bounds,
+      center,
+      participantCount: participants.length,
+      uniquePincodes: pincodes.length
+    });
+  } catch (err) {
+    console.error('getParticipantGeoJSON:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 //user dashboard campaign data
 exports.getUserCampaignData = async (req, res) => {
   try {

@@ -29,6 +29,9 @@ const campaignTaskSchema = new mongoose.Schema({
 
   targetUrl:   { type: String, default: '' },
   targetCount: { type: Number, default: 1 },
+  targetViews: { type: Number, default: 0 },
+  targetLikes: { type: Number, default: 0 },
+  targetComments: { type: Number, default: 0 },
   credits:     { type: Number, required: true },
 
   // App Review specific
@@ -56,6 +59,13 @@ const campaignTaskSchema = new mongoose.Schema({
 
   assignedTo: { type: [String], default: [] }, // googleIds
   completedBy: { type: [String], default: [] },
+  completedByWithMetrics: [{
+    userId: { type: String, required: true },
+    completedAt: { type: Date, default: Date.now },
+    finalViews: { type: Number, default: 0 },
+    finalLikes: { type: Number, default: 0 },
+    finalComments: { type: Number, default: 0 },
+  }],
 
   visibility: {
     type: String,
@@ -71,6 +81,9 @@ const campaignTaskSchema = new mongoose.Schema({
     submittedAt:  { type: Date, default: Date.now },
     status:       { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
     creditsGiven: { type: Number, default: 0 },
+    views:        { type: Number, default: 0 },
+    likes:        { type: Number, default: 0 },
+    comments:     { type: Number, default: 0 },
   }],
 
   deadline: { type: Date, default: null },
