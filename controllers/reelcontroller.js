@@ -628,9 +628,61 @@ exports.getSharedReelsForUser = async (req, res) => {
   const skip  = (page - 1) * limit;
 
   try {
+    const CampaignTask = require('../models/CampaignTask');
+    const now = new Date();
+
     const shared = await SharedReels.findOne({ googleId: userId });
-    if (!shared || !Array.isArray(shared.reels)) {
-      return res.json({ success: true, reels: [], total: 0, page, limit, totalPages: 0 });
+    const sharedReels = shared?.reels || [];
+
+    // ── Build a set of campaignTaskIds already in user's SharedReels ──
+    const userReelTaskIdSet = new Set(
+      sharedReels.map(r => r.campaignTaskId || r.reelId).filter(Boolean).map(String)
+    );
+
+    // ── Fetch all active public tasks not yet in user's SharedReels ──
+    const explicitPublicTasks = await CampaignTask.find({ visibility: 'public', status: 'active' }).lean();
+    const publicCampaigns = await Campaign.find({
+      campaignType: 'public', status: 'Active',
+      $or: [{ endDate: null }, { endDate: { $gt: now } }],
+    }).select('_id').lean();
+    const publicCampaignIds = publicCampaigns.map(c => String(c._id));
+    const publicCampaignTasks = publicCampaignIds.length
+      ? await CampaignTask.find({ campaignId: { $in: publicCampaignIds }, status: 'active', visibility: { $ne: 'public' } }).lean()
+      : [];
+
+    // Deduplicate public tasks
+    const publicTaskMap = new Map();
+    for (const t of [...explicitPublicTasks, ...publicCampaignTasks]) publicTaskMap.set(String(t._id), t);
+
+    // Build virtual reel entries for public tasks not yet accepted by user
+    const virtualPublicReels = [];
+    for (const t of publicTaskMap.values()) {
+      if (t.deadline && new Date(t.deadline) < now) continue; // skip expired
+      if (userReelTaskIdSet.has(String(t._id))) continue;     // already in SharedReels
+      virtualPublicReels.push({
+        _isVirtual: true,
+        reelId: String(t._id),
+        campaignTaskId: String(t._id),
+        campaignId: t.campaignId,
+        title: t.title,
+        contentCategory: t.contentCategory || 'post',
+        credits: t.credits,
+        s3Key: '',
+        campaignType: 'public',
+        TaskStatus: 'assigned',
+        isTaskAccepted: false,
+        isTaskComplete: false,
+        submissionStatus: 'none',
+        acceptedAt: null,
+        cancelledAt: null,
+        cancellationReason: '',
+        penaltyApplied: false,
+        creditsPenalized: 0,
+        cancelCount: 0,
+        createdAt: t.createdAt,
+        // task fields for enrichment
+        _taskDoc: t,
+      });
     }
 
     const regDoc = await RegisteredCampaign.findOne({ userId }).lean();
@@ -641,10 +693,13 @@ exports.getSharedReelsForUser = async (req, res) => {
         .filter(Boolean)
     );
 
-    const now = new Date();
-    const campaignIds = [...new Set(shared.reels.map(r => r.campaignId).filter(Boolean))];
+    // ── Merge: SharedReels (private + already-accepted public) + virtual public ──
+    const allCampaignIds = [...new Set([
+      ...sharedReels.map(r => r.campaignId),
+      ...virtualPublicReels.map(r => r.campaignId),
+    ].filter(Boolean))];
 
-    const campaigns = await Campaign.find({ _id: { $in: campaignIds } })
+    const campaigns = await Campaign.find({ _id: { $in: allCampaignIds } })
       .select('_id campaignName brandName description clientId campaignType supportedTaskTypes tNc goal views cutoff credits endDate startDate status penaltyThresholdMinutes cancellationPenalty allowCancellation autoApproval image brandImage tags location userIds')
       .lean();
     const campaignMap = new Map(campaigns.map(c => [String(c._id), c]));
@@ -652,17 +707,25 @@ exports.getSharedReelsForUser = async (req, res) => {
     const expiredIds = new Set(
       campaigns.filter(c => c.endDate && new Date(c.endDate) < now).map(c => String(c._id))
     );
-    const allFilteredReels = shared.reels.filter(r =>
+
+    // Filter SharedReels: remove expired, rejected
+    const filteredSharedReels = sharedReels.filter(r =>
       !expiredIds.has(String(r.campaignId)) &&
-      r.TaskStatus !== 'rejected' &&
-      r.campaignType !== 'public'
+      r.TaskStatus !== 'rejected'
     );
-    const total      = allFilteredReels.length;
+
+    // Filter virtual public reels: remove expired campaigns
+    const filteredVirtualReels = virtualPublicReels.filter(r =>
+      !expiredIds.has(String(r.campaignId))
+    );
+
+    // Combine: shared reels first, then unaccepted public tasks at end
+    const allReels = [...filteredSharedReels, ...filteredVirtualReels];
+    const total      = allReels.length;
     const totalPages = Math.ceil(total / limit);
-    const reelsToReturn = allFilteredReels.slice(skip, skip + limit);
+    const reelsToReturn = allReels.slice(skip, skip + limit);
 
     // Fetch all CampaignTask docs needed in one query
-    const CampaignTask = require('../models/CampaignTask');
     const campaignTaskIds = [...new Set(
       reelsToReturn.map(r => r.campaignTaskId).filter(id => id && mongoose.Types.ObjectId.isValid(id))
     )];
@@ -674,7 +737,7 @@ exports.getSharedReelsForUser = async (req, res) => {
     const userRespDoc = await UserResponse.findOne({ googleId: userId });
     const userResponses = userRespDoc && Array.isArray(userRespDoc.response) ? userRespDoc.response : [];
 
-    // Fetch all UGC submissions for this user in one query — scoped by campaignTaskId
+    // Fetch all UGC submissions
     const ugcTaskIds = reelsToReturn
       .filter(r => r.contentCategory === 'ugc' && r.campaignTaskId)
       .map(r => String(r.campaignTaskId))
@@ -688,12 +751,16 @@ exports.getSharedReelsForUser = async (req, res) => {
 
     const reelsWithFreshUrls = await Promise.all(reelsToReturn.map(async (r) => {
       const campaign = campaignMap.get(String(r.campaignId));
-      const campaignTask = r.campaignTaskId ? campaignTaskMap.get(String(r.campaignTaskId)) : null;
+      // For virtual public reels, use the embedded _taskDoc; else look up campaignTaskMap
+      const campaignTask = r._taskDoc || (r.campaignTaskId ? campaignTaskMap.get(String(r.campaignTaskId)) : null);
+      const isPublicTask = r.campaignType === 'public';
 
-      const before = JSON.stringify({ a: r.isTaskAccepted, t: r.TaskStatus, at: r.acceptedAt });
-      normalizeReelAcceptState(r);
-      const after = JSON.stringify({ a: r.isTaskAccepted, t: r.TaskStatus, at: r.acceptedAt });
-      if (before !== after) legacyFixed = true;
+      if (!r._isVirtual) {
+        const before = JSON.stringify({ a: r.isTaskAccepted, t: r.TaskStatus, at: r.acceptedAt });
+        normalizeReelAcceptState(r);
+        const after = JSON.stringify({ a: r.isTaskAccepted, t: r.TaskStatus, at: r.acceptedAt });
+        if (before !== after) legacyFixed = true;
+      }
 
       const userRespEntry = userResponses.find(ur =>
         String(ur.reelId) === String(r.reelId) ||
@@ -747,14 +814,6 @@ exports.getSharedReelsForUser = async (req, res) => {
         return campaignTask?.proofRequired || 'none';
       })();
 
-      // taskType & platform: from CampaignTask if available
-      const taskType = (() => {
-        const raw = campaignTask?.taskType || contentCategory;
-        if (raw === 'upload_reel' || raw === 'ugc') return 'Upload Video';
-        return raw;
-      })();
-      const platform = campaignTask?.platform || campaign?.supportedTaskTypes?.[0] || contentCategory;
-
       const taskDetails = campaignTask ? {
         instructions: campaignTask.description || '',
         targetUrl: campaignTask.targetUrl || '',
@@ -775,9 +834,17 @@ exports.getSharedReelsForUser = async (req, res) => {
         referenceVideoUrl: r.referenceVideoUrl || '',
       };
 
+      // taskType for virtual public reels
+      const resolvedTaskType = (() => {
+        const raw = campaignTask?.taskType || contentCategory;
+        if (raw === 'upload_reel' || raw === 'ugc') return 'Upload Video';
+        return raw;
+      })();
+      const resolvedPlatform = campaignTask?.platform || campaign?.supportedTaskTypes?.[0] || contentCategory;
+
       return {
         // ─── Identity ────────────────────────────────────────────────
-        _id: r._id,
+        _id: r._id || campaignTask?._id,
         reelId: r.reelId,
         campaignTaskId: r.campaignTaskId || '',
         campaignId: r.campaignId,
@@ -785,9 +852,10 @@ exports.getSharedReelsForUser = async (req, res) => {
         // ─── Task Content ────────────────────────────────────────────
         title: r.title || campaignTask?.title || '',
         contentCategory,
-        taskType,
-        platform,
+        taskType: resolvedTaskType,
+        platform: resolvedPlatform,
         proofRequired,
+        isPublicTask,
         credits: r.credits || campaign?.credits || 0,
         instructions: taskDetails.instructions,
         targetUrl: taskDetails.targetUrl,
@@ -807,7 +875,7 @@ exports.getSharedReelsForUser = async (req, res) => {
         alreadySubmitted: hasUgcSubmission || !!userRespEntry,
         canEdit: !!isUnderReview,
         isUnderReview: !!isUnderReview,
-        campaignType: resolveReelCampaignType(r, campaign, userId, registeredCampaignIds, registeredCampaigns),
+        campaignType: isPublicTask ? 'public' : resolveReelCampaignType(r, campaign, userId, registeredCampaignIds, registeredCampaigns),
 
         // ─── Timestamps ──────────────────────────────────────────────
         acceptedAt: r.acceptedAt || null,
@@ -890,7 +958,7 @@ exports.getSharedReelsForUser = async (req, res) => {
       };
     }));
 
-    if (legacyFixed) {
+    if (legacyFixed && shared) {
       shared.reels.forEach((r) => normalizeReelAcceptState(r));
       await shared.save();
     }

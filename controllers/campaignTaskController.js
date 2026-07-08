@@ -345,7 +345,9 @@ exports.getPublicTasks = async (req, res) => {
       const shared = await SharedReels.findOne({ googleId: userId }).lean();
       if (shared?.reels) {
         for (const r of shared.reels) {
-          if (r.campaignTaskId) userReelMap.set(String(r.campaignTaskId), r);
+          // Key by campaignTaskId first, fallback to reelId — covers all assignment paths
+          const key = r.campaignTaskId || r.reelId;
+          if (key) userReelMap.set(String(key), r);
         }
       }
       const taskIds = allTasks.map(t => String(t._id));
@@ -359,6 +361,7 @@ exports.getPublicTasks = async (req, res) => {
           const camp = campMap.get(String(t.campaignId));
           if (!camp) return false;
           if (camp.endDate && new Date(camp.endDate) < now) return false;
+          if (t.deadline && new Date(t.deadline) < now) return false;
           return true;
         })
         .map(async t => {
