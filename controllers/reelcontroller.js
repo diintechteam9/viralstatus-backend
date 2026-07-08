@@ -654,7 +654,8 @@ exports.getSharedReelsForUser = async (req, res) => {
     );
     const allFilteredReels = shared.reels.filter(r =>
       !expiredIds.has(String(r.campaignId)) &&
-      r.TaskStatus !== 'rejected'
+      r.TaskStatus !== 'rejected' &&
+      r.campaignType !== 'public'
     );
     const total      = allFilteredReels.length;
     const totalPages = Math.ceil(total / limit);
