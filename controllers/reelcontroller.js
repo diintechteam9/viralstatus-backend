@@ -955,9 +955,6 @@ exports.getSharedReelsForUser = async (req, res) => {
             url: userRespEntry.urls,
             status: userRespEntry.status,
             submittedAt: userRespEntry.createdAt,
-            currentViews: userRespEntry.views || 0,
-            currentLikes: userRespEntry.likes || 0,
-            currentComments: userRespEntry.comments || 0,
             creditAmount: userRespEntry.creditAmount || 0,
             isCreditAccepted: userRespEntry.isCreditAccepted || false,
           } : null;
