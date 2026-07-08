@@ -869,6 +869,9 @@ exports.getSharedReelsForUser = async (req, res) => {
         targetViews: campaignTask?.targetViews || r.targetViews || 0,
         targetLikes: campaignTask?.targetLikes || r.targetLikes || 0,
         targetComments: campaignTask?.targetComments || r.targetComments || 0,
+        currentViews: r.currentViews || 0,
+        currentLikes: r.currentLikes || 0,
+        currentComments: r.currentComments || 0,
 
         // ─── Task Status ─────────────────────────────────────────────
         TaskStatus: r.TaskStatus || 'assigned',
