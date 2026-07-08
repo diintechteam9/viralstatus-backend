@@ -80,7 +80,7 @@ async function acceptUserTask({ userId, reelId, campaignId }) {
     if (!isPublic && !isPublicCampaign) {
       return { ok: false, status: 404, message: 'Task not found for this user' };
     }
-    // Auto-add public task to user's SharedReels
+    // Auto-add public task to user's SharedReels (already accepted state)
     const now = new Date();
     const taskIdStr = String(task._id);
     shared.reels.push({
@@ -102,14 +102,32 @@ async function acceptUserTask({ userId, reelId, campaignId }) {
       script: task.script || '',
       referenceVideoUrl: task.referenceVideoUrl || '',
       isTaskComplete: false,
-      isTaskAccepted: false,
-      TaskStatus: 'assigned',
-      acceptedAt: null,
+      isTaskAccepted: true,
+      TaskStatus: 'accepted',
+      acceptedAt: now,
+      cancelledAt: null,
+      cancellationReason: '',
+      penaltyApplied: false,
+      creditsPenalized: 0,
       campaignType: 'public',
       createdAt: now,
     });
     await shared.save();
+    // Return immediately — already in accepted state, no need to go through accept flow again
     idx = shared.reels.length - 1;
+    const newReel = shared.reels[idx];
+    const camp2 = camp || await loadCampaign(task.campaignId);
+    const settings2 = getCampaignTaskSettings(camp2);
+    await recordDailyAccept(userId, taskIdStr, String(task.campaignId));
+    const quota2 = buildDailyQuota(shared.reels, settings2.dailyTaskAcceptLimit);
+    return {
+      ok: true,
+      status: 200,
+      message: 'Task accepted successfully',
+      updatedReel: newReel,
+      quota: quota2,
+      ...buildTimerPayload(newReel, camp2),
+    };
   }
 
   const reel = shared.reels[idx];
