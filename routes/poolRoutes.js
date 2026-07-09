@@ -35,6 +35,9 @@ router.delete('/reels', reelController.deleteMultipleReels);
 // Approved credits
 router.post('/reels/approved/:campaignId', reelController.approveCreditsForUser);
 
+// Manual admin approval for specific user task
+router.post('/reels/manual-approve', reelController.manuallyApproveUserTask);
+
 // Task management
 router.post('/task/submit', reelController.submitTask);
 router.post('/task/accept', reelController.acceptTask);

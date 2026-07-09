@@ -1261,6 +1261,87 @@ exports.approveCreditsForUser = async (req, res) => {
   }
 };
 
+// Manual admin approval for a specific user's task
+exports.manuallyApproveUserTask = async (req, res) => {
+  const { userId, campaignId, reelId } = req.body;
+  
+  if (!userId || !campaignId || !reelId) {
+    return res.status(400).json({ success: false, error: 'userId, campaignId, reelId are required' });
+  }
+
+  try {
+    // Update SharedReels — mark task as completed
+    const shared = await SharedReels.findOne({ googleId: userId });
+    if (!shared) {
+      return res.status(404).json({ success: false, error: 'User shared reels not found' });
+    }
+
+    const reelEntry = shared.reels.find(r => 
+      (String(r.reelId) === String(reelId) || String(r.campaignTaskId) === String(reelId)) &&
+      String(r.campaignId) === String(campaignId)
+    );
+
+    if (!reelEntry) {
+      return res.status(404).json({ success: false, error: 'Task not found for this user' });
+    }
+
+    // Mark task as completed
+    reelEntry.TaskStatus = 'completed';
+    reelEntry.submissionStatus = 'approved';
+    reelEntry.isTaskComplete = true;
+    await shared.save();
+
+    // Award credits
+    const creditAmount = reelEntry.credits || 0;
+    if (creditAmount > 0) {
+      const wallet = await CreditWallet.findOneAndUpdate(
+        { userId },
+        { $inc: { totalBalance: creditAmount, acceptedCredits: creditAmount } },
+        { new: true, upsert: true }
+      );
+      await TransactionHistory.create({
+        userId,
+        type: 'campaign_reward',
+        amount: creditAmount,
+        description: `Task manually approved by admin: ${reelEntry.campaignName}`,
+        referenceType: 'campaign',
+        referenceId: String(campaignId),
+        status: 'completed',
+        meta: {
+          campaignId: String(campaignId),
+          taskId: String(reelId),
+          reason: 'Manually approved by admin',
+        },
+        balanceAfter: wallet.totalBalance,
+      });
+    }
+
+    // Update UserResponse if exists
+    const userResponse = await UserResponse.findOne({ googleId: userId });
+    if (userResponse) {
+      const entry = userResponse.response.find(r => 
+        String(r.campaignId) === String(campaignId) && 
+        (String(r.reelId) === String(reelId) || String(r.urls))
+      );
+      if (entry) {
+        entry.isCreditAccepted = true;
+        entry.status = 'approved';
+        await userResponse.save();
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Task manually approved and credits awarded',
+      updatedReel: reelEntry,
+      creditsAwarded: creditAmount,
+    });
+  } catch (err) {
+    console.error('Error in manuallyApproveUserTask:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 exports.getYoutubeVideoStats = async (req, res) => {
   const url = req.query.url || req.body.url;
   const videoId = req.query.videoId || req.body.videoId;
