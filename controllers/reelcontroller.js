@@ -824,6 +824,7 @@ exports.getSharedReelsForUser = async (req, res) => {
         minRating: campaignTask.minRating || '',
         script: campaignTask.script || '',
         referenceVideoUrl: campaignTask.referenceVideoUrl || '',
+        deadline: campaignTask.deadline || null,
       } : {
         instructions: r.description || campaign?.description || '',
         targetUrl: r.targetUrl || campaign?.goal || '',
@@ -833,6 +834,7 @@ exports.getSharedReelsForUser = async (req, res) => {
         minRating: r.minRating || '',
         script: r.script || '',
         referenceVideoUrl: r.referenceVideoUrl || '',
+        deadline: null,
       };
 
       // taskType for virtual public reels
@@ -858,6 +860,7 @@ exports.getSharedReelsForUser = async (req, res) => {
         proofRequired,
         isPublicTask,
         credits: r.credits || campaign?.credits || 0,
+        deadline: taskDetails.deadline,
         instructions: taskDetails.instructions,
         targetUrl: taskDetails.targetUrl,
         targetCount: taskDetails.targetCount,
