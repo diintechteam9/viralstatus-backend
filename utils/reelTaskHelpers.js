@@ -7,56 +7,51 @@ async function checkAndCompleteReelTask(userId, campaignTaskId, campaignId, view
   const task = await CampaignTask.findById(campaignTaskId).lean();
   if (!task || task.contentCategory !== 'reels') return null;
 
-  const targetViews = task.targetViews || 0;
-  const targetLikes = task.targetLikes || 0;
+  const targetViews    = task.targetViews    || 0;
+  const targetLikes    = task.targetLikes    || 0;
   const targetComments = task.targetComments || 0;
 
   // Calculate completion percentage
   let completionPercent = 0;
   let targetsSet = 0;
-  if (targetViews > 0) { completionPercent += Math.min(100, (views / targetViews) * 100); targetsSet++; }
-  if (targetLikes > 0) { completionPercent += Math.min(100, (likes / targetLikes) * 100); targetsSet++; }
+  if (targetViews    > 0) { completionPercent += Math.min(100, (views    / targetViews)    * 100); targetsSet++; }
+  if (targetLikes    > 0) { completionPercent += Math.min(100, (likes    / targetLikes)    * 100); targetsSet++; }
   if (targetComments > 0) { completionPercent += Math.min(100, (comments / targetComments) * 100); targetsSet++; }
 
-  if (targetsSet === 0) return null; // No targets set
+  if (targetsSet === 0) return null;
   completionPercent = completionPercent / targetsSet;
 
-  // Update SharedReels with current progress
-  await SharedReels.updateOne(
-    { googleId: userId, 'reels.campaignTaskId': String(campaignTaskId) },
-    { $set: {
-      'reels.$[elem].currentViews': views,
-      'reels.$[elem].currentLikes': likes,
-      'reels.$[elem].currentComments': comments,
-    }},
-    { arrayFilters: [{ 'elem.campaignTaskId': String(campaignTaskId) }] }
-  );
+  const taskIdStr = String(campaignTaskId);
 
-  // If 100% complete, auto-complete task
-  if (completionPercent >= 100) {
-    // Mark task as completed in SharedReels
-    await SharedReels.updateOne(
-      { googleId: userId, 'reels.campaignTaskId': String(campaignTaskId) },
-      { $set: {
-        'reels.$[elem].isTaskComplete': true,
-        'reels.$[elem].TaskStatus': 'completed',
-        'reels.$[elem].submissionStatus': 'approved',
-      }},
-      { arrayFilters: [{ 'elem.campaignTaskId': String(campaignTaskId) }] }
+  // Find the matching SharedReels entry — match by campaignTaskId OR reelId
+  const shared = await SharedReels.findOne({
+    googleId: userId,
+    reels: { $elemMatch: { $or: [{ campaignTaskId: taskIdStr }, { reelId: taskIdStr }] } },
+  });
+
+  if (shared) {
+    const reelEntry = shared.reels.find(
+      r => String(r.campaignTaskId) === taskIdStr || String(r.reelId) === taskIdStr
     );
+    if (reelEntry) {
+      reelEntry.currentViews    = views;
+      reelEntry.currentLikes    = likes;
+      reelEntry.currentComments = comments;
 
+      if (completionPercent >= 100) {
+        reelEntry.isTaskComplete   = true;
+        reelEntry.TaskStatus       = 'completed';
+        reelEntry.submissionStatus = 'approved';
+      }
+      await shared.save();
+    }
+  }
+
+  if (completionPercent >= 100) {
     // Add to completedByWithMetrics in CampaignTask
     await CampaignTask.updateOne(
       { _id: campaignTaskId },
-      { $push: {
-        completedByWithMetrics: {
-          userId,
-          completedAt: new Date(),
-          finalViews: views,
-          finalLikes: likes,
-          finalComments: comments,
-        }
-      }}
+      { $push: { completedByWithMetrics: { userId, completedAt: new Date(), finalViews: views, finalLikes: likes, finalComments: comments } } }
     );
 
     // Award credits
@@ -73,11 +68,11 @@ async function checkAndCompleteReelTask(userId, campaignTaskId, campaignId, view
         amount: creditAmount,
         description: `Reel task auto-completed: ${task.title} (${Math.round(completionPercent)}% target reached)`,
         referenceType: 'task',
-        referenceId: String(campaignTaskId),
+        referenceId: taskIdStr,
         status: 'completed',
         meta: {
           campaignId: String(campaignId),
-          taskId: String(campaignTaskId),
+          taskId: taskIdStr,
           reason: `Target metrics reached: ${views} views, ${likes} likes, ${comments} comments`,
           completionPercent: Math.round(completionPercent),
         },

@@ -1125,12 +1125,24 @@ async function syncCampaignResponseStats(campaignId) {
         let completedViaTaskTarget = false;
         if (entry.reelId && !entry.isCreditAccepted) {
           const CampaignTask = require('../models/CampaignTask');
-          const task = await CampaignTask.findById(entry.reelId).lean();
-          if (task && task.contentCategory === 'reels') {
+          // entry.reelId may be a CampaignTask _id or a Reel _id — resolve correctly
+          let resolvedTaskId = null;
+          if (mongoose.Types.ObjectId.isValid(entry.reelId)) {
+            const byTaskId = await CampaignTask.findById(entry.reelId).select('_id contentCategory').lean();
+            if (byTaskId && byTaskId.contentCategory === 'reels') {
+              resolvedTaskId = String(byTaskId._id);
+            } else {
+              // It's a Reel _id — find CampaignTask via SharedReels
+              const shared = await SharedReels.findOne({ googleId: userResponse.googleId, 'reels.reelId': String(entry.reelId) }).lean();
+              const reelEntry = shared?.reels?.find(r => String(r.reelId) === String(entry.reelId));
+              if (reelEntry?.campaignTaskId) resolvedTaskId = String(reelEntry.campaignTaskId);
+            }
+          }
+          if (resolvedTaskId) {
             const { checkAndCompleteReelTask } = require('../utils/reelTaskHelpers');
             const targetCompletion = await checkAndCompleteReelTask(
               userResponse.googleId,
-              entry.reelId,
+              resolvedTaskId,
               campaignId,
               latestViews,
               latestLikes,
@@ -1417,8 +1429,28 @@ exports.submitTask = [
         // Check if reel task target is reached
         const { checkAndCompleteReelTask } = require('../utils/reelTaskHelpers');
         let targetCompletion = null;
-        if (contentCategory === 'reels' && campaignTaskId) {
-          targetCompletion = await checkAndCompleteReelTask(userId, campaignTaskId, campaignId, views, likes, comments);
+        if (contentCategory === 'reels') {
+          // Resolve the CampaignTask id: prefer explicit campaignTaskId, else look up by reelId
+          let taskIdToCheck = campaignTaskId || null;
+          if (!taskIdToCheck && reelId) {
+            // reelId may be a CampaignTask _id directly, or a Reel _id — try CampaignTask first
+            const CampaignTask = require('../models/CampaignTask');
+            const byTaskId = mongoose.Types.ObjectId.isValid(reelId)
+              ? await CampaignTask.findById(reelId).select('_id contentCategory').lean()
+              : null;
+            if (byTaskId && byTaskId.contentCategory === 'reels') {
+              taskIdToCheck = String(byTaskId._id);
+            } else {
+              // reelId is a Reel _id — find the CampaignTask that references this reel via SharedReels
+              const SharedReels = require('../models/SharedReels');
+              const shared = await SharedReels.findOne({ googleId: userId, 'reels.reelId': String(reelId) }).lean();
+              const reelEntry = shared?.reels?.find(r => String(r.reelId) === String(reelId));
+              if (reelEntry?.campaignTaskId) taskIdToCheck = String(reelEntry.campaignTaskId);
+            }
+          }
+          if (taskIdToCheck) {
+            targetCompletion = await checkAndCompleteReelTask(userId, taskIdToCheck, campaignId, views, likes, comments);
+          }
         }
 
         try {
