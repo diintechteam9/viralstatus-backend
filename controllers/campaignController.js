@@ -1120,6 +1120,66 @@ exports.getParticipantCityMap = async (req, res) => {
   }
 };
 
+// City coordinates for major Indian cities
+const CITY_COORDS = {
+  'delhi': { lat: 28.6139, lng: 77.2090 }, 'new delhi': { lat: 28.6139, lng: 77.2090 },
+  'mumbai': { lat: 19.0760, lng: 72.8777 }, 'bangalore': { lat: 12.9716, lng: 77.5946 },
+  'bengaluru': { lat: 12.9716, lng: 77.5946 }, 'hyderabad': { lat: 17.3850, lng: 78.4867 },
+  'chennai': { lat: 13.0827, lng: 80.2707 }, 'kolkata': { lat: 22.5726, lng: 88.3639 },
+  'pune': { lat: 18.5204, lng: 73.8567 }, 'ahmedabad': { lat: 23.0225, lng: 72.5714 },
+  'jaipur': { lat: 26.9124, lng: 75.7873 }, 'lucknow': { lat: 26.8467, lng: 80.9462 },
+  'noida': { lat: 28.5355, lng: 77.3910 }, 'gurugram': { lat: 28.4595, lng: 77.0266 },
+  'gurgaon': { lat: 28.4595, lng: 77.0266 }, 'surat': { lat: 21.1702, lng: 72.8311 },
+  'chandigarh': { lat: 30.7333, lng: 76.7794 }, 'indore': { lat: 22.7196, lng: 75.8577 },
+  'bhopal': { lat: 23.2599, lng: 77.4126 }, 'patna': { lat: 25.5941, lng: 85.1376 },
+  'nagpur': { lat: 21.1458, lng: 79.0882 }, 'vadodara': { lat: 22.3072, lng: 73.1812 },
+  'coimbatore': { lat: 11.0168, lng: 76.9558 }, 'kochi': { lat: 9.9312, lng: 76.2673 },
+  'visakhapatnam': { lat: 17.6868, lng: 83.2185 }, 'agra': { lat: 27.1767, lng: 78.0081 },
+  'varanasi': { lat: 25.3176, lng: 82.9739 }, 'meerut': { lat: 28.9845, lng: 77.7064 },
+  'faridabad': { lat: 28.4089, lng: 77.3178 }, 'ghaziabad': { lat: 28.6692, lng: 77.4538 },
+};
+
+// Get top 10 cities map data for campaign participants
+exports.getParticipantCityMap = async (req, res) => {
+  try {
+    const { campaignId } = req.params;
+
+    const campaign = await Campaign.findById(campaignId).select('userIds').lean();
+    if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
+
+    const userIds = campaign.userIds || [];
+    if (userIds.length === 0) {
+      return res.json({ success: true, cities: [], participantCount: 0, totalCities: 0 });
+    }
+
+    const participants = await MobileUser.find({ googleId: { $in: userIds } })
+      .select('city locationAddress').lean();
+
+    // Count by city
+    const cityCount = {};
+    for (const p of participants) {
+      const city = (p.locationAddress?.city || p.city || '').trim();
+      if (!city) continue;
+      cityCount[city] = (cityCount[city] || 0) + 1;
+    }
+
+    // Top 10 cities with known coordinates
+    const cities = Object.entries(cityCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([city, count]) => {
+        const coords = CITY_COORDS[city.toLowerCase()];
+        return coords ? { city, count, lat: coords.lat, lng: coords.lng } : null;
+      })
+      .filter(Boolean);
+
+    res.json({ success: true, cities, participantCount: participants.length, totalCities: Object.keys(cityCount).length });
+  } catch (err) {
+    console.error('getParticipantCityMap:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 //user dashboard campaign data
 exports.getUserCampaignData = async (req, res) => {
   try {
