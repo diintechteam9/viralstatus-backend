@@ -132,6 +132,8 @@ exports.createTask = async (req, res) => {
     const campaign = await Campaign.findById(campaignId).lean();
     if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
 
+    const parsedDeadline = deadline ? new Date(deadline) : null;
+
     const task = await CampaignTask.create({
       campaignId,
       clientId: clientId || campaign.clientId,
@@ -142,7 +144,7 @@ exports.createTask = async (req, res) => {
       targetLikes: contentCategory === 'reels' ? (Number(targetLikes) || 0) : 0,
       targetComments: contentCategory === 'reels' ? (Number(targetComments) || 0) : 0,
       credits,
-      proofRequired, status, deadline, order,
+      proofRequired, status, deadline: parsedDeadline, order,
       visibility: visibility || 'private',
       contentCategory: contentCategory || 'post',
       appName: appName || '',
@@ -708,6 +710,7 @@ exports.updateTask = async (req, res) => {
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];
     }
+    if (update.deadline) update.deadline = new Date(update.deadline);
     // post category ke liye targetUrl aur targetCount ignore
     const existingTask = await CampaignTask.findById(taskId).lean();
     if (existingTask?.contentCategory === 'post') {

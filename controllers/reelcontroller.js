@@ -1131,8 +1131,8 @@ async function syncCampaignResponseStats(campaignId) {
           // entry.reelId may be a CampaignTask _id or a Reel _id — resolve correctly
           let resolvedTaskId = null;
           if (mongoose.Types.ObjectId.isValid(entry.reelId)) {
-            const byTaskId = await CampaignTask.findById(entry.reelId).select('_id contentCategory').lean();
-            if (byTaskId && byTaskId.contentCategory === 'reels') {
+            const byTaskId = await CampaignTask.findById(entry.reelId).select('_id').lean();
+            if (byTaskId) {
               resolvedTaskId = String(byTaskId._id);
             } else {
               // It's a Reel _id — find CampaignTask via SharedReels
@@ -1433,23 +1433,13 @@ exports.submitTask = [
         const { checkAndCompleteReelTask } = require('../utils/reelTaskHelpers');
         let targetCompletion = null;
         if (contentCategory === 'reels') {
-          // Resolve the CampaignTask id: prefer explicit campaignTaskId, else look up by reelId
+          // Prefer explicit campaignTaskId; fallback: look up via SharedReels
           let taskIdToCheck = campaignTaskId || null;
           if (!taskIdToCheck && reelId) {
-            // reelId may be a CampaignTask _id directly, or a Reel _id — try CampaignTask first
-            const CampaignTask = require('../models/CampaignTask');
-            const byTaskId = mongoose.Types.ObjectId.isValid(reelId)
-              ? await CampaignTask.findById(reelId).select('_id contentCategory').lean()
-              : null;
-            if (byTaskId && byTaskId.contentCategory === 'reels') {
-              taskIdToCheck = String(byTaskId._id);
-            } else {
-              // reelId is a Reel _id — find the CampaignTask that references this reel via SharedReels
-              const SharedReels = require('../models/SharedReels');
-              const shared = await SharedReels.findOne({ googleId: userId, 'reels.reelId': String(reelId) }).lean();
-              const reelEntry = shared?.reels?.find(r => String(r.reelId) === String(reelId));
-              if (reelEntry?.campaignTaskId) taskIdToCheck = String(reelEntry.campaignTaskId);
-            }
+            const SharedReels = require('../models/SharedReels');
+            const shared = await SharedReels.findOne({ googleId: userId, 'reels.reelId': String(reelId) }).lean();
+            const reelEntry = shared?.reels?.find(r => String(r.reelId) === String(reelId));
+            if (reelEntry?.campaignTaskId) taskIdToCheck = String(reelEntry.campaignTaskId);
           }
           if (taskIdToCheck) {
             targetCompletion = await checkAndCompleteReelTask(userId, taskIdToCheck, campaignId, views, likes, comments);

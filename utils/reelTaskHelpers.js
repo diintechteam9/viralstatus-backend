@@ -5,7 +5,7 @@ const TransactionHistory = require('../models/TransactionHistory');
 
 async function checkAndCompleteReelTask(userId, campaignTaskId, campaignId, views, likes, comments) {
   const task = await CampaignTask.findById(campaignTaskId).lean();
-  if (!task || task.contentCategory !== 'reels') return null;
+  if (!task) return null;
 
   const targetViews    = task.targetViews    || 0;
   const targetLikes    = task.targetLikes    || 0;
