@@ -1160,46 +1160,60 @@ async function syncCampaignResponseStats(campaignId) {
           }
         }
 
-        // Campaign-level cutoff check fallback
-        if (!completedViaTaskTarget && entry.cutoff > 0 && latestViews >= entry.cutoff && !entry.isCreditAccepted) {
-          entry.isCreditAccepted = true;
-          entry.status = 'approved';
-          approvedEntries.push({ url: entry.urls, views: latestViews });
-
-          // Sync completion status to SharedReels
-          try {
-            await syncSharedReelSubmission(userResponse.googleId, entry.reelId, campaignId, 'approve');
-          } catch (syncErr) {
-            console.error('[syncCampaignResponseStats] SharedReels sync failed:', syncErr.message);
+        // Campaign-level cutoff check fallback — also check task-level cutoffViews
+        if (!completedViaTaskTarget && !entry.isCreditAccepted) {
+          let taskCutoff = 0;
+          if (entry.reelId && mongoose.Types.ObjectId.isValid(entry.reelId)) {
+            const CampaignTask = require('../models/CampaignTask');
+            const ct = await CampaignTask.findById(entry.reelId).select('cutoffViews targetViews').lean()
+              || (await (async () => {
+                const shared = await SharedReels.findOne({ googleId: userResponse.googleId, 'reels.reelId': String(entry.reelId) }).lean();
+                const re = shared?.reels?.find(r => String(r.reelId) === String(entry.reelId));
+                return re?.campaignTaskId ? CampaignTask.findById(re.campaignTaskId).select('cutoffViews targetViews').lean() : null;
+              })());
+            taskCutoff = ct?.cutoffViews || ct?.targetViews || 0;
           }
+          const cutoffToUse = taskCutoff > 0 ? taskCutoff : (entry.cutoff || 0);
+          if (cutoffToUse > 0 && latestViews >= cutoffToUse) {
+            entry.isCreditAccepted = true;
+            entry.status = 'approved';
+            approvedEntries.push({ url: entry.urls, views: latestViews });
 
-          // Write earning to wallet + transaction history
-          try {
-            const creditAmount = entry.creditAmount || 0;
-            if (creditAmount > 0) {
-              const wallet = await CreditWallet.findOneAndUpdate(
-                { userId: userResponse.googleId },
-                { $inc: { totalBalance: creditAmount, acceptedCredits: creditAmount } },
-                { new: true, upsert: true }
-              );
-              await TransactionHistory.create({
-                userId: userResponse.googleId,
-                type: 'campaign_reward',
-                amount: creditAmount,
-                description: `Task completed: views target reached (${latestViews} views)`,
-                referenceType: 'campaign',
-                referenceId: String(entry.campaignId),
-                status: 'completed',
-                meta: {
-                  campaignId: String(entry.campaignId),
-                  taskId: String(entry.reelId || ''),
-                  reason: `Views cutoff reached: ${latestViews}/${entry.cutoff}`,
-                },
-                balanceAfter: wallet.totalBalance,
-              });
+            // Sync completion status to SharedReels
+            try {
+              await syncSharedReelSubmission(userResponse.googleId, entry.reelId, campaignId, 'approve');
+            } catch (syncErr) {
+              console.error('[syncCampaignResponseStats] SharedReels sync failed:', syncErr.message);
             }
-          } catch (creditErr) {
-            console.error('[syncCampaignResponseStats] credit write failed:', creditErr.message);
+
+            // Write earning to wallet + transaction history
+            try {
+              const creditAmount = entry.creditAmount || 0;
+              if (creditAmount > 0) {
+                const wallet = await CreditWallet.findOneAndUpdate(
+                  { userId: userResponse.googleId },
+                  { $inc: { totalBalance: creditAmount, acceptedCredits: creditAmount } },
+                  { new: true, upsert: true }
+                );
+                await TransactionHistory.create({
+                  userId: userResponse.googleId,
+                  type: 'campaign_reward',
+                  amount: creditAmount,
+                  description: `Task completed: views target reached (${latestViews} views)`,
+                  referenceType: 'campaign',
+                  referenceId: String(entry.campaignId),
+                  status: 'completed',
+                  meta: {
+                    campaignId: String(entry.campaignId),
+                    taskId: String(entry.reelId || ''),
+                    reason: `Views cutoff reached: ${latestViews}/${entry.cutoff}`,
+                  },
+                  balanceAfter: wallet.totalBalance,
+                });
+              }
+            } catch (creditErr) {
+              console.error('[syncCampaignResponseStats] credit write failed:', creditErr.message);
+            }
           }
         }
 
