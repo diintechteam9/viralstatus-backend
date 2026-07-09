@@ -32,6 +32,8 @@ const campaignTaskSchema = new mongoose.Schema({
   targetViews: { type: Number, default: 0 },
   targetLikes: { type: Number, default: 0 },
   targetComments: { type: Number, default: 0 },
+  targetChannels: { type: String, default: '' },
+  cutoffViews:    { type: Number, default: 0 },
   credits:     { type: Number, required: true },
 
   // App Review specific

@@ -869,6 +869,8 @@ exports.getSharedReelsForUser = async (req, res) => {
         targetViews: campaignTask?.targetViews || r.targetViews || 0,
         targetLikes: campaignTask?.targetLikes || r.targetLikes || 0,
         targetComments: campaignTask?.targetComments || r.targetComments || 0,
+        targetChannels: campaignTask?.targetChannels || r.targetChannels || '',
+        cutoffViews: campaignTask?.cutoffViews || r.cutoffViews || 0,
 
         // ─── Task Status ─────────────────────────────────────────────
         TaskStatus: r.TaskStatus || 'assigned',
@@ -1352,8 +1354,16 @@ exports.submitTask = [
         const campaign = await Campaign.findById(campaignId);
         if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
 
-        const creditAmount = campaign.credits || 0;
-        const cutoff = campaign.cutoff || 0;
+        let creditAmount = campaign.credits || 0;
+        let cutoff = campaign.cutoff || 0;
+        if (campaignTaskId) {
+          const CampaignTask = require('../models/CampaignTask');
+          const task = await CampaignTask.findById(campaignTaskId).lean();
+          if (task) {
+            if (task.credits !== undefined && task.credits !== null) creditAmount = task.credits;
+            if (task.cutoffViews !== undefined && task.cutoffViews !== null) cutoff = task.cutoffViews;
+          }
+        }
         let views = 0, likes = 0, comments = 0;
         try {
           const stats = await getPostStats(url);

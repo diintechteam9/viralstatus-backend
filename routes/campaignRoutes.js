@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const campaignController = require('../controllers/campaignController');
 const { authenticate, authorize } = require('../middleware/authenticate');
+const Campaign = require('../models/campaign');
 
 // Create campaign — client only
 router.post('/', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.createCampaign);
@@ -41,8 +42,8 @@ router.get('/videos/:campaignId', campaignController.getCampaignResponseUrls);
 router.get('/response/data/:userId', campaignController.getUserDashboardStats);
 router.get('/response/campaign/data/:userId', campaignController.getUserCampaignData);
 
-// GeoJSON map data (BEFORE generic :campaignId routes)
-router.get('/:campaignId/geojson', campaignController.getParticipantGeoJSON);
+// City map data (BEFORE generic :campaignId routes)
+router.get('/:campaignId/citymap', campaignController.getParticipantCityMap);
 
 // Location-based participant filtering (BEFORE generic :campaignId routes)
 router.get('/:campaignId/location/stats', campaignController.getParticipantLocationStats);
@@ -57,7 +58,6 @@ router.delete('/:campaignId', authenticate, authorize('client', 'admin', 'super_
 // Get campaign by ID
 router.get('/:campaignId', async (req, res) => {
   try {
-    const Campaign = require('../models/campaign');
     const campaign = await Campaign.findOne({ _id: req.params.campaignId });
     if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
     res.json({ success: true, campaign });

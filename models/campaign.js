@@ -57,11 +57,23 @@ const campaignSchema = new mongoose.Schema({
   },
   startDate: {
     type: Date,
-    required: true
+    required: true,
+    validate: {
+      validator: function(val) {
+        return val instanceof Date && !isNaN(val);
+      },
+      message: 'Invalid start date'
+    }
   },
   endDate: {
     type: Date,
-    required: true
+    required: true,
+    validate: {
+      validator: function(val) {
+        return val instanceof Date && !isNaN(val) && val > this.startDate;
+      },
+      message: 'End date must be after start date'
+    }
   },
   tags: {
     type: [String],
@@ -69,15 +81,18 @@ const campaignSchema = new mongoose.Schema({
   },
   limit: {
     type: Number,
-    required: true
+    required: false,
+    default: 0
   },
   views:{
     type: String,
-    required: true
+    required: false,
+    default: '0'
   },
   credits:{
     type: Number,
-    required:true
+    required: false,
+    default: 0
   },
   location:{
     type: String,
@@ -97,7 +112,8 @@ const campaignSchema = new mongoose.Schema({
   },
   cutoff:{
     type: Number,
-    required: true
+    required: false,
+    default: 0
   },
   category: {
     type: String,
@@ -109,15 +125,33 @@ const campaignSchema = new mongoose.Schema({
   },
   cancellationPenalty: {
     type: Number,
-    default: 2
+    default: 2,
+    validate: {
+      validator: function(val) {
+        return val >= 0;
+      },
+      message: 'Cancellation penalty must be non-negative'
+    }
   },
   penaltyThresholdMinutes: {
     type: Number,
-    default: 10
+    default: 10,
+    validate: {
+      validator: function(val) {
+        return val > 0;
+      },
+      message: 'Penalty threshold must be greater than 0'
+    }
   },
   dailyTaskAcceptLimit: {
     type: Number,
-    default: 3
+    default: 3,
+    validate: {
+      validator: function(val) {
+        return val > 0;
+      },
+      message: 'Daily task accept limit must be greater than 0'
+    }
   },
   allowCancellation: {
     type: Boolean,

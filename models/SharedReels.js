@@ -94,6 +94,8 @@ const sharedReelsSchema = new mongoose.Schema({
       targetViews: { type: Number, default: 0 },
       targetLikes: { type: Number, default: 0 },
       targetComments: { type: Number, default: 0 },
+      targetChannels: { type: String, default: '' },
+      cutoffViews: { type: Number, default: 0 },
       currentViews: { type: Number, default: 0 },
       currentLikes: { type: Number, default: 0 },
       currentComments: { type: Number, default: 0 },

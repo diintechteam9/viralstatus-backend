@@ -94,6 +94,8 @@ async function assignCampaignTaskToUsers(task, userIds, assignmentScope, campaig
             minRating: task.minRating || '',
             script: task.script || '',
             referenceVideoUrl: task.referenceVideoUrl || '',
+            targetChannels: task.targetChannels || '',
+            cutoffViews: task.cutoffViews || 0,
             isTaskComplete: false,
             isTaskAccepted: false,
             TaskStatus: 'assigned',
@@ -120,6 +122,7 @@ exports.createTask = async (req, res) => {
       contentCategory,
       appName, businessName, minRating, script, referenceVideoUrl,
       targetViews, targetLikes, targetComments,
+      targetChannels, cutoffViews,
     } = req.body;
 
     if (!campaignId || !title || !platform || !taskType || credits === undefined) {
@@ -135,9 +138,9 @@ exports.createTask = async (req, res) => {
       title, description, platform, taskType,
       targetCount: contentCategory === 'post' ? 0 : targetCount,
       targetUrl: contentCategory === 'post' ? '' : (req.body.targetUrl || ''),
-      targetViews: contentCategory === 'reels' ? (targetViews || 0) : 0,
-      targetLikes: contentCategory === 'reels' ? (targetLikes || 0) : 0,
-      targetComments: contentCategory === 'reels' ? (targetComments || 0) : 0,
+      targetViews: contentCategory === 'reels' ? (Number(targetViews) || 0) : 0,
+      targetLikes: contentCategory === 'reels' ? (Number(targetLikes) || 0) : 0,
+      targetComments: contentCategory === 'reels' ? (Number(targetComments) || 0) : 0,
       credits,
       proofRequired, status, deadline, order,
       visibility: visibility || 'private',
@@ -147,6 +150,8 @@ exports.createTask = async (req, res) => {
       minRating: minRating || '5',
       script: script || '',
       referenceVideoUrl: referenceVideoUrl || '',
+      targetChannels: targetChannels || '',
+      cutoffViews: contentCategory === 'reels' ? (Number(cutoffViews) || 0) : 0,
     });
 
     res.status(201).json({ success: true, task });
@@ -698,7 +703,7 @@ exports.getPublicSubmissions = async (req, res) => {
 exports.updateTask = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const allowed = ['title','description','platform','taskType','targetUrl','targetCount','credits','proofRequired','status','deadline','order','visibility','contentCategory','appName','businessName','minRating','script','referenceVideoUrl'];
+    const allowed = ['title','description','platform','taskType','targetUrl','targetCount','credits','proofRequired','status','deadline','order','visibility','contentCategory','appName','businessName','minRating','script','referenceVideoUrl', 'targetViews', 'targetLikes', 'targetComments', 'targetChannels', 'cutoffViews'];
     const update = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];

@@ -77,6 +77,7 @@ const mobileUserSchema = new mongoose.Schema({
   lastLoginAt: { type: Date, default: Date.now },
 });
 
+mobileUserSchema.index({ googleId: 1 }, { sparse: true });
 mobileUserSchema.index({ 'location.latitude': 1, 'location.longitude': 1 });
 
 mobileUserSchema.index({ email: 1, clientId: 1 }, { unique: true });

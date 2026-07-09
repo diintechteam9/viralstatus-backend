@@ -15,6 +15,10 @@ const TelegramSettings = require('../models/Settings');
 const telegramAlerts = require('../utils/telegramAlerts');
 const { parseSupportedTaskTypes } = require('../utils/campaignTaskTypes');
 const { resolveOneUserProfile } = require('../utils/resolveUserProfiles');
+const locationService = require('../services/locationFilterService');
+const geoJsonService = require('../services/geoJsonService');
+const MobileUser = require('../models/MobileUser');
+const SharedReels = require('../models/SharedReels');
 
 /** Normalize client id for Campaign.clientId (MongoDB Client _id as string, or legacy). */
 async function resolveCampaignClientStorageId(raw) {
@@ -39,6 +43,13 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function validateDateRange(startDate, endDate) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (isNaN(start) || isNaN(end)) return false;
+  return start < end;
+}
+
 function formatCampaignStartMessage(c) {
   const start = c.startDate ? new Date(c.startDate).toLocaleString('en-US') : '-';
   const end = c.endDate ? new Date(c.endDate).toLocaleString('en-US') : '-';
@@ -51,28 +62,20 @@ function formatCampaignStartMessage(c) {
     `\n<b>Name:</b> ${escapeHtml(c.campaignName)}`,
     `<b>Brand:</b> ${escapeHtml(c.brandName)}`,
     `<b>Goal:</b> ${escapeHtml(c.goal)}`,
-    // `<b>Client ID:</b> ${escapeHtml(c.clientId)}`,
     `<b>Status:</b> ${escapeHtml(c.status || '-')}`,
     `<b>Created At:</b> ${createdAt}`,
     `<b>Start:</b> ${start}`,
     `<b>End:</b> ${end}`,
-    `<b>Credits:</b> ${escapeHtml(c.credits !== undefined ? c.credits : '-')}`,
-    `<b>Target Channels:</b> ${escapeHtml(c.limit !== undefined ? c.limit : '-')}`,
-    `<b>Target Views:</b> ${escapeHtml(c.views !== undefined ? c.views : '-')}`,
-    `<b>Cutoff:</b> ${escapeHtml(c.cutoff !== undefined ? c.cutoff : '-')}`,
+    `<b>Credits:</b> ${String(c.credits !== undefined ? c.credits : '-')}`,
+    `<b>Target Channels:</b> ${String(c.limit !== undefined ? c.limit : '-')}`,
+    `<b>Target Views:</b> ${String(c.views !== undefined ? c.views : '-')}`,
+    `<b>Cutoff:</b> ${String(c.cutoff !== undefined ? c.cutoff : '-')}`,
     `<b>Location:</b> ${escapeHtml(c.location || '-')}`,
     `<b>Tags:</b> ${tags}`,
-    // `<b>Group IDs:</b> ${groupIds}`,
-    `<b>Active Participants:</b> ${escapeHtml(members)}`,
+    `<b>Active Participants:</b> ${String(members)}`,
     `<b>Description:</b> ${escapeHtml(c.description || '-')}`,
     `<b>Terms & Conditions:</b> ${escapeHtml(c.tNc || '-')}`,
   ];
-  // if (c.image?.key) {
-  //   lines.push(`<b>Image Key:</b> ${escapeHtml(c.image.key)}`);
-  // }
-  // if (c.image?.url) {
-  //   lines.push(`<b>Image URL:</b> ${escapeHtml(c.image.url)}`);
-  // }
   return lines.join('\n');
 }
 
@@ -93,25 +96,33 @@ function generateCampaignId(name) {
 
 // Activate campaigns whose window has started and not yet ended, and status is not 'Inactive'
 async function activateCurrentCampaigns() {
-  const now = new Date();
-  await Campaign.updateMany(
-    {
-      isActive: false,
-      status: { $ne: 'Inactive' },
-      startDate: { $lte: now },
-      endDate: { $gte: now },
-    },
-    { isActive: true }
-  );
+  try {
+    const now = new Date();
+    await Campaign.updateMany(
+      {
+        isActive: false,
+        status: { $ne: 'Inactive' },
+        startDate: { $lte: now },
+        endDate: { $gte: now },
+      },
+      { isActive: true }
+    );
+  } catch (err) {
+    console.error('Error activating campaigns:', err);
+  }
 }
 
 // Deactivate campaigns whose endDate has passed
 async function deactivateExpiredCampaigns() {
-  const now = new Date();
-  await Campaign.updateMany(
-    { isActive: true, endDate: { $lt: now } },
-    { isActive: false }
-  );
+  try {
+    const now = new Date();
+    await Campaign.updateMany(
+      { isActive: true, endDate: { $lt: now } },
+      { isActive: false }
+    );
+  } catch (err) {
+    console.error('Error deactivating campaigns:', err);
+  }
 }
 
 // Add multer file filter for images only
@@ -154,8 +165,12 @@ exports.createCampaign = [
       const normalizedClientId = await resolveCampaignClientStorageId(rawClientId);
 
       const mainImageFile = req.files?.image?.[0];
-      if (!campaignName || !brandName || !goal || !normalizedClientId || !mainImageFile || !description || !startDate || !endDate || !limit || !views || !credits || !location) {
+      if (!campaignName || !brandName || !goal || !normalizedClientId || !mainImageFile || !description || !startDate || !endDate || !location) {
         return res.status(400).json({ success: false, message: 'Missing required fields' });
+      }
+      
+      if (!validateDateRange(startDate, endDate)) {
+        return res.status(400).json({ success: false, message: 'End date must be after start date' });
       }
 
       const campaignId = generateCampaignId(campaignName);
@@ -357,6 +372,10 @@ exports.updateCampaign = [
     const existing = await Campaign.findById(campaignId);
     if (!existing) return res.status(404).json({ success: false, message: 'Campaign not found' });
 
+    if (updateData.startDate && updateData.endDate && !validateDateRange(updateData.startDate, updateData.endDate)) {
+      return res.status(400).json({ success: false, message: 'End date must be after start date' });
+    }
+
     // Upload main image if provided
     const mainImageFile = req.files?.image?.[0];
     if (mainImageFile) {
@@ -541,15 +560,23 @@ exports.getUserRegisteredCampaigns = async (req, res) => {
     const active = [];
     const expired = [];
     for (const entry of reg.registeredCampaigns) {
-      const storedId = entry?.campaign?._id?.toString?.();
-      const fresh = storedId ? idToCampaign.get(storedId) : null;
-      const campaignObj = fresh || entry.campaign || null;
-      if (campaignObj && campaignObj.image && campaignObj.image.key) {
-        campaignObj.image.url = await getobject(campaignObj.image.key);
+      try {
+        const storedId = entry?.campaign?._id?.toString?.();
+        const fresh = storedId ? idToCampaign.get(storedId) : null;
+        const campaignObj = fresh || entry.campaign || null;
+        if (campaignObj && campaignObj.image && campaignObj.image.key) {
+          try {
+            campaignObj.image.url = await getobject(campaignObj.image.key);
+          } catch (imgErr) {
+            console.debug('Failed to get image URL:', imgErr.message);
+          }
+        }
+        const isActive = computeIsActive(campaignObj);
+        const item = { campaign: campaignObj, registeredAt: entry.registeredAt };
+        if (isActive) active.push(item); else expired.push(item);
+      } catch (entryErr) {
+        console.error('Error processing campaign entry:', entryErr);
       }
-      const isActive = computeIsActive(campaignObj);
-      const item = { campaign: campaignObj, registeredAt: entry.registeredAt };
-      if (isActive) active.push(item); else expired.push(item);
     }
 
     res.json({ success: true, active, expired });
@@ -776,10 +803,6 @@ exports.getUserDashboardStats = async (req, res) => {
   const { userId } = req.params; // userId is googleId
   try {
     // 1. Registered Campaigns
-    const RegisteredCampaign = require('../models/RegisteredCampaign');
-    const SharedReels = require('../models/SharedReels');
-    const userResponse = require('../models/userResponse');
-
     // Get totalCampaigns
     const regDoc = await RegisteredCampaign.findOne({ userId });
     const totalCampaigns = regDoc && Array.isArray(regDoc.registeredCampaigns) ? regDoc.registeredCampaigns.length : 0;
@@ -847,8 +870,6 @@ exports.getParticipantsWithLocationFilters = async (req, res) => {
       });
     }
 
-    const locationService = require('../services/locationFilterService');
-
     // Build filter object
     const filters = {};
     if (pincode) filters.pincode = pincode;
@@ -901,7 +922,6 @@ exports.getParticipantLocationStats = async (req, res) => {
     }
 
     const userIds = campaign.userIds || [];
-    const locationService = require('../services/locationFilterService');
     const stats = await locationService.getLocationStats(userIds);
 
     res.json({
@@ -915,12 +935,31 @@ exports.getParticipantLocationStats = async (req, res) => {
   }
 };
 
-// Get GeoJSON map data for campaign participants
-exports.getParticipantGeoJSON = async (req, res) => {
+const CITY_COORDINATES = {
+  'delhi': { lat: 28.6139, lng: 77.2090 },
+  'mumbai': { lat: 19.0760, lng: 72.8777 },
+  'bangalore': { lat: 12.9716, lng: 77.5946 },
+  'hyderabad': { lat: 17.3850, lng: 78.4867 },
+  'chennai': { lat: 13.0827, lng: 80.2707 },
+  'kolkata': { lat: 22.5726, lng: 88.3639 },
+  'pune': { lat: 18.5204, lng: 73.8567 },
+  'ahmedabad': { lat: 23.0225, lng: 72.5714 },
+  'jaipur': { lat: 26.9124, lng: 75.7873 },
+  'lucknow': { lat: 26.8467, lng: 80.9462 },
+  'noida': { lat: 28.5355, lng: 77.3910 },
+  'gurugram': { lat: 28.4595, lng: 77.0266 },
+  'surat': { lat: 21.1702, lng: 72.8311 },
+  'chandigarh': { lat: 30.7333, lng: 76.7794 },
+  'indore': { lat: 22.7196, lng: 75.8577 }
+};
+
+// Get lightweight city map data for campaign participants
+exports.getParticipantCityMap = async (req, res) => {
   try {
     const { campaignId } = req.params;
+    const mongoose = require('mongoose');
 
-    const campaign = await Campaign.findById(campaignId);
+    const campaign = await Campaign.findById(campaignId).select('userIds').lean();
     if (!campaign) {
       return res.status(404).json({ success: false, message: 'Campaign not found' });
     }
@@ -929,48 +968,154 @@ exports.getParticipantGeoJSON = async (req, res) => {
     if (userIds.length === 0) {
       return res.json({
         success: true,
-        type: 'FeatureCollection',
-        features: [],
-        bounds: null,
-        center: null
+        cities: [],
+        participantCount: 0,
+        totalCities: 0
       });
     }
 
-    const geoJsonService = require('../services/geoJsonService');
-    const MobileUser = require('../models/MobileUser');
-
-    // Get all participants with location data
-    const participants = await MobileUser.find({ googleId: { $in: userIds } }).lean();
-    const pincodes = participants
-      .map(p => p.pincode)
-      .filter(Boolean);
-
-    if (pincodes.length === 0) {
-      return res.json({
-        success: true,
-        type: 'FeatureCollection',
-        features: [],
-        bounds: null,
-        center: null
-      });
+    // Convert any valid ObjectId strings to ObjectId types for MongoDB matching
+    const objectIds = [];
+    for (const id of userIds) {
+      if (typeof id === 'string' && /^[a-f0-9]{24}$/i.test(id)) {
+        objectIds.push(new mongoose.Types.ObjectId(id));
+      }
     }
 
-    // Get GeoJSON features for these pincodes
-    const features = await geoJsonService.getFeaturesByPincodes(pincodes);
-    const bounds = await geoJsonService.getBoundsForPincodes(pincodes);
-    const center = await geoJsonService.getCenterForPincodes(pincodes);
+    // Fast count queries using indexed googleId and _id
+    const participantCount = await MobileUser.countDocuments({
+      $or: [
+        { googleId: { $in: userIds } },
+        { _id: { $in: objectIds } }
+      ]
+    });
+
+    // Use MongoDB aggregation pipeline for high-performance grouping
+    const results = await MobileUser.aggregate([
+      {
+        $match: {
+          $or: [
+            { googleId: { $in: userIds } },
+            { _id: { $in: objectIds } }
+          ]
+        }
+      },
+      {
+        $project: {
+          city: { $ifNull: [ "$locationAddress.city", "$city" ] },
+          lat: "$location.latitude",
+          lng: "$location.longitude"
+        }
+      },
+      {
+        $group: {
+          _id: "$city",
+          count: { $sum: 1 },
+          lat: { $first: "$lat" },
+          lng: { $first: "$lng" }
+        }
+      }
+    ]);
+
+    const cityCounts = {};
+    for (const r of results) {
+      let city = r._id;
+      if (!city) continue;
+      city = city.trim();
+      if (!city) continue;
+
+      const lowerCity = city.toLowerCase();
+      let canonicalCity = city;
+      let latLng = null;
+
+      // Group & normalize coordinates based on major Indian cities
+      if (lowerCity.includes('delhi')) {
+        canonicalCity = 'Delhi';
+        latLng = CITY_COORDINATES['delhi'];
+      } else if (lowerCity.includes('mumbai') || lowerCity.includes('bombay')) {
+        canonicalCity = 'Mumbai';
+        latLng = CITY_COORDINATES['mumbai'];
+      } else if (lowerCity.includes('bangalore') || lowerCity.includes('bengaluru')) {
+        canonicalCity = 'Bangalore';
+        latLng = CITY_COORDINATES['bangalore'];
+      } else if (lowerCity.includes('hyderabad')) {
+        canonicalCity = 'Hyderabad';
+        latLng = CITY_COORDINATES['hyderabad'];
+      } else if (lowerCity.includes('chennai') || lowerCity.includes('madras')) {
+        canonicalCity = 'Chennai';
+        latLng = CITY_COORDINATES['chennai'];
+      } else if (lowerCity.includes('kolkata') || lowerCity.includes('calcutta')) {
+        canonicalCity = 'Kolkata';
+        latLng = CITY_COORDINATES['kolkata'];
+      } else if (lowerCity.includes('pune')) {
+        canonicalCity = 'Pune';
+        latLng = CITY_COORDINATES['pune'];
+      } else if (lowerCity.includes('ahmedabad')) {
+        canonicalCity = 'Ahmedabad';
+        latLng = CITY_COORDINATES['ahmedabad'];
+      } else if (lowerCity.includes('jaipur')) {
+        canonicalCity = 'Jaipur';
+        latLng = CITY_COORDINATES['jaipur'];
+      } else if (lowerCity.includes('lucknow')) {
+        canonicalCity = 'Lucknow';
+        latLng = CITY_COORDINATES['lucknow'];
+      } else if (lowerCity.includes('noida')) {
+        canonicalCity = 'Noida';
+        latLng = CITY_COORDINATES['noida'];
+      } else if (lowerCity.includes('gurugram') || lowerCity.includes('gurgaon')) {
+        canonicalCity = 'Gurugram';
+        latLng = CITY_COORDINATES['gurugram'];
+      } else if (lowerCity.includes('surat')) {
+        canonicalCity = 'Surat';
+        latLng = CITY_COORDINATES['surat'];
+      } else if (lowerCity.includes('chandigarh')) {
+        canonicalCity = 'Chandigarh';
+        latLng = CITY_COORDINATES['chandigarh'];
+      } else if (lowerCity.includes('indore')) {
+        canonicalCity = 'Indore';
+        latLng = CITY_COORDINATES['indore'];
+      } else {
+        // Fallback for other cities: convert to Title Case
+        canonicalCity = city.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+        if (typeof r.lat === 'number' && typeof r.lng === 'number') {
+          latLng = { lat: r.lat, lng: r.lng };
+        }
+      }
+
+      if (!cityCounts[canonicalCity]) {
+        cityCounts[canonicalCity] = {
+          city: canonicalCity,
+          count: 0,
+          lat: latLng ? latLng.lat : null,
+          lng: latLng ? latLng.lng : null
+        };
+      } else if (!cityCounts[canonicalCity].lat && latLng) {
+        cityCounts[canonicalCity].lat = latLng.lat;
+        cityCounts[canonicalCity].lng = latLng.lng;
+      }
+      cityCounts[canonicalCity].count += r.count;
+    }
+
+    const cityList = Object.values(cityCounts);
+    const totalCities = cityList.length;
+
+    // Filter out cities that do not have valid coordinates to prevent frontend Leaflet errors
+    const citiesWithCoords = cityList.filter(c => c.lat !== null && c.lng !== null);
+
+    // Sort descending by participant count
+    citiesWithCoords.sort((a, b) => b.count - a.count);
+
+    // Take top 10 cities
+    const topCities = citiesWithCoords.slice(0, 10);
 
     res.json({
       success: true,
-      type: 'FeatureCollection',
-      features,
-      bounds,
-      center,
-      participantCount: participants.length,
-      uniquePincodes: pincodes.length
+      cities: topCities,
+      participantCount,
+      totalCities
     });
   } catch (err) {
-    console.error('getParticipantGeoJSON:', err);
+    console.error('getParticipantCityMap error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -997,32 +1142,42 @@ exports.getUserCampaignData = async (req, res) => {
 
     // Prepare campaign data only for registered campaign objects
     let campaigns = await Promise.all(regDoc.registeredCampaigns.map(async (entry) => {
-      // entry: { campaign, registeredAt }
-      const camp = entry.campaign;
-      const campaignId = camp?._id?.toString?.() || camp?._id || camp?.campaignId;
-      const campaignName = camp?.campaignName || '';
-      const key = camp?.image?.key || '';
-      const url = key ? await getobject(key) : '';
-      // Aggregate stats for this campaign from userResponses
-      let totalViews = 0, totalLikes = 0, totalComments = 0;
-      for (const resp of userResponses) {
-        if (String(resp.campaignId) === String(campaignId)) {
-          totalViews += resp.views || 0;
-          totalLikes += resp.likes || 0;
-          totalComments += resp.comments || 0;
+      try {
+        // entry: { campaign, registeredAt }
+        const camp = entry.campaign;
+        const campaignId = camp?._id?.toString?.() || camp?._id || camp?.campaignId;
+        const campaignName = camp?.campaignName || '';
+        const key = camp?.image?.key || '';
+        let url = '';
+        try {
+          url = key ? await getobject(key) : '';
+        } catch (imgErr) {
+          console.debug('Failed to get image URL:', imgErr.message);
         }
+        // Aggregate stats for this campaign from userResponses
+        let totalViews = 0, totalLikes = 0, totalComments = 0;
+        for (const resp of userResponses) {
+          if (String(resp.campaignId) === String(campaignId)) {
+            totalViews += resp.views || 0;
+            totalLikes += resp.likes || 0;
+            totalComments += resp.comments || 0;
+          }
+        }
+        return (campaignId && campaignName) ? {
+          campaignId,
+          campaignName,
+          key,
+          url,
+          isActive: camp?.isActive,
+          registeredAt: entry.registeredAt,
+          views: totalViews,
+          likes: totalLikes,
+          comments: totalComments
+        } : null;
+      } catch (err) {
+        console.error('Error processing campaign:', err);
+        return null;
       }
-      return (campaignId && campaignName) ? {
-        campaignId,
-        campaignName,
-        key,
-        url,
-        isActive: camp?.isActive,
-        registeredAt: entry.registeredAt,
-        views: totalViews,
-        likes: totalLikes,
-        comments: totalComments
-      } : null;
     }));
     // Filter out nulls (invalid campaigns)
     campaigns = campaigns.filter(c => c);
