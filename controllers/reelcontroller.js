@@ -1121,10 +1121,42 @@ async function syncCampaignResponseStats(campaignId) {
         }
         updated = true;
 
-        if (entry.cutoff > 0 && latestViews >= entry.cutoff && !entry.isCreditAccepted) {
+        // Task-level targets check (reels specific task check)
+        let completedViaTaskTarget = false;
+        if (entry.reelId && !entry.isCreditAccepted) {
+          const CampaignTask = require('../models/CampaignTask');
+          const task = await CampaignTask.findById(entry.reelId).lean();
+          if (task && task.contentCategory === 'reels') {
+            const { checkAndCompleteReelTask } = require('../utils/reelTaskHelpers');
+            const targetCompletion = await checkAndCompleteReelTask(
+              userResponse.googleId,
+              entry.reelId,
+              campaignId,
+              latestViews,
+              latestLikes,
+              latestComments
+            );
+            if (targetCompletion?.completed) {
+              entry.isCreditAccepted = true;
+              entry.status = 'approved';
+              approvedEntries.push({ url: entry.urls, views: latestViews });
+              completedViaTaskTarget = true;
+            }
+          }
+        }
+
+        // Campaign-level cutoff check fallback
+        if (!completedViaTaskTarget && entry.cutoff > 0 && latestViews >= entry.cutoff && !entry.isCreditAccepted) {
           entry.isCreditAccepted = true;
           entry.status = 'approved';
           approvedEntries.push({ url: entry.urls, views: latestViews });
+
+          // Sync completion status to SharedReels
+          try {
+            await syncSharedReelSubmission(userResponse.googleId, entry.reelId, campaignId, 'approve');
+          } catch (syncErr) {
+            console.error('[syncCampaignResponseStats] SharedReels sync failed:', syncErr.message);
+          }
 
           // Write earning to wallet + transaction history
           try {

@@ -569,13 +569,13 @@ exports.reviewPublicSubmission = async (req, res) => {
     
     // If not found, search by reelId in UserResponse
     if (!task) {
-      const userResp = await UserResponse.findOne({ 'response.reelId': taskId });
+      const userResp = await UserResponse.findOne({ googleId: userId, 'response.reelId': taskId });
       if (!userResp) {
         return res.status(404).json({ success: false, message: 'Task or submission not found' });
       }
       
       // Handle UserResponse (reels/post) submission
-      const respIndex = userResp.response.findIndex(r => String(r.reelId) === String(taskId) && r.userId === userId);
+      const respIndex = userResp.response.findIndex(r => String(r.reelId) === String(taskId));
       if (respIndex === -1) {
         return res.status(404).json({ success: false, message: 'Submission not found' });
       }
