@@ -56,7 +56,10 @@ exports.submitVideo = async (req, res) => {
       promptId, userId, clientId,
       videoKey,
       note: note || '',
+      status: 'submitted',
     });
+
+    await UGCPrompter.findByIdAndUpdate(promptId, { status: 'submitted' });
 
     res.status(201).json({
       success: true,
@@ -119,7 +122,8 @@ exports.getUserVideos = async (req, res) => {
 exports.updateVideoStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    if (!status || !['approved', 'rejected', 'pending'].includes(status)) {
+    const validStatuses = ['pending', 'submitted', 'edited', 'approved', 'objection', 'rejected'];
+    if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'Invalid status' });
     }
 
@@ -136,6 +140,8 @@ exports.updateVideoStatus = async (req, res) => {
 
     doc.status = status;
     await doc.save();
+
+    await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: status });
 
     res.json({
       success: true,

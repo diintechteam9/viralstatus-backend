@@ -1249,4 +1249,83 @@ exports.getUserCampaignData = async (req, res) => {
     console.error('Error in getUserCampaign:', err);
     res.status(500).json({ success: false, message: 'Server error', error: err.message });
   }
+};
+
+// Get GeoJSON boundaries and participant locations for campaign
+exports.getParticipantGeoJSON = async (req, res) => {
+  try {
+    const { campaignId } = req.params;
+    const mongoose = require('mongoose');
+
+    const campaign = await Campaign.findById(campaignId).select('userIds').lean();
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+
+    const userIds = campaign.userIds || [];
+    if (userIds.length === 0) {
+      return res.json({
+        success: true,
+        geojson: { type: 'FeatureCollection', features: [] },
+        bounds: null,
+        center: null,
+        participants: []
+      });
+    }
+
+    const objectIds = [];
+    for (const id of userIds) {
+      if (typeof id === 'string' && /^[a-f0-9]{24}$/i.test(id)) {
+        objectIds.push(new mongoose.Types.ObjectId(id));
+      }
+    }
+
+    // Retrieve all participants for the campaign
+    const users = await MobileUser.find({
+      $or: [
+        { googleId: { $in: userIds } },
+        { _id: { $in: objectIds } }
+      ]
+    }).select('name email city pincode location locationAddress').lean();
+
+    const pincodes = [...new Set(users.map(u => u.pincode || u.locationAddress?.pincode).filter(Boolean))];
+
+    let geojson = { type: 'FeatureCollection', features: [] };
+    let bounds = null;
+    let center = null;
+
+    if (pincodes.length > 0) {
+      geojson = await geoJsonService.createFeatureCollection(pincodes);
+      bounds = await geoJsonService.getBoundsForPincodes(pincodes);
+      center = await geoJsonService.getCenterForPincodes(pincodes);
+    }
+
+    // Format participant markers
+    const participants = users.map(u => {
+      const lat = u.location?.latitude || null;
+      const lng = u.location?.longitude || null;
+      return {
+        id: u._id,
+        name: u.name || 'Anonymous User',
+        email: u.email || '',
+        city: u.locationAddress?.city || u.city || '',
+        pincode: u.locationAddress?.pincode || u.pincode || '',
+        lat,
+        lng,
+        address: u.locationAddress?.formattedAddress || ''
+      };
+    });
+
+    res.json({
+      success: true,
+      geojson,
+      bounds,
+      center,
+      pincodeCount: pincodes.length,
+      participants
+    });
+  } catch (err) {
+    console.error('getParticipantGeoJSON error:', err);
+    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+  }
 };  

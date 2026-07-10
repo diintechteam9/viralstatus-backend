@@ -6,7 +6,7 @@ const ugcVideoSchema = new mongoose.Schema({
   clientId:  { type: String, required: true, index: true },   // from JWT token
   videoKey:  { type: String, required: true },                 // R2 key
   videoUrl:  { type: String, default: '' },                    // signed URL (refreshed on GET)
-  status:    { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+  status:    { type: String, enum: ['pending', 'submitted', 'edited', 'approved', 'objection', 'rejected'], default: 'submitted' },
   note:      { type: String, default: '' },                    // optional note from user
 }, { timestamps: true });
 

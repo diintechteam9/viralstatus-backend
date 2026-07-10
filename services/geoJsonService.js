@@ -1,8 +1,11 @@
 const { GetObjectCommand } = require('@aws-sdk/client-s3');
 const { r2Client } = require('../config/r2');
+const fs = require('fs').promises;
+const path = require('path');
 
 const BUCKET = process.env.R2_BUCKET;
-const GEOJSON_KEY = 'geojson/india-pincodes.geojson';
+const GEOJSON_KEY = 'static/pincode-boundaries.geojson';
+const LOCAL_CACHE_PATH = path.join(__dirname, '../temp/pincode-boundaries.geojson');
 
 let cachedGeoJSON = null;
 let cachedPincodeIndex = null;
@@ -14,6 +17,17 @@ const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
  */
 async function fetchGeoJSONFromR2() {
   try {
+    // 1. Try to load from local disk cache first
+    try {
+      const localData = await fs.readFile(LOCAL_CACHE_PATH, 'utf8');
+      const parsed = JSON.parse(localData);
+      console.log('✅ Loaded GeoJSON from local disk cache:', LOCAL_CACHE_PATH);
+      return parsed;
+    } catch (err) {
+      console.log('ℹ️ Local GeoJSON cache not found or invalid, downloading from R2...');
+    }
+
+    // 2. Fetch from R2 if not cached locally
     const command = new GetObjectCommand({
       Bucket: BUCKET,
       Key: GEOJSON_KEY
@@ -21,6 +35,17 @@ async function fetchGeoJSONFromR2() {
     
     const response = await r2Client.send(command);
     const body = await response.Body.transformToString();
+    
+    // Save to local disk cache asynchronously
+    try {
+      const tempDir = path.dirname(LOCAL_CACHE_PATH);
+      await fs.mkdir(tempDir, { recursive: true });
+      await fs.writeFile(LOCAL_CACHE_PATH, body, 'utf8');
+      console.log('💾 GeoJSON saved to local disk cache:', LOCAL_CACHE_PATH);
+    } catch (writeErr) {
+      console.warn('⚠️ Failed to save GeoJSON to local disk cache:', writeErr.message);
+    }
+
     const parsed = JSON.parse(body);
     
     if (!parsed.type || !parsed.features || !Array.isArray(parsed.features)) {
@@ -45,6 +70,7 @@ function buildPincodeIndex(geoJSON) {
   geoJSON.features.forEach((feature, idx) => {
     if (!feature.properties) return;
     const pincode = String(
+      feature.properties.Pincode || 
       feature.properties.pincode || 
       feature.properties.postal_code || 
       feature.properties.code || 
@@ -225,11 +251,11 @@ async function createFeatureCollection(pincodes) {
         type: 'Feature',
         geometry: feature.geometry,
         properties: {
-          pincode: feature.properties?.pincode || feature.properties?.postal_code || feature.properties?.code,
-          city: feature.properties?.city,
-          state: feature.properties?.state,
-          area: feature.properties?.area,
-          name: feature.properties?.name
+          pincode: feature.properties?.Pincode || feature.properties?.pincode || feature.properties?.postal_code || feature.properties?.code,
+          city: feature.properties?.city || feature.properties?.Office_Name || feature.properties?.Division || '',
+          state: feature.properties?.state || feature.properties?.Circle || '',
+          area: feature.properties?.area || feature.properties?.Office_Name || '',
+          name: feature.properties?.name || feature.properties?.Office_Name || ''
         }
       }))
     };
@@ -251,11 +277,11 @@ async function getPincodeInfo(pincode) {
     if (!feature) return null;
     
     return {
-      pincode: feature.properties?.pincode || feature.properties?.postal_code || feature.properties?.code,
-      city: feature.properties?.city,
-      state: feature.properties?.state,
-      area: feature.properties?.area,
-      name: feature.properties?.name,
+      pincode: feature.properties?.Pincode || feature.properties?.pincode || feature.properties?.postal_code || feature.properties?.code,
+      city: feature.properties?.city || feature.properties?.Office_Name || feature.properties?.Division || '',
+      state: feature.properties?.state || feature.properties?.Circle || '',
+      area: feature.properties?.area || feature.properties?.Office_Name || '',
+      name: feature.properties?.name || feature.properties?.Office_Name || '',
       geometry: feature.geometry
     };
   } catch (error) {

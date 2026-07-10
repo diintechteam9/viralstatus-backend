@@ -44,6 +44,7 @@ router.get('/response/campaign/data/:userId', campaignController.getUserCampaign
 
 // City map data (BEFORE generic :campaignId routes)
 router.get('/:campaignId/citymap', campaignController.getParticipantCityMap);
+router.get('/:campaignId/geojson', campaignController.getParticipantGeoJSON);
 
 // Location-based participant filtering (BEFORE generic :campaignId routes)
 router.get('/:campaignId/location/stats', campaignController.getParticipantLocationStats);

@@ -6,34 +6,25 @@ async function checkR2() {
   try {
     console.log('Checking R2 bucket:', process.env.R2_BUCKET);
     
-    const command = new ListObjectsV2Command({
-      Bucket: process.env.R2_BUCKET,
-      Prefix: 'geojson/'
-    });
-    
-    const response = await r2Client.send(command);
-    
-    console.log('\n📁 Files in geojson/ folder:');
-    if (response.Contents && response.Contents.length > 0) {
-      response.Contents.forEach(obj => {
-        console.log(`  - ${obj.Key} (${obj.Size} bytes)`);
-      });
-    } else {
-      console.log('  ❌ No files found in geojson/ folder');
-    }
-    
-    // Check all files
-    console.log('\n📁 All files in bucket:');
+    // Check all files up to 1000
+    console.log('\n📁 Listing files in bucket containing "geojson" or ".json":');
     const allCommand = new ListObjectsV2Command({
       Bucket: process.env.R2_BUCKET,
-      MaxKeys: 50
+      MaxKeys: 1000
     });
     
     const allResponse = await r2Client.send(allCommand);
+    let found = false;
     if (allResponse.Contents && allResponse.Contents.length > 0) {
       allResponse.Contents.forEach(obj => {
-        console.log(`  - ${obj.Key}`);
+        if (obj.Key.toLowerCase().includes('geojson') || obj.Key.toLowerCase().endsWith('.json')) {
+          console.log(`  - ${obj.Key} (${obj.Size} bytes)`);
+          found = true;
+        }
       });
+      if (!found) {
+        console.log('  ❌ No JSON/GeoJSON files found in the bucket list (top 1000)');
+      }
     } else {
       console.log('  ❌ Bucket is empty');
     }

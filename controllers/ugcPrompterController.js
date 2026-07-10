@@ -101,7 +101,7 @@ exports.createPrompt = async (req, res) => {
       prompt: prompt || script || '',
       script: script || '',
       hashtags: Array.isArray(hashtags) ? hashtags : [],
-      status: status || 'active',
+      status: status || 'pending',
       isAiGenerated: !!isAiGenerated,
     });
 
@@ -139,6 +139,9 @@ exports.updatePrompt = async (req, res) => {
       if (req.body[key] !== undefined) update[key] = req.body[key];
     }
     if (update.duration) update.duration = Number(update.duration);
+    if ((update.script !== undefined || update.prompt !== undefined) && update.status === undefined) {
+      update.status = 'edited';
+    }
 
     const doc = await UGCPrompter.findByIdAndUpdate(req.params.id, update, { new: true });
     if (!doc) return res.status(404).json({ success: false, message: 'Prompt not found' });
