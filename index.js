@@ -147,6 +147,8 @@ const {
 // console.log('[AutoPost] ✅ 5x daily cron scheduled — 8AM, 11AM, 2PM, 5PM, 8PM IST (1 News + 1 Blog each = 10 posts/day)');
 console.log('[AutoPost] ⏸ Auto-post cron is DISABLED.');
 
+const { startUGCAiPolling } = require('./services/ugcAiPollingService');
+
 // ─── Auto Stats Cron ─────────────────────────────────────────────────────────
 const cron = require('node-cron');
 const { getPostStats } = require('./utils/socialPostStats');
@@ -562,6 +564,7 @@ connectDB().then(() => {
     });
 
     startTemplateSyncScheduler();
+    startUGCAiPolling();
 
     // Graceful shutdown handling
     const gracefulShutdown = (signal) => {

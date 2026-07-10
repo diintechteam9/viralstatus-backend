@@ -14,8 +14,20 @@ router.post('/', authenticate, allAccess, ctrl.submitVideo);
 // Get user's submitted videos (role-based: mobileuser gets own, client gets all)
 router.get('/', authenticate, allAccess, ctrl.getUserVideos);
 
+// Get processing status (AI pipeline polling)
+router.get('/:id/status', authenticate, allAccess, ctrl.getProcessingStatus);
+
 // Update video status (approve/reject) — client only
 router.patch('/:id', authenticate, authorize('client', 'admin', 'super_admin'), ctrl.updateVideoStatus);
+
+// Update settings
+router.patch('/:id/settings', authenticate, authorize('client', 'admin', 'super_admin'), ctrl.updateAutoApprovalSettings);
+
+// Raise objection
+router.patch('/:id/objection', authenticate, authorize('client', 'admin', 'super_admin'), ctrl.submitObjection);
+
+// Submit edited video
+router.patch('/:id/edited', authenticate, authorize('client', 'admin', 'super_admin'), ctrl.submitEditedVideo);
 
 // Delete a video
 router.delete('/:id', authenticate, allAccess, ctrl.deleteVideo);

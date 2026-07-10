@@ -83,7 +83,7 @@ exports.createPrompt = async (req, res) => {
     const {
       campaignId, title, category, platform, tone,
       duration, brandName, productName, keyPoints, prompt,
-      script, hashtags, status, isAiGenerated,
+      script, hashtags, status, isAiGenerated, autoApprovalSettings,
     } = req.body;
 
     if (!title) {
@@ -103,6 +103,11 @@ exports.createPrompt = async (req, res) => {
       hashtags: Array.isArray(hashtags) ? hashtags : [],
       status: status || 'pending',
       isAiGenerated: !!isAiGenerated,
+      autoApprovalSettings: autoApprovalSettings || {
+        recording: false,
+        editingRequest: false,
+        finalEditedVideo: false
+      }
     });
 
     res.status(201).json({
@@ -132,7 +137,7 @@ exports.updatePrompt = async (req, res) => {
     const allowed = [
       'title', 'category', 'platform', 'tone', 'duration',
       'brandName', 'productName', 'keyPoints', 'prompt',
-      'script', 'hashtags', 'status', 'campaignId',
+      'script', 'hashtags', 'status', 'campaignId', 'autoApprovalSettings',
     ];
     const update = {};
     for (const key of allowed) {

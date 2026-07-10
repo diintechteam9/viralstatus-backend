@@ -32,6 +32,11 @@ const ugcPrompterSchema = new mongoose.Schema({
     default: 'pending',
   },
   isAiGenerated: { type: Boolean, default: false },
+  autoApprovalSettings: {
+    recording: { type: Boolean, default: false },
+    editingRequest: { type: Boolean, default: false },
+    finalEditedVideo: { type: Boolean, default: false }
+  }
 }, { timestamps: true });
 
 module.exports = mongoose.model('UGCPrompter', ugcPrompterSchema);
