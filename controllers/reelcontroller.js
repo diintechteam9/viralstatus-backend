@@ -1181,7 +1181,17 @@ async function syncCampaignResponseStats(campaignId) {
 
             // Sync completion status to SharedReels
             try {
-              await syncSharedReelSubmission(userResponse.googleId, entry.reelId, campaignId, 'approve');
+              // Try direct update by reelId OR campaignTaskId
+              const reelIdStr = String(entry.reelId || '');
+              await SharedReels.updateOne(
+                { googleId: userResponse.googleId, reels: { $elemMatch: { $or: [{ reelId: reelIdStr }, { campaignTaskId: reelIdStr }] } } },
+                { $set: {
+                  'reels.$[elem].TaskStatus': 'completed',
+                  'reels.$[elem].isTaskComplete': true,
+                  'reels.$[elem].submissionStatus': 'approved',
+                }},
+                { arrayFilters: [{ $or: [{ 'elem.reelId': reelIdStr }, { 'elem.campaignTaskId': reelIdStr }] }] }
+              );
             } catch (syncErr) {
               console.error('[syncCampaignResponseStats] SharedReels sync failed:', syncErr.message);
             }
