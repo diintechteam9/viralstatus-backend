@@ -223,16 +223,22 @@ exports.updateVideoStatus = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid status' });
     }
 
-    const clientId = String(req.user.clientId || req.user.id);
     const role = req.user.role;
 
-    // Only client/appclient can update status
-    if (role !== 'client' && role !== 'appclient') {
+    // Only client/appclient/admin/super_admin can update status
+    if (role !== 'client' && role !== 'appclient' && role !== 'admin' && role !== 'super_admin') {
       return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
 
-    const doc = await UGCVideo.findOne({ _id: req.params.id, clientId });
+    const doc = await UGCVideo.findById(req.params.id);
     if (!doc) return res.status(404).json({ success: false, message: 'Video not found' });
+
+    if (role !== 'admin' && role !== 'super_admin') {
+      const clientId = String(req.user.clientId || req.user.id);
+      if (String(doc.clientId) !== clientId) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+      }
+    }
 
     doc.status = status;
     await doc.save();
@@ -293,9 +299,15 @@ exports.updateAutoApprovalSettings = async (req, res) => {
       return res.status(400).json({ success: false, message: 'autoApprovalSettings is required' });
     }
 
-    const clientId = String(req.user.clientId || req.user.id);
-    const doc = await UGCVideo.findOne({ _id: req.params.id, clientId });
+    const doc = await UGCVideo.findById(req.params.id);
     if (!doc) return res.status(404).json({ success: false, message: 'Video not found' });
+
+    if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
+      const clientId = String(req.user.clientId || req.user.id);
+      if (String(doc.clientId) !== clientId) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+      }
+    }
 
     doc.autoApprovalSettings = {
       ...doc.autoApprovalSettings,
@@ -318,9 +330,15 @@ exports.submitObjection = async (req, res) => {
       return res.status(400).json({ success: false, message: 'objectionNotes is required' });
     }
 
-    const clientId = String(req.user.clientId || req.user.id);
-    const doc = await UGCVideo.findOne({ _id: req.params.id, clientId });
+    const doc = await UGCVideo.findById(req.params.id);
     if (!doc) return res.status(404).json({ success: false, message: 'Video not found' });
+
+    if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
+      const clientId = String(req.user.clientId || req.user.id);
+      if (String(doc.clientId) !== clientId) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+      }
+    }
 
     doc.status = 'objection';
     doc.objectionNotes = objectionNotes;
@@ -343,9 +361,15 @@ exports.submitEditedVideo = async (req, res) => {
       return res.status(400).json({ success: false, message: 'videoKey is required' });
     }
 
-    const clientId = String(req.user.clientId || req.user.id);
-    const doc = await UGCVideo.findOne({ _id: req.params.id, clientId });
+    const doc = await UGCVideo.findById(req.params.id);
     if (!doc) return res.status(404).json({ success: false, message: 'Video not found' });
+
+    if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
+      const clientId = String(req.user.clientId || req.user.id);
+      if (String(doc.clientId) !== clientId) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+      }
+    }
 
     doc.editedVideoKey = videoKey;
     
