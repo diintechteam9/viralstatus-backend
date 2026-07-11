@@ -369,7 +369,7 @@ exports.requestEdit = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
 
-    const allowedStatuses = ['submitted'];
+    const allowedStatuses = ['submitted', 'rejected'];
     if (!allowedStatuses.includes(doc.status)) {
       return res.status(400).json({ success: false, message: `Cannot request edit for video with status: ${doc.status}` });
     }
