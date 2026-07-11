@@ -99,7 +99,7 @@ exports.submitVideo = async (req, res) => {
     const userId   = String(req.user.id);
     const clientId = String(req.user.clientId || prompterDoc.clientId || req.user.id);
 
-    // Always start with 'submitted' status - user will decide if they want editing
+    // Always start with 'submitted' status
     const initialStatus = 'submitted';
 
     const doc = await UGCVideo.create({
@@ -108,9 +108,6 @@ exports.submitVideo = async (req, res) => {
       note: note || '',
       status: initialStatus,
       processingStatus: 'none',
-      autoApprovalSettings: prompterDoc.autoApprovalSettings || {
-        recording: false, editingRequest: false, finalEditedVideo: false,
-      },
     });
 
     // Update prompter status to match video
@@ -377,9 +374,8 @@ exports.requestEdit = async (req, res) => {
       return res.status(400).json({ success: false, message: `Cannot request edit for video with status: ${doc.status}` });
     }
 
-    // Auto-approve editing request if setting enabled
-    const newStatus = doc.autoApprovalSettings?.editingRequest ? 'editing' : 'editing_requested';
-    doc.status = newStatus;
+    // Always set status to 'editing_requested' - no auto approval
+    doc.status = 'editing_requested';
     await doc.save();
 
     await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: newStatus });
