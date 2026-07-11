@@ -99,8 +99,8 @@ exports.submitVideo = async (req, res) => {
     const userId   = String(req.user.id);
     const clientId = String(req.user.clientId || prompterDoc.clientId || req.user.id);
 
-    // Always start with 'submitted' status - user will decide if they want editing
-    const initialStatus = 'submitted';
+    // Video starts in 'client_review' status - client must approve before AI processing
+    const initialStatus = 'client_review';
 
     const doc = await UGCVideo.create({
       promptId, userId, clientId,
@@ -127,7 +127,7 @@ exports.submitVideo = async (req, res) => {
         note:             doc.note,
         createdAt:        doc.createdAt,
       },
-      message: 'Video submitted successfully. Please review and decide if you want editing.',
+      message: 'Video submitted successfully. Waiting for client approval.',
     });
   } catch (err) {
     console.error('[UGC Submit] Error:', err.message);
@@ -215,12 +215,12 @@ exports.getUserVideos = async (req, res) => {
 };
 
 // ── PATCH /api/ugc-video/:id
-// Client approve/reject video
-// Body: { status: 'approved' | 'rejected' }
+// Client approve/reject raw video from client_review status
+// Body: { status: 'approved' | 'rejected', rejectionReason?: string }
 exports.updateVideoStatus = async (req, res) => {
   try {
-    const { status } = req.body;
-    const validStatuses = ['pending', 'edited', 'approved', 'objection', 'rejected'];
+    const { status, rejectionReason } = req.body;
+    const validStatuses = ['approved', 'rejected'];
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'Invalid status' });
     }
@@ -241,17 +241,15 @@ exports.updateVideoStatus = async (req, res) => {
       }
     }
 
-    // Cannot approve from submitted status - user must request edit first
-    if (status === 'approved' && doc.status === 'submitted') {
-      return res.status(400).json({ success: false, message: 'Cannot approve video from submitted status. User must request editing first.' });
-    }
-
-    // Cannot approve/reject edited video via this endpoint — user must use /accept or /reject
-    if (doc.status === 'edited' && (status === 'approved' || status === 'rejected')) {
-      return res.status(400).json({ success: false, message: 'Edited video must be approved or rejected by the user via accept/reject endpoint.' });
+    // Only allow approve/reject from client_review status
+    if (doc.status !== 'client_review') {
+      return res.status(400).json({ success: false, message: `Cannot approve/reject video with status: ${doc.status}. Video must be in 'client_review' status.` });
     }
 
     doc.status = status;
+    if (status === 'rejected' && rejectionReason) {
+      doc.objectionNotes = rejectionReason;
+    }
     await doc.save();
 
     await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: status });
@@ -361,7 +359,7 @@ exports.submitObjection = async (req, res) => {
 };
 
 // ── POST /api/ugc-video/:id/request-edit
-// MobileUser requests editing for their submitted video
+// MobileUser requests editing for their approved video
 // THIS NOW TRIGGERS AI PROCESSING PIPELINE
 exports.requestEdit = async (req, res) => {
   try {
@@ -372,9 +370,9 @@ exports.requestEdit = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
 
-    const allowedStatuses = ['submitted', 'approved', 'rejected'];
-    if (!allowedStatuses.includes(doc.status)) {
-      return res.status(400).json({ success: false, message: `Cannot request edit for video with status: ${doc.status}` });
+    // Only allow edit request from approved status
+    if (doc.status !== 'approved') {
+      return res.status(400).json({ success: false, message: `Cannot request edit for video with status: ${doc.status}. Video must be approved by client first.` });
     }
 
     // Auto-approve editing request if setting enabled
