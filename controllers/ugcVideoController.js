@@ -1,7 +1,8 @@
 const UGCPrompter = require('../models/UGCPrompter');
 const UGCVideo    = require('../models/UGCVideo');
-const { putobject, getobject, deleteObject, s3Client } = require('../utils/r2');
+const { putobject, getobject, deleteObject } = require('../utils/r2');
 const { GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { r2Client } = require('../config/r2');
 const axios       = require('axios');
 const FormData    = require('form-data');
 
@@ -378,7 +379,7 @@ exports.requestEdit = async (req, res) => {
     doc.status = 'editing_requested';
     await doc.save();
 
-    await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: newStatus });
+    await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: doc.status });
 
     // ── NOW START AI PROCESSING PIPELINE ──────────────────────────────────
     const baseUrl = AI_BASE();
@@ -391,7 +392,7 @@ exports.requestEdit = async (req, res) => {
           let retries = 3;
           while (retries > 0) {
             try {
-              const r2Stream = await s3Client.send(new GetObjectCommand({
+              const r2Stream = await r2Client.send(new GetObjectCommand({
                 Bucket: process.env.R2_BUCKET, 
                 Key: doc.videoKey,
               }));
