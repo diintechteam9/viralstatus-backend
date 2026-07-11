@@ -106,10 +106,10 @@ exports.createPrompt = async (req, res) => {
       prompt: prompt || script || '',
       script: script || '',
       hashtags: Array.isArray(hashtags) ? hashtags : [],
-      status: status || 'pending',
+      status: status || 'active',
       isAiGenerated: !!isAiGenerated,
       autoApprovalSettings: autoApprovalSettings || {
-        recording: false,
+        recording: true,
         editingRequest: false,
         finalEditedVideo: false
       }
