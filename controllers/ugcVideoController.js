@@ -61,34 +61,70 @@ exports.submitVideo = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Prompter script not found' });
     }
 
+    // Allow video submission for all active script statuses except archived
+    const blockedStatuses = ['archived'];
+    if (blockedStatuses.includes(prompterDoc.status)) {
+      return res.status(403).json({ 
+        success: false, 
+        message: `Cannot submit video for archived script.` 
+      });
+    }
+
     const userId   = String(req.user.id);
-    const clientId = String(req.user.clientId || req.user.id);
+    // For mobileuser: use clientId from JWT (decoded.clientId), fallback to prompterDoc.clientId
+    // This ensures video is always linked to the correct client
+    const clientId = String(req.user.clientId || prompterDoc.clientId || req.user.id);
+
+    // ── DETERMINE INITIAL STATUS based on auto-approval settings ────────
+    let initialStatus = 'submitted';
+    if (prompterDoc.autoApprovalSettings?.recording) {
+      initialStatus = 'approved';
+    }
 
     const doc = await UGCVideo.create({
       promptId, userId, clientId,
       videoKey,
       note: note || '',
-      status: 'pending',
+      status: initialStatus,
       processingStatus: 'none',
       autoApprovalSettings: prompterDoc.autoApprovalSettings || {
         recording: false, editingRequest: false, finalEditedVideo: false,
       },
     });
 
+    // ── Update prompter status to match video ────────────────────────────
+    await UGCPrompter.findByIdAndUpdate(promptId, { status: initialStatus });
+
     // ── Kick off AI processing pipeline in background ──────────────────
     const baseUrl = AI_BASE();
-    if (baseUrl) {
+    if (baseUrl && AI_TOKEN()) {
       (async () => {
         try {
           await UGCVideo.findByIdAndUpdate(doc._id, { processingStatus: 'uploading' });
 
-          // Step 1: Download raw video from R2 and upload to AI server
-          const r2Stream = await s3Client.send(new GetObjectCommand({
-            Bucket: process.env.R2_BUCKET, Key: videoKey,
-          }));
-          const chunks = [];
-          for await (const chunk of r2Stream.Body) chunks.push(chunk);
-          const videoBuffer = Buffer.concat(chunks);
+          // Step 1: Download raw video from R2 with retry logic
+          let videoBuffer;
+          let retries = 3;
+          while (retries > 0) {
+            try {
+              const r2Stream = await s3Client.send(new GetObjectCommand({
+                Bucket: process.env.R2_BUCKET, 
+                Key: videoKey,
+              }));
+              const chunks = [];
+              for await (const chunk of r2Stream.Body) chunks.push(chunk);
+              videoBuffer = Buffer.concat(chunks);
+              break;
+            } catch (err) {
+              retries--;
+              if (retries === 0) throw new Error(`Failed to download from R2 after 3 retries: ${err.message}`);
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+
+          if (!videoBuffer || videoBuffer.length === 0) {
+            throw new Error('Downloaded video buffer is empty');
+          }
 
           const form = new FormData();
           form.append('file', videoBuffer, { filename: 'video.mp4', contentType: 'video/mp4' });
@@ -96,6 +132,7 @@ exports.submitVideo = async (req, res) => {
           const uploadRes = await axios.post(`${baseUrl}/api/ugc/upload`, form, {
             headers: { ...aiHeaders(), ...form.getHeaders() },
             maxBodyLength: Infinity,
+            timeout: 120000,
           });
           const jobId = uploadRes.data?.job_id;
           if (!jobId) throw new Error('No job_id from AI server');
@@ -113,12 +150,13 @@ exports.submitVideo = async (req, res) => {
           };
           await axios.post(`${baseUrl}/api/ugc/process/${jobId}`, processBody, {
             headers: { ...aiHeaders(), 'Content-Type': 'application/json' },
+            timeout: 30000,
           });
 
-          // Step 3: Cron service will poll DB-based (production safe)
+          console.log(`[UGC Submit] ✅ Video ${doc._id} queued for AI processing with job ${jobId}`);
 
         } catch (err) {
-          console.error('[UGC AI Pipeline]', err.message);
+          console.error('[UGC AI Pipeline] Error:', err.message);
           await UGCVideo.findByIdAndUpdate(doc._id, { processingStatus: 'failed' });
         }
       })();
@@ -138,6 +176,7 @@ exports.submitVideo = async (req, res) => {
       message: baseUrl ? 'Video submitted. AI processing started.' : 'Video submitted (AI processing not configured).',
     });
   } catch (err) {
+    console.error('[UGC Submit] Error:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -176,38 +215,49 @@ exports.getUserVideos = async (req, res) => {
 
     let filter = {};
 
-    // If mobileuser - get only their videos
     if (role === 'mobileuser') {
+      // mobileuser: get videos by their userId
       filter.userId = userId;
-    }
-    // If client - get all videos for their prompts
-    else if (role === 'client' || role === 'appclient') {
+    } else if (role === 'client' || role === 'appclient') {
+      // client: match by clientId OR by userId (in case old videos stored userId as clientId)
       filter.clientId = clientId;
     }
+    // admin/super_admin — no filter, get all
 
     if (req.query.promptId) filter.promptId = req.query.promptId;
+    if (req.query.clientId && (role === 'admin' || role === 'super_admin')) {
+      filter.clientId = req.query.clientId;
+    }
 
     const videos = await UGCVideo.find(filter)
       .sort({ createdAt: -1 })
-      .populate('promptId', 'title category script')
+      .populate('promptId', 'title category script platform tone duration brandName')
       .lean();
 
-    // Refresh signed URLs
+    // Generate fresh signed URLs for all video keys
     for (const v of videos) {
-      try { v.videoUrl = await getobject(v.videoKey); } catch { v.videoUrl = ''; }
-      if (v.editedVideoKey) {
-        try { v.editedVideoUrl = await getobject(v.editedVideoKey); } catch { v.editedVideoUrl = ''; }
+      if (v.videoKey) {
+        try { v.videoUrl = await getobject(v.videoKey); } catch { v.videoUrl = ''; }
       }
-      if (v.processedVideoKey) {
-        try { v.processedVideoUrl = await getobject(v.processedVideoKey); } catch { v.processedVideoUrl = ''; }
+      if (v.editedVideoKey && v.editedVideoKey.trim()) {
+        try { v.editedVideoUrl = await getobject(v.editedVideoKey.trim()); } catch (e) {
+          console.error('[getUserVideos] editedVideoUrl sign error:', e.message);
+          v.editedVideoUrl = '';
+        }
+      } else {
+        v.editedVideoUrl = '';
       }
-      if (v.viralVideoKey) {
-        try { v.viralVideoUrl = await getobject(v.viralVideoKey); } catch { v.viralVideoUrl = ''; }
-      }
+      if (v.processedVideoKey && v.processedVideoKey.trim()) {
+        try { v.processedVideoUrl = await getobject(v.processedVideoKey.trim()); } catch { v.processedVideoUrl = ''; }
+      } else { v.processedVideoUrl = ''; }
+      if (v.viralVideoKey && v.viralVideoKey.trim()) {
+        try { v.viralVideoUrl = await getobject(v.viralVideoKey.trim()); } catch { v.viralVideoUrl = ''; }
+      } else { v.viralVideoUrl = ''; }
     }
 
     res.json({ success: true, videos });
   } catch (err) {
+    console.error('[getUserVideos] Error:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -235,7 +285,7 @@ exports.updateVideoStatus = async (req, res) => {
 
     if (role !== 'admin' && role !== 'super_admin') {
       const clientId = String(req.user.clientId || req.user.id);
-      if (String(doc.clientId) !== clientId) {
+      if (String(doc.clientId) !== clientId && String(doc.clientId) !== String(req.user.id)) {
         return res.status(403).json({ success: false, message: 'Unauthorized' });
       }
     }
@@ -304,7 +354,7 @@ exports.updateAutoApprovalSettings = async (req, res) => {
 
     if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
       const clientId = String(req.user.clientId || req.user.id);
-      if (String(doc.clientId) !== clientId) {
+      if (String(doc.clientId) !== clientId && String(doc.clientId) !== String(req.user.id)) {
         return res.status(403).json({ success: false, message: 'Unauthorized' });
       }
     }
@@ -335,7 +385,7 @@ exports.submitObjection = async (req, res) => {
 
     if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
       const clientId = String(req.user.clientId || req.user.id);
-      if (String(doc.clientId) !== clientId) {
+      if (String(doc.clientId) !== clientId && String(doc.clientId) !== String(req.user.id)) {
         return res.status(403).json({ success: false, message: 'Unauthorized' });
       }
     }
@@ -366,14 +416,14 @@ exports.submitEditedVideo = async (req, res) => {
 
     if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
       const clientId = String(req.user.clientId || req.user.id);
-      if (String(doc.clientId) !== clientId) {
+      if (String(doc.clientId) !== clientId && String(doc.clientId) !== String(req.user.id)) {
         return res.status(403).json({ success: false, message: 'Unauthorized' });
       }
     }
 
-    doc.editedVideoKey = videoKey;
+    doc.editedVideoKey = videoKey.trim();
     
-    // Auto approval check
+    // ── AUTO-APPROVAL: Check finalEditedVideo setting ──────────────────
     if (doc.autoApprovalSettings?.finalEditedVideo) {
       doc.status = 'approved';
     } else {
@@ -382,10 +432,18 @@ exports.submitEditedVideo = async (req, res) => {
     
     await doc.save();
 
+    // ── Update prompter status to match ──────────────────────────────────
     await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: doc.status });
 
-    res.json({ success: true, status: doc.status, editedVideoKey: doc.editedVideoKey });
+    // ── Generate signed URL for immediate response ──────────────────────
+    let editedVideoUrl = '';
+    try { editedVideoUrl = await getobject(doc.editedVideoKey); } catch { editedVideoUrl = ''; }
+
+    console.log(`[UGC Edited] Video ${doc._id} editedVideoKey=${doc.editedVideoKey} status=${doc.status}`);
+
+    res.json({ success: true, status: doc.status, editedVideoKey: doc.editedVideoKey, editedVideoUrl });
   } catch (err) {
+    console.error('[UGC Edited] Error:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };

@@ -6,7 +6,7 @@ const ugcPrompterSchema = new mongoose.Schema({
   title:       { type: String, required: true, trim: true },
   category:    {
     type: String,
-    enum: ['testimonial', 'unboxing', 'tutorial', 'review', 'lifestyle', 'challenge', 'other'],
+    enum: ['testimonial', 'demo', 'unboxing', 'tutorial', 'review', 'lifestyle', 'challenge', 'other'],
     default: 'testimonial',
   },
   platform:    {

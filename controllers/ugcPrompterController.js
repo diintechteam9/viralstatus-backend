@@ -1,10 +1,15 @@
 const UGCPrompter = require('../models/UGCPrompter');
 const Groq = require('groq-sdk');
 
-// ── Groq client (lazy-init so missing key doesn't crash on import) ───────────
+// ── Groq client initialization with validation ───────────────────────────────
 let _groq = null;
 function getGroq() {
-  if (!_groq) _groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  if (!_groq) {
+    if (!process.env.GROQ_API_KEY) {
+      throw new Error('GROQ_API_KEY environment variable is not set. AI script generation will not work.');
+    }
+    _groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  }
   return _groq;
 }
 
@@ -144,9 +149,7 @@ exports.updatePrompt = async (req, res) => {
       if (req.body[key] !== undefined) update[key] = req.body[key];
     }
     if (update.duration) update.duration = Number(update.duration);
-    if ((update.script !== undefined || update.prompt !== undefined) && update.status === undefined) {
-      update.status = 'edited';
-    }
+    // Do NOT auto-change status when script/prompt is updated — only change if explicitly passed
 
     const doc = await UGCPrompter.findByIdAndUpdate(req.params.id, update, { new: true });
     if (!doc) return res.status(404).json({ success: false, message: 'Prompt not found' });
@@ -170,6 +173,14 @@ exports.deletePrompt = async (req, res) => {
 // ── POST AI generate prompt + script via Groq ────────────────────────────────
 exports.generatePrompt = async (req, res) => {
   try {
+    // Validate Groq API key at request time
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(503).json({ 
+        success: false, 
+        message: 'AI script generation is not configured. GROQ_API_KEY is missing.' 
+      });
+    }
+
     const {
       topic = '',
       script = '', category = 'testimonial',
