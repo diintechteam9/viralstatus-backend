@@ -26,6 +26,7 @@ exports.getPromptForUser = async (req, res) => {
 
     // Generate signed URLs for all video keys
     for (const v of videos) {
+      v.id = v._id.toString();
       if (v.videoKey) {
         try { v.videoUrl = await getobject(v.videoKey); } catch { v.videoUrl = ''; }
       }
@@ -260,6 +261,7 @@ exports.getUserVideos = async (req, res) => {
 
     // Generate fresh signed URLs for all video keys
     for (const v of videos) {
+      v.id = v._id.toString();
       if (v.videoKey) {
         try { v.videoUrl = await getobject(v.videoKey); } catch { v.videoUrl = ''; }
       }

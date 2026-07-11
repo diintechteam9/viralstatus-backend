@@ -26,10 +26,9 @@ exports.getPrompts = async (req, res) => {
 
     const prompts = await UGCPrompter.find(filter).sort({ createdAt: -1 }).lean();
     
-    // Return only required fields
+    // Return only required fields with consistent naming
     const cleanedPrompts = prompts.map(p => ({
-      _id: p._id,
-      clientId: p.clientId,
+      id: p._id.toString(),
       title: p.title,
       category: p.category,
       tone: p.tone,
