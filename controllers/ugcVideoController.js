@@ -11,7 +11,7 @@ const aiHeaders = () => ({ 'X-App-Token': AI_TOKEN() });
 
 // ── GET /api/ugc-prompter/public/:promptId
 // User script dekhta hai — mobileuser ke liye
-// Returns prompt details + all video submissions for this prompt
+// Returns prompt details + all video submissions for this prompt with complete data
 exports.getPromptForUser = async (req, res) => {
   try {
     const prompt = await UGCPrompter.findById(req.params.promptId)
@@ -19,19 +19,27 @@ exports.getPromptForUser = async (req, res) => {
       .lean();
     if (!prompt) return res.status(404).json({ success: false, message: 'Prompt not found' });
 
-    // Get all videos submitted for this prompt
+    // Get all videos submitted for this prompt with complete details
     const videos = await UGCVideo.find({ promptId: req.params.promptId })
-      .select('_id userId status note editedVideoKey processingStatus createdAt updatedAt')
       .sort({ createdAt: -1 })
       .lean();
 
-    // Generate signed URLs for edited videos
+    // Generate signed URLs for all video keys
     for (const v of videos) {
+      if (v.videoKey) {
+        try { v.videoUrl = await getobject(v.videoKey); } catch { v.videoUrl = ''; }
+      }
       if (v.editedVideoKey && v.editedVideoKey.trim()) {
         try { v.editedVideoUrl = await getobject(v.editedVideoKey.trim()); } catch { v.editedVideoUrl = ''; }
       } else {
         v.editedVideoUrl = '';
       }
+      if (v.processedVideoKey && v.processedVideoKey.trim()) {
+        try { v.processedVideoUrl = await getobject(v.processedVideoKey.trim()); } catch { v.processedVideoUrl = ''; }
+      } else { v.processedVideoUrl = ''; }
+      if (v.viralVideoKey && v.viralVideoKey.trim()) {
+        try { v.viralVideoUrl = await getobject(v.viralVideoKey.trim()); } catch { v.viralVideoUrl = ''; }
+      } else { v.viralVideoUrl = ''; }
     }
 
     res.json({ success: true, prompt, videos });
