@@ -11,14 +11,30 @@ const aiHeaders = () => ({ 'X-App-Token': AI_TOKEN() });
 
 // ── GET /api/ugc-prompter/public/:promptId
 // User script dekhta hai — mobileuser ke liye
-// Returns prompt details regardless of status (active, draft, pending, etc.)
+// Returns prompt details + all video submissions for this prompt
 exports.getPromptForUser = async (req, res) => {
   try {
     const prompt = await UGCPrompter.findById(req.params.promptId)
       .select('_id title category tone duration script status createdAt platform brandName productName keyPoints')
       .lean();
     if (!prompt) return res.status(404).json({ success: false, message: 'Prompt not found' });
-    res.json({ success: true, prompt });
+
+    // Get all videos submitted for this prompt
+    const videos = await UGCVideo.find({ promptId: req.params.promptId })
+      .select('_id userId status note editedVideoKey processingStatus createdAt updatedAt')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Generate signed URLs for edited videos
+    for (const v of videos) {
+      if (v.editedVideoKey && v.editedVideoKey.trim()) {
+        try { v.editedVideoUrl = await getobject(v.editedVideoKey.trim()); } catch { v.editedVideoUrl = ''; }
+      } else {
+        v.editedVideoUrl = '';
+      }
+    }
+
+    res.json({ success: true, prompt, videos });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
