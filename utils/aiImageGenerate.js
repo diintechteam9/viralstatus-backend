@@ -12,8 +12,8 @@ const STYLES = [
 ];
 
 const RATE_LIMIT_PLACEHOLDER_MD5 = '2090a5dc21c32952cbf8496339752bd1';
-const POLLINATIONS_MIN_GAP_MS = 15000;
-let lastPollinationsAt = 0;
+const PIXCELES_MIN_GAP_MS = 5000;
+let lastPixcelesAt = 0;
 let imagineArtDisabledReason = null;
 
 function isImagineArtEnabled() {
@@ -24,7 +24,7 @@ function isImagineArtEnabled() {
 function disableImagineArt(reason) {
   if (!imagineArtDisabledReason) {
     imagineArtDisabledReason = reason;
-    console.warn('[aiImage] ImagineArt disabled for cover images:', reason, '— using Pollinations.');
+    console.warn('[aiImage] ImagineArt disabled for cover images:', reason, '— using Pixceles.');
   }
 }
 
@@ -38,13 +38,13 @@ function buildStyledPrompt(prompt, style) {
   return `${base}, ${s}, sharp focus, no text watermark, blog cover image`;
 }
 
-function getPollinationsUrl(prompt, seed) {
-  const key = process.env.POLLINATIONS_API_KEY;
-  const encoded = encodeURIComponent(prompt);
-  if (key) {
-    return `https://gen.pollinations.ai/image/${encoded}?width=800&height=500&seed=${seed}&nologo=true&model=flux&key=${key}`;
+function getPixcelesUrl(prompt, seed) {
+  const key = process.env.PIXCELES_API_KEY;
+  if (!key) {
+    throw new Error('PIXCELES_API_KEY is not configured');
   }
-  return `https://image.pollinations.ai/prompt/${encoded}?seed=${seed}&width=800&height=500&nologo=true&model=flux`;
+  const encoded = encodeURIComponent(prompt);
+  return `https://api.pixceles.com/generate?prompt=${encoded}&width=800&height=500&seed=${seed}&api_key=${key}`;
 }
 
 function fetchUrlAsBuffer(url, timeoutMs = 120000) {
@@ -77,7 +77,7 @@ function fetchUrlAsBuffer(url, timeoutMs = 120000) {
           const crypto = require('crypto');
           const md5 = crypto.createHash('md5').update(buffer).digest('hex');
           if (md5 === RATE_LIMIT_PLACEHOLDER_MD5) {
-            return reject(new Error('Pollinations rate limit — wait and retry'));
+            return reject(new Error('Pixceles rate limit — wait and retry'));
           }
           resolve({ buffer, contentType, url });
         });
@@ -152,30 +152,31 @@ async function generateViaImagineArt(prompt, styleLabel, seed) {
   }
 }
 
-async function waitForPollinationsSlot() {
-  const elapsed = Date.now() - lastPollinationsAt;
-  const wait = POLLINATIONS_MIN_GAP_MS - elapsed;
-  if (wait > 0) await sleep(wait);
+function waitForPixcelesSlot() {
+  const elapsed = Date.now() - lastPixcelesAt;
+  const wait = PIXCELES_MIN_GAP_MS - elapsed;
+  if (wait > 0) return sleep(wait);
+  return Promise.resolve();
 }
 
-async function generateViaPollinations(prompt, seed, attempt = 1) {
-  await waitForPollinationsSlot();
-  const url = getPollinationsUrl(prompt, seed);
+async function generateViaPixceles(prompt, seed, attempt = 1) {
+  await waitForPixcelesSlot();
+  const url = getPixcelesUrl(prompt, seed);
   try {
     const result = await fetchUrlAsBuffer(url, 120000);
-    lastPollinationsAt = Date.now();
-    return { ...result, source: 'pollinations', pollinationsUrl: url };
+    lastPixcelesAt = Date.now();
+    return { ...result, source: 'pixceles', pixcelesUrl: url };
   } catch (err) {
     if (attempt < 3) {
       await sleep(attempt * 5000);
-      return generateViaPollinations(prompt, seed + attempt, attempt + 1);
+      return generateViaPixceles(prompt, seed + attempt, attempt + 1);
     }
     throw err;
   }
 }
 
 /**
- * Generate one cover image (ImagineArt if configured, else Pollinations).
+ * Generate one cover image (ImagineArt if configured, else Pixceles).
  */
 async function generateOneImage(prompt, index = 0) {
   const style = STYLES[index % STYLES.length];
@@ -191,18 +192,18 @@ async function generateOneImage(prompt, index = 0) {
     }
   }
 
-  const result = await generateViaPollinations(styledPrompt, seed);
+  const result = await generateViaPixceles(styledPrompt, seed);
   return formatImageResult(result, index, style);
 }
 
-function formatImageResult({ buffer, contentType, url, pollinationsUrl, source }, index, style) {
+function formatImageResult({ buffer, contentType, url, pixcelesUrl, source }, index, style) {
   const mime = (contentType || 'image/jpeg').split(';')[0];
   const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`;
   return {
     index,
     success: true,
     data: dataUrl,
-    pollinationsUrl: pollinationsUrl || url || null,
+    pixcelesUrl: pixcelesUrl || url || null,
     style,
     source,
   };
@@ -213,7 +214,7 @@ function formatImageResult({ buffer, contentType, url, pollinationsUrl, source }
  */
 async function generateSixImages(prompt, onProgress) {
   const images = [];
-  const delayMs = isImagineArtEnabled() ? 2000 : 15000;
+  const delayMs = isImagineArtEnabled() ? 2000 : 5000;
 
   for (let i = 0; i < 6; i++) {
     if (i > 0) await sleep(delayMs);
@@ -229,7 +230,7 @@ async function generateSixImages(prompt, onProgress) {
         index: i,
         success: false,
         data: null,
-        pollinationsUrl: null,
+        pixcelesUrl: null,
         error: err.message,
       });
       if (onProgress) onProgress(images[images.length - 1]);
