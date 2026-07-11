@@ -72,11 +72,12 @@ exports.getUploadUrl = async (req, res) => {
 };
 
 // ── POST /api/ugc-video
-// Video submit karo after R2 upload — triggers AI processing pipeline
-// Body: { promptId, videoKey, note, aiOptions (optional) }
+// Video submit karo after R2 upload
+// Body: { promptId, videoKey, note }
+// IMPORTANT: NO automatic AI processing - user decides via request-edit endpoint
 exports.submitVideo = async (req, res) => {
   try {
-    const { promptId, videoKey, note, aiOptions } = req.body;
+    const { promptId, videoKey, note } = req.body;
     if (!promptId || !videoKey) {
       return res.status(400).json({ success: false, message: 'promptId and videoKey are required' });
     }
@@ -96,15 +97,10 @@ exports.submitVideo = async (req, res) => {
     }
 
     const userId   = String(req.user.id);
-    // For mobileuser: use clientId from JWT (decoded.clientId), fallback to prompterDoc.clientId
-    // This ensures video is always linked to the correct client
     const clientId = String(req.user.clientId || prompterDoc.clientId || req.user.id);
 
-    // ── DETERMINE INITIAL STATUS based on auto-approval settings ────────
-    let initialStatus = 'submitted';
-    if (prompterDoc.autoApprovalSettings?.recording) {
-      initialStatus = 'approved';
-    }
+    // Always start with 'submitted' status - user will decide if they want editing
+    const initialStatus = 'submitted';
 
     const doc = await UGCVideo.create({
       promptId, userId, clientId,
@@ -117,75 +113,8 @@ exports.submitVideo = async (req, res) => {
       },
     });
 
-    // ── Update prompter status to match video ────────────────────────────
+    // Update prompter status to match video
     await UGCPrompter.findByIdAndUpdate(promptId, { status: initialStatus });
-
-    // ── Kick off AI processing pipeline in background ──────────────────
-    const baseUrl = AI_BASE();
-    if (baseUrl && AI_TOKEN()) {
-      (async () => {
-        try {
-          await UGCVideo.findByIdAndUpdate(doc._id, { processingStatus: 'uploading' });
-
-          // Step 1: Download raw video from R2 with retry logic
-          let videoBuffer;
-          let retries = 3;
-          while (retries > 0) {
-            try {
-              const r2Stream = await s3Client.send(new GetObjectCommand({
-                Bucket: process.env.R2_BUCKET, 
-                Key: videoKey,
-              }));
-              const chunks = [];
-              for await (const chunk of r2Stream.Body) chunks.push(chunk);
-              videoBuffer = Buffer.concat(chunks);
-              break;
-            } catch (err) {
-              retries--;
-              if (retries === 0) throw new Error(`Failed to download from R2 after 3 retries: ${err.message}`);
-              await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-          }
-
-          if (!videoBuffer || videoBuffer.length === 0) {
-            throw new Error('Downloaded video buffer is empty');
-          }
-
-          const form = new FormData();
-          form.append('file', videoBuffer, { filename: 'video.mp4', contentType: 'video/mp4' });
-
-          const uploadRes = await axios.post(`${baseUrl}/api/ugc/upload`, form, {
-            headers: { ...aiHeaders(), ...form.getHeaders() },
-            maxBodyLength: Infinity,
-            timeout: 120000,
-          });
-          const jobId = uploadRes.data?.job_id;
-          if (!jobId) throw new Error('No job_id from AI server');
-
-          await UGCVideo.findByIdAndUpdate(doc._id, { aiJobId: jobId, processingStatus: 'processing' });
-
-          // Step 2: Start AI processing with options
-          const processBody = {
-            caption: true, subtitle_style: 'two_line_zoom_in',
-            broll: true, music: true, bgm_mood: 'Motivational',
-            sfx: true, zoom: true, silence: true, jumpcut: true,
-            facetrack: true, viral: true, background: false, logo: false,
-            video_quality: '1080p',
-            ...(aiOptions || {}),
-          };
-          await axios.post(`${baseUrl}/api/ugc/process/${jobId}`, processBody, {
-            headers: { ...aiHeaders(), 'Content-Type': 'application/json' },
-            timeout: 30000,
-          });
-
-          console.log(`[UGC Submit] ✅ Video ${doc._id} queued for AI processing with job ${jobId}`);
-
-        } catch (err) {
-          console.error('[UGC AI Pipeline] Error:', err.message);
-          await UGCVideo.findByIdAndUpdate(doc._id, { processingStatus: 'failed' });
-        }
-      })();
-    }
 
     res.status(201).json({
       success: true,
@@ -198,7 +127,7 @@ exports.submitVideo = async (req, res) => {
         note:             doc.note,
         createdAt:        doc.createdAt,
       },
-      message: baseUrl ? 'Video submitted. AI processing started.' : 'Video submitted (AI processing not configured).',
+      message: 'Video submitted successfully. Please review and decide if you want editing.',
     });
   } catch (err) {
     console.error('[UGC Submit] Error:', err.message);
@@ -241,13 +170,10 @@ exports.getUserVideos = async (req, res) => {
     let filter = {};
 
     if (role === 'mobileuser') {
-      // mobileuser: get videos by their userId
       filter.userId = userId;
     } else if (role === 'client' || role === 'appclient') {
-      // client: match by clientId OR by userId (in case old videos stored userId as clientId)
       filter.clientId = clientId;
     }
-    // admin/super_admin — no filter, get all
 
     if (req.query.promptId) filter.promptId = req.query.promptId;
     if (req.query.clientId && (role === 'admin' || role === 'super_admin')) {
@@ -301,7 +227,6 @@ exports.updateVideoStatus = async (req, res) => {
 
     const role = req.user.role;
 
-    // Only client/appclient/admin/super_admin can update status
     if (role !== 'client' && role !== 'appclient' && role !== 'admin' && role !== 'super_admin') {
       return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
@@ -343,11 +268,9 @@ exports.deleteVideo = async (req, res) => {
 
     let filter = { _id: req.params.id };
 
-    // mobileuser can only delete their own videos
     if (role === 'mobileuser') {
       filter.userId = userId;
     }
-    // client can delete any video from their prompts
     else if (role === 'client' || role === 'appclient') {
       const clientId = String(req.user.clientId || req.user.id);
       filter.clientId = clientId;
@@ -356,8 +279,7 @@ exports.deleteVideo = async (req, res) => {
     const doc = await UGCVideo.findOne(filter);
     if (!doc) return res.status(404).json({ success: false, message: 'Video not found' });
 
-    // Delete from R2
-    try { await deleteObject(doc.videoKey); } catch { /* ignore if already gone */ }
+    try { await deleteObject(doc.videoKey); } catch { }
 
     await doc.deleteOne();
     res.json({ success: true, message: 'Video deleted' });
@@ -430,12 +352,12 @@ exports.submitObjection = async (req, res) => {
 
 // ── POST /api/ugc-video/:id/request-edit
 // MobileUser requests editing for their submitted video
+// THIS NOW TRIGGERS AI PROCESSING PIPELINE
 exports.requestEdit = async (req, res) => {
   try {
     const doc = await UGCVideo.findById(req.params.id);
     if (!doc) return res.status(404).json({ success: false, message: 'Video not found' });
 
-    // Only the video owner (mobileuser) can request edit
     if (req.user.role === 'mobileuser' && String(doc.userId) !== String(req.user.id)) {
       return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
@@ -452,7 +374,71 @@ exports.requestEdit = async (req, res) => {
 
     await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: newStatus });
 
-    res.json({ success: true, status: doc.status, message: 'Edit request submitted successfully' });
+    // ── NOW START AI PROCESSING PIPELINE ──────────────────────────────────
+    const baseUrl = AI_BASE();
+    if (baseUrl && AI_TOKEN()) {
+      (async () => {
+        try {
+          await UGCVideo.findByIdAndUpdate(doc._id, { processingStatus: 'uploading' });
+
+          let videoBuffer;
+          let retries = 3;
+          while (retries > 0) {
+            try {
+              const r2Stream = await s3Client.send(new GetObjectCommand({
+                Bucket: process.env.R2_BUCKET, 
+                Key: doc.videoKey,
+              }));
+              const chunks = [];
+              for await (const chunk of r2Stream.Body) chunks.push(chunk);
+              videoBuffer = Buffer.concat(chunks);
+              break;
+            } catch (err) {
+              retries--;
+              if (retries === 0) throw new Error(`Failed to download from R2 after 3 retries: ${err.message}`);
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+
+          if (!videoBuffer || videoBuffer.length === 0) {
+            throw new Error('Downloaded video buffer is empty');
+          }
+
+          const form = new FormData();
+          form.append('file', videoBuffer, { filename: 'video.mp4', contentType: 'video/mp4' });
+
+          const uploadRes = await axios.post(`${baseUrl}/api/ugc/upload`, form, {
+            headers: { ...aiHeaders(), ...form.getHeaders() },
+            maxBodyLength: Infinity,
+            timeout: 120000,
+          });
+          const jobId = uploadRes.data?.job_id;
+          if (!jobId) throw new Error('No job_id from AI server');
+
+          await UGCVideo.findByIdAndUpdate(doc._id, { aiJobId: jobId, processingStatus: 'processing' });
+
+          const processBody = {
+            caption: true, subtitle_style: 'two_line_zoom_in',
+            broll: true, music: true, bgm_mood: 'Motivational',
+            sfx: true, zoom: true, silence: true, jumpcut: true,
+            facetrack: true, viral: true, background: false, logo: false,
+            video_quality: '1080p',
+          };
+          await axios.post(`${baseUrl}/api/ugc/process/${jobId}`, processBody, {
+            headers: { ...aiHeaders(), 'Content-Type': 'application/json' },
+            timeout: 30000,
+          });
+
+          console.log(`[UGC Edit Request] ✅ Video ${doc._id} queued for AI processing with job ${jobId}`);
+
+        } catch (err) {
+          console.error('[UGC AI Pipeline] Error:', err.message);
+          await UGCVideo.findByIdAndUpdate(doc._id, { processingStatus: 'failed' });
+        }
+      })();
+    }
+
+    res.json({ success: true, status: doc.status, message: 'Edit request submitted. AI processing started.' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -539,7 +525,6 @@ exports.submitEditedVideo = async (req, res) => {
 
     doc.editedVideoKey = videoKey.trim();
     
-    // ── AUTO-APPROVAL: Check finalEditedVideo setting ──────────────────
     if (doc.autoApprovalSettings?.finalEditedVideo) {
       doc.status = 'approved';
     } else {
@@ -548,10 +533,8 @@ exports.submitEditedVideo = async (req, res) => {
     
     await doc.save();
 
-    // ── Update prompter status to match ──────────────────────────────────
     await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: doc.status });
 
-    // ── Generate signed URL for immediate response ──────────────────────
     let editedVideoUrl = '';
     try { editedVideoUrl = await getobject(doc.editedVideoKey); } catch { editedVideoUrl = ''; }
 
