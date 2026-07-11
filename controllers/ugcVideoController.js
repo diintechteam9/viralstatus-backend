@@ -534,13 +534,7 @@ exports.submitEditedVideo = async (req, res) => {
     }
 
     doc.editedVideoKey = videoKey.trim();
-    
-    if (doc.autoApprovalSettings?.finalEditedVideo) {
-      doc.status = 'approved';
-    } else {
-      doc.status = 'edited';
-    }
-    
+    doc.status = 'edited';
     await doc.save();
 
     await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: doc.status });
