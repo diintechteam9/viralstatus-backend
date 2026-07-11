@@ -246,6 +246,11 @@ exports.updateVideoStatus = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Cannot approve video from submitted status. User must request editing first.' });
     }
 
+    // Cannot approve/reject edited video via this endpoint — user must use /accept or /reject
+    if (doc.status === 'edited' && (status === 'approved' || status === 'rejected')) {
+      return res.status(400).json({ success: false, message: 'Edited video must be approved or rejected by the user via accept/reject endpoint.' });
+    }
+
     doc.status = status;
     await doc.save();
 
@@ -503,7 +508,7 @@ exports.rejectEditedVideo = async (req, res) => {
 
     await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: 'rejected' });
 
-    res.json({ success: true, status: doc.status, message: 'Video rejected. Backend will re-process.' });
+    res.json({ success: true, status: doc.status, message: 'Video rejected.' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
