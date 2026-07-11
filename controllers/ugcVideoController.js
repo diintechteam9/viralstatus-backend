@@ -247,7 +247,7 @@ exports.getUserVideos = async (req, res) => {
 
     const videos = await UGCVideo.find(filter)
       .sort({ createdAt: -1 })
-      .populate('promptId', 'title category script platform tone duration brandName')
+      .select('-promptId')
       .lean();
 
     // Generate fresh signed URLs for all video keys
