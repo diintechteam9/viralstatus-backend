@@ -13,16 +13,73 @@ function parseCoords(body = {}) {
 }
 
 /**
- * Reverse geocode via OpenStreetMap Nominatim (no API key).
+ * Reverse geocode via Google Geocoding API, falling back to OpenStreetMap Nominatim.
  */
 async function reverseGeocode(lat, lng) {
+  const googleKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (googleKey) {
+    try {
+      console.log('[userLocation] Querying Google Geocoding API for coordinates:', lat, lng);
+      const res = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
+        params: {
+          latlng: `${lat},${lng}`,
+          key: googleKey
+        },
+        timeout: 5000
+      });
+
+      if (res.data && res.data.status === 'OK' && res.data.results && res.data.results.length > 0) {
+        const firstResult = res.data.results[0];
+        const components = firstResult.address_components || [];
+        
+        let city = '';
+        let state = '';
+        let country = '';
+        let pincode = '';
+
+        for (const comp of components) {
+          const types = comp.types || [];
+          if (types.includes('postal_code')) {
+            pincode = comp.long_name;
+          }
+          if (types.includes('locality')) {
+            city = comp.long_name;
+          } else if (!city && types.includes('administrative_area_level_2')) {
+            city = comp.long_name;
+          }
+          if (types.includes('administrative_area_level_1')) {
+            state = comp.long_name;
+          }
+          if (types.includes('country')) {
+            country = comp.long_name;
+          }
+        }
+
+        console.log('[userLocation] Google Geocoding succeeded:', { city, pincode });
+        return {
+          formattedAddress: firstResult.formatted_address || '',
+          city,
+          state,
+          country,
+          pincode
+        };
+      } else {
+        console.warn('[userLocation] Google Geocoding API status not OK:', res.data?.status);
+      }
+    } catch (googleErr) {
+      console.warn('[userLocation] Google Geocoding failed, falling back to Nominatim:', googleErr.message);
+    }
+  }
+
+  // Fallback: OpenStreetMap Nominatim reverse geocode at high precision (zoom=18)
+  console.log('[userLocation] Querying OpenStreetMap Nominatim fallback geocode (zoom=18)');
   const res = await axios.get('https://nominatim.openstreetmap.org/reverse', {
     params: {
       lat,
       lon: lng,
       format: 'json',
       addressdetails: 1,
-      zoom: 14,
+      zoom: 18,
     },
     headers: {
       'User-Agent': process.env.NOMINATIM_USER_AGENT || 'YovoAI-MobileApp/1.0 (contact@yovoai.com)',
