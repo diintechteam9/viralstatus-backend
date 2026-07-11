@@ -402,6 +402,96 @@ exports.submitObjection = async (req, res) => {
   }
 };
 
+// ── POST /api/ugc-video/:id/request-edit
+// MobileUser requests editing for their submitted video
+exports.requestEdit = async (req, res) => {
+  try {
+    const doc = await UGCVideo.findById(req.params.id);
+    if (!doc) return res.status(404).json({ success: false, message: 'Video not found' });
+
+    // Only the video owner (mobileuser) can request edit
+    if (req.user.role === 'mobileuser' && String(doc.userId) !== String(req.user.id)) {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const allowedStatuses = ['submitted', 'approved', 'rejected'];
+    if (!allowedStatuses.includes(doc.status)) {
+      return res.status(400).json({ success: false, message: `Cannot request edit for video with status: ${doc.status}` });
+    }
+
+    // Auto-approve editing request if setting enabled
+    const newStatus = doc.autoApprovalSettings?.editingRequest ? 'editing' : 'editing_requested';
+    doc.status = newStatus;
+    await doc.save();
+
+    await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: newStatus });
+
+    res.json({ success: true, status: doc.status, message: 'Edit request submitted successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── POST /api/ugc-video/:id/accept
+// MobileUser accepts the edited video
+exports.acceptEditedVideo = async (req, res) => {
+  try {
+    const doc = await UGCVideo.findById(req.params.id);
+    if (!doc) return res.status(404).json({ success: false, message: 'Video not found' });
+
+    if (req.user.role === 'mobileuser' && String(doc.userId) !== String(req.user.id)) {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
+    if (doc.status !== 'edited') {
+      return res.status(400).json({ success: false, message: `Cannot accept video with status: ${doc.status}. Video must be in 'edited' status.` });
+    }
+
+    doc.status = 'approved';
+    await doc.save();
+
+    await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: 'approved' });
+
+    let editedVideoUrl = '';
+    if (doc.editedVideoKey) {
+      try { editedVideoUrl = await getobject(doc.editedVideoKey); } catch { editedVideoUrl = ''; }
+    }
+
+    res.json({ success: true, status: doc.status, editedVideoUrl, message: 'Video accepted successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── POST /api/ugc-video/:id/reject
+// MobileUser rejects the edited video (sends back for re-edit)
+exports.rejectEditedVideo = async (req, res) => {
+  try {
+    const { reason } = req.body;
+
+    const doc = await UGCVideo.findById(req.params.id);
+    if (!doc) return res.status(404).json({ success: false, message: 'Video not found' });
+
+    if (req.user.role === 'mobileuser' && String(doc.userId) !== String(req.user.id)) {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
+    if (doc.status !== 'edited') {
+      return res.status(400).json({ success: false, message: `Cannot reject video with status: ${doc.status}. Video must be in 'edited' status.` });
+    }
+
+    doc.status = 'rejected';
+    if (reason) doc.objectionNotes = reason;
+    await doc.save();
+
+    await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: 'rejected' });
+
+    res.json({ success: true, status: doc.status, message: 'Video rejected. Backend will re-process.' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // ── PATCH /api/ugc-video/:id/edited
 // Client/Editor uploads final edited video key
 exports.submitEditedVideo = async (req, res) => {

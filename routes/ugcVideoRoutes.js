@@ -17,6 +17,15 @@ router.get('/', authenticate, allAccess, ctrl.getUserVideos);
 // Get processing status (AI pipeline polling)
 router.get('/:id/status', authenticate, allAccess, ctrl.getProcessingStatus);
 
+// Request editing — mobileuser clicks "Edit Video"
+router.post('/:id/request-edit', authenticate, allAccess, ctrl.requestEdit);
+
+// Accept edited video — mobileuser approves the edited version
+router.post('/:id/accept', authenticate, allAccess, ctrl.acceptEditedVideo);
+
+// Reject edited video — mobileuser rejects, sends back for re-edit
+router.post('/:id/reject', authenticate, allAccess, ctrl.rejectEditedVideo);
+
 // Update video status (approve/reject) — client only
 router.patch('/:id', authenticate, authorize('client', 'admin', 'super_admin'), ctrl.updateVideoStatus);
 

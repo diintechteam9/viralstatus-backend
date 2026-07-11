@@ -28,7 +28,7 @@ const ugcPrompterSchema = new mongoose.Schema({
   hashtags:    { type: [String], default: [] },
   status:      {
     type: String,
-    enum: ['pending', 'submitted', 'edited', 'approved', 'objection', 'rejected', 'draft', 'active', 'archived'],
+    enum: ['pending', 'submitted', 'editing_requested', 'editing', 'edited', 'approved', 'objection', 'rejected', 'draft', 'active', 'archived'],
     default: 'pending',
   },
   isAiGenerated: { type: Boolean, default: false },
