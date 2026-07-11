@@ -11,13 +11,13 @@ const aiHeaders = () => ({ 'X-App-Token': AI_TOKEN() });
 
 // ── GET /api/ugc-prompter/public/:promptId
 // User script dekhta hai — mobileuser ke liye
+// Returns prompt details regardless of status (active, draft, pending, etc.)
 exports.getPromptForUser = async (req, res) => {
   try {
     const prompt = await UGCPrompter.findById(req.params.promptId)
-      .select('_id title category tone duration script status createdAt')
+      .select('_id title category tone duration script status createdAt platform brandName productName keyPoints')
       .lean();
     if (!prompt) return res.status(404).json({ success: false, message: 'Prompt not found' });
-    if (prompt.status !== 'active') return res.status(403).json({ success: false, message: 'Prompt is not active' });
     res.json({ success: true, prompt });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
