@@ -220,7 +220,7 @@ exports.getUserVideos = async (req, res) => {
 exports.updateVideoStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const validStatuses = ['pending', 'submitted', 'edited', 'approved', 'objection', 'rejected'];
+    const validStatuses = ['pending', 'edited', 'approved', 'objection', 'rejected'];
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'Invalid status' });
     }
@@ -239,6 +239,11 @@ exports.updateVideoStatus = async (req, res) => {
       if (String(doc.clientId) !== clientId && String(doc.clientId) !== String(req.user.id)) {
         return res.status(403).json({ success: false, message: 'Unauthorized' });
       }
+    }
+
+    // Cannot approve from submitted status - user must request edit first
+    if (status === 'approved' && doc.status === 'submitted') {
+      return res.status(400).json({ success: false, message: 'Cannot approve video from submitted status. User must request editing first.' });
     }
 
     doc.status = status;
