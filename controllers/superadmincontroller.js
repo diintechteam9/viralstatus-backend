@@ -49,16 +49,21 @@ const loginSuperadmin = async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    console.log('Login attempt for email:', email);
+
     const superadmin = await Superadmin.findOne({ email });
 
-    const ispasswordvalid = await bcrypt.compare(password, superadmin.password);
-
-    if (!ispasswordvalid) {
-      return res.status(401).json({ meassage: "invalid credentials" });
+    if (!superadmin) {
+      console.log('Superadmin not found for email:', email);
+      return res.status(401).json({ message: "Superadmin not found" });
     }
 
-    if (!superadmin) {
-      return res.status(401).json({ message: "superadmin not found" });
+    console.log('Superadmin found, checking password...');
+    const isPasswordValid = await bcrypt.compare(password, superadmin.password);
+
+    if (!isPasswordValid) {
+      console.log('Password mismatch for email:', email);
+      return res.status(401).json({ message: "Invalid credentials" });
     }
 
     const token = generateAdminToken(superadmin._id);
@@ -66,12 +71,17 @@ const loginSuperadmin = async (req, res) => {
     res.status(200).json({
       success: true,
       token,
-      superadmin,
+      superadmin: {
+        _id: superadmin._id,
+        name: superadmin.name,
+        email: superadmin.email
+      },
     });
 
-    console.log("superamdin login successfully");
+    console.log("Superadmin login successful for:", email);
   } catch (error) {
-    console.log("login failed");
+    console.log("Login error:", error.message);
+    res.status(500).json({ message: "Login failed: " + error.message });
   }
 };
 
