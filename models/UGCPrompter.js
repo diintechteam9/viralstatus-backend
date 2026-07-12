@@ -19,16 +19,16 @@ const ugcPrompterSchema = new mongoose.Schema({
     enum: ['casual', 'professional', 'funny', 'emotional', 'energetic'],
     default: 'casual',
   },
-  duration:    { type: Number, default: 30 },   // seconds
+  duration:    { type: Number, default: 30 },
   brandName:   { type: String, default: '' },
   productName: { type: String, default: '' },
-  keyPoints:   { type: [String], default: [] },  // bullet points to cover
+  keyPoints:   { type: [String], default: [] },
   prompt:      { type: String, default: '' },
-  script:      { type: String, default: '' },    // optional full script
+  script:      { type: String, default: '' },
   hashtags:    { type: [String], default: [] },
   status:      {
     type: String,
-    enum: ['pending', 'submitted', 'editing_requested', 'editing', 'edited', 'approved', 'objection', 'rejected', 'draft', 'active', 'archived'],
+    enum: ['pending', 'submitted', 'edited', 'approved', 'objection', 'rejected', 'archived'],
     default: 'pending',
   },
   isAiGenerated: { type: Boolean, default: false },

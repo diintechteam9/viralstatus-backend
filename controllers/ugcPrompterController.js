@@ -13,21 +13,68 @@ function getGroq() {
   return _groq;
 }
 
-// ── GET all prompts for a client ─────────────────────────────────────────────
+// ── Input validation helpers ──────────────────────────────────────────────────
+function validatePromptInput(data) {
+  const errors = [];
+  
+  if (!data.title || typeof data.title !== 'string' || data.title.trim().length === 0) {
+    errors.push('Title is required and must be a non-empty string');
+  } else if (data.title.length > 200) {
+    errors.push('Title must be 200 characters or less');
+  }
+  
+  if (data.duration) {
+    const dur = Number(data.duration);
+    if (isNaN(dur) || dur < 5 || dur > 600) {
+      errors.push('Duration must be between 5 and 600 seconds');
+    }
+  }
+  
+  if (data.script && data.script.length > 5000) {
+    errors.push('Script must be 5000 characters or less');
+  }
+  
+  if (data.prompt && data.prompt.length > 2000) {
+    errors.push('Prompt must be 2000 characters or less');
+  }
+  
+  if (data.category && !['testimonial', 'demo', 'unboxing', 'tutorial', 'review', 'lifestyle', 'challenge', 'other'].includes(data.category)) {
+    errors.push('Invalid category');
+  }
+  
+  if (data.tone && !['casual', 'professional', 'funny', 'emotional', 'energetic'].includes(data.tone)) {
+    errors.push('Invalid tone');
+  }
+  
+  if (data.platform && !['instagram', 'youtube', 'both'].includes(data.platform)) {
+    errors.push('Invalid platform');
+  }
+  
+  return errors;
+}
+
+// ── GET all prompts for a client with pagination ──────────────────────────────
 exports.getPrompts = async (req, res) => {
   try {
     const clientId = String(req.user.clientId || req.user.id);
-    const { campaignId, status, category } = req.query;
+    const { campaignId, status, category, page = 1, limit = 20 } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
+    const skip = (pageNum - 1) * limitNum;
 
     const filter = { clientId };
     if (campaignId) filter.campaignId = campaignId;
-    if (status)     filter.status     = status;
-    if (category)   filter.category   = category;
+    if (status) filter.status = status;
+    if (category) filter.category = category;
 
-    const prompts = await UGCPrompter.find(filter).sort({ createdAt: -1 }).lean();
+    const [prompts, total] = await Promise.all([
+      UGCPrompter.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limitNum).lean(),
+      UGCPrompter.countDocuments(filter),
+    ]);
     
-    // Return only required fields with consistent naming
     const cleanedPrompts = prompts.map(p => ({
+      _id: p._id,
       id: p._id.toString(),
       title: p.title,
       category: p.category,
@@ -45,8 +92,13 @@ exports.getPrompts = async (req, res) => {
       keyPoints: p.keyPoints,
     }));
     
-    res.json({ success: true, prompts: cleanedPrompts });
+    res.json({ 
+      success: true, 
+      prompts: cleanedPrompts,
+      pagination: { page: pageNum, limit: limitNum, total, pages: Math.ceil(total / limitNum) }
+    });
   } catch (err) {
+    console.error('[UGCPrompter] getPrompts error:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -54,10 +106,16 @@ exports.getPrompts = async (req, res) => {
 // ── GET single prompt ────────────────────────────────────────────────────────
 exports.getPromptById = async (req, res) => {
   try {
+    const clientId = String(req.user.clientId || req.user.id);
     const prompt = await UGCPrompter.findById(req.params.id).lean();
+    
     if (!prompt) return res.status(404).json({ success: false, message: 'Prompt not found' });
     
-    // Return only required fields
+    // Validate ownership
+    if (String(prompt.clientId) !== clientId && req.user.role !== 'admin' && req.user.role !== 'super_admin') {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+    
     res.json({
       success: true,
       prompt: {
@@ -77,6 +135,7 @@ exports.getPromptById = async (req, res) => {
       }
     });
   } catch (err) {
+    console.error('[UGCPrompter] getPromptById error:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -90,25 +149,27 @@ exports.createPrompt = async (req, res) => {
       script, hashtags, status, isAiGenerated, autoApprovalSettings,
     } = req.body;
 
-    if (!title) {
-      return res.status(400).json({ success: false, message: 'title is required' });
+    // Validate input
+    const validationErrors = validatePromptInput({ title, duration, script, prompt, category, tone, platform });
+    if (validationErrors.length > 0) {
+      return res.status(400).json({ success: false, message: validationErrors.join('; ') });
     }
 
     const clientId = String(req.user.clientId || req.user.id);
 
     const doc = await UGCPrompter.create({
       clientId, campaignId: campaignId || '',
-      title, category, platform, tone,
-      duration: Number(duration) || 30,
-      brandName: brandName || '', productName: productName || '',
-      keyPoints: Array.isArray(keyPoints) ? keyPoints : [],
-      prompt: prompt || script || '',
-      script: script || '',
-      hashtags: Array.isArray(hashtags) ? hashtags : [],
-      status: status || 'active',
+      title: title.trim(), category: category || 'testimonial', platform: platform || 'instagram', tone: tone || 'casual',
+      duration: Math.min(600, Math.max(5, Number(duration) || 30)),
+      brandName: (brandName || '').trim(), productName: (productName || '').trim(),
+      keyPoints: Array.isArray(keyPoints) ? keyPoints.filter(k => k && typeof k === 'string').slice(0, 10) : [],
+      prompt: (prompt || script || '').trim(),
+      script: (script || '').trim(),
+      hashtags: Array.isArray(hashtags) ? hashtags.filter(h => h && typeof h === 'string').slice(0, 20) : [],
+      status: status || 'pending',
       isAiGenerated: !!isAiGenerated,
       autoApprovalSettings: autoApprovalSettings || {
-        recording: true,
+        recording: false,
         editingRequest: false,
         finalEditedVideo: false
       }
@@ -131,6 +192,7 @@ exports.createPrompt = async (req, res) => {
       }
     });
   } catch (err) {
+    console.error('[UGCPrompter] createPrompt error:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -138,22 +200,44 @@ exports.createPrompt = async (req, res) => {
 // ── PATCH update prompt ──────────────────────────────────────────────────────
 exports.updatePrompt = async (req, res) => {
   try {
+    const clientId = String(req.user.clientId || req.user.id);
+    const doc = await UGCPrompter.findById(req.params.id);
+    
+    if (!doc) return res.status(404).json({ success: false, message: 'Prompt not found' });
+    
+    // Validate ownership
+    if (String(doc.clientId) !== clientId && req.user.role !== 'admin' && req.user.role !== 'super_admin') {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
     const allowed = [
       'title', 'category', 'platform', 'tone', 'duration',
       'brandName', 'productName', 'keyPoints', 'prompt',
       'script', 'hashtags', 'status', 'campaignId', 'autoApprovalSettings',
     ];
+    
     const update = {};
     for (const key of allowed) {
-      if (req.body[key] !== undefined) update[key] = req.body[key];
+      if (req.body[key] !== undefined) {
+        if (key === 'title') update[key] = String(req.body[key]).trim();
+        else if (key === 'duration') update[key] = Math.min(600, Math.max(5, Number(req.body[key]) || 30));
+        else if (key === 'script' || key === 'prompt') update[key] = String(req.body[key]).trim().slice(0, 5000);
+        else if (key === 'keyPoints') update[key] = Array.isArray(req.body[key]) ? req.body[key].slice(0, 10) : [];
+        else if (key === 'hashtags') update[key] = Array.isArray(req.body[key]) ? req.body[key].slice(0, 20) : [];
+        else update[key] = req.body[key];
+      }
     }
-    if (update.duration) update.duration = Number(update.duration);
-    // Do NOT auto-change status when script/prompt is updated — only change if explicitly passed
 
-    const doc = await UGCPrompter.findByIdAndUpdate(req.params.id, update, { new: true });
-    if (!doc) return res.status(404).json({ success: false, message: 'Prompt not found' });
-    res.json({ success: true, prompt: doc });
+    // Validate update
+    const validationErrors = validatePromptInput(update);
+    if (validationErrors.length > 0) {
+      return res.status(400).json({ success: false, message: validationErrors.join('; ') });
+    }
+
+    const updated = await UGCPrompter.findByIdAndUpdate(req.params.id, update, { new: true });
+    res.json({ success: true, prompt: updated });
   } catch (err) {
+    console.error('[UGCPrompter] updatePrompt error:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -161,10 +245,20 @@ exports.updatePrompt = async (req, res) => {
 // ── DELETE prompt ────────────────────────────────────────────────────────────
 exports.deletePrompt = async (req, res) => {
   try {
-    const doc = await UGCPrompter.findByIdAndDelete(req.params.id);
+    const clientId = String(req.user.clientId || req.user.id);
+    const doc = await UGCPrompter.findById(req.params.id);
+    
     if (!doc) return res.status(404).json({ success: false, message: 'Prompt not found' });
+    
+    // Validate ownership
+    if (String(doc.clientId) !== clientId && req.user.role !== 'admin' && req.user.role !== 'super_admin') {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
+    await UGCPrompter.findByIdAndDelete(req.params.id);
     res.json({ success: true, message: 'Prompt deleted' });
   } catch (err) {
+    console.error('[UGCPrompter] deletePrompt error:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -172,7 +266,6 @@ exports.deletePrompt = async (req, res) => {
 // ── POST AI generate prompt + script via Groq ────────────────────────────────
 exports.generatePrompt = async (req, res) => {
   try {
-    // Validate Groq API key at request time
     if (!process.env.GROQ_API_KEY) {
       return res.status(503).json({ 
         success: false, 
@@ -187,10 +280,15 @@ exports.generatePrompt = async (req, res) => {
       keyPoints = [],
     } = req.body;
 
-    const brand   = topic || 'our brand';
-    const product = topic || 'our product';
-    const kp      = Array.isArray(keyPoints) && keyPoints.length
-      ? keyPoints.filter(p => p.trim()).map((p, i) => `${i + 1}. ${p}`).join('\n')
+    // Validate input
+    if (!topic || typeof topic !== 'string' || topic.trim().length === 0) {
+      return res.status(400).json({ success: false, message: 'Topic is required' });
+    }
+
+    const brand = topic.trim().slice(0, 100);
+    const product = topic.trim().slice(0, 100);
+    const kp = Array.isArray(keyPoints) && keyPoints.length
+      ? keyPoints.filter(p => p && typeof p === 'string').slice(0, 5).map((p, i) => `${i + 1}. ${p}`).join('\n')
       : '';
 
     const platformLabel =
@@ -229,19 +327,32 @@ RULES:
 - Start response with { immediately`;
 
     const groq = getGroq();
-    const chat = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: aiPrompt }],
-      temperature: 0.75,
-      max_tokens: 1800,
-    });
+    
+    let chat;
+    try {
+      chat = await Promise.race([
+        groq.chat.completions.create({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: aiPrompt }],
+          temperature: 0.75,
+          max_tokens: 1800,
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Groq API timeout after 30 seconds')), 30000)
+        )
+      ]);
+    } catch (err) {
+      if (err.message.includes('timeout')) {
+        return res.status(504).json({ success: false, message: 'AI service timeout. Please try again.' });
+      }
+      throw err;
+    }
 
     const rawText = (chat.choices?.[0]?.message?.content || '').trim();
 
     // ── Robust JSON extraction ───────────────────────────────────────────
     let parsed = null;
     try {
-      // Strip markdown code fences if model still adds them
       const cleaned = rawText
         .replace(/^```(?:json)?\s*/i, '')
         .replace(/\s*```$/i, '')
@@ -253,35 +364,23 @@ RULES:
       parsed = null;
     }
 
-    // ── Sanitize: if any value is itself a JSON string, unwrap it ────────
+    // ── Sanitize parsed data ──────────────────────────────────────────────
     if (parsed) {
       for (const key of ['title', 'instructions', 'script', 'prompt']) {
         if (typeof parsed[key] === 'string') {
-          // If AI returned escaped JSON inside a string, try to unwrap
           const v = parsed[key].trim();
           if ((v.startsWith('{') || v.startsWith('[')) ) {
             try { parsed[key] = JSON.stringify(JSON.parse(v)); } catch { /* keep as-is */ }
           }
-          // Unescape literal \n sequences into real newlines
           parsed[key] = parsed[key].replace(/\\n/g, '\n');
         }
       }
     }
 
-    // ── Fallback if JSON parsing still fails ────────────────────────────
-    if (!parsed) {
-      parsed = {
-        title: `${product} UGC — ${category.charAt(0).toUpperCase() + category.slice(1)} (${duration}s)`,
-        instructions: `• Film in natural light near a window\n• Hold product clearly in frame\n• Speak directly to camera with ${tone} energy\n• Show the product in action\n• End with a clear call to action`,
-        script: `[HOOK]\nHey everyone! I have to tell you about ${product} — this one genuinely surprised me.\n\n[MAIN CONTENT]\n${kp || `I've been using it for a while now and honestly the results speak for themselves. It's one of those things you don't know you need until you try it.`}\n\n[CTA]\nIf you want to try it yourself, check the link in bio! Drop a comment if you have questions — I reply to everyone! 🙌`,
-        prompt: `A ${tone} ${category} video about ${product} for ${platformLabel}.`,
-        hashtags: [
-          brand.toLowerCase().replace(/\s+/g, ''),
-          product.toLowerCase().replace(/\s+/g, ''),
-          category, 'ugc', 'ugccreator',
-          platform === 'youtube' ? 'youtuber' : 'instagramreels',
-        ].filter(Boolean),
-      };
+    // ── Validate required fields ──────────────────────────────────────────
+    if (!parsed || !parsed.title || !parsed.script || !parsed.instructions) {
+      console.error('[UGCPrompter] AI response missing required fields');
+      return res.status(400).json({ success: false, message: 'AI generation failed. Please try again.' });
     }
 
     // Ensure hashtags is array
@@ -290,12 +389,12 @@ RULES:
     }
 
     const generatedData = {
-      title:        parsed.title || `${brand} — ${category} (${duration}s)`,
-      instructions: parsed.instructions || '',
-      script:       parsed.script || '',
+      title: parsed.title.slice(0, 200),
+      instructions: parsed.instructions.slice(0, 2000),
+      script: parsed.script.slice(0, 5000),
       category,
       tone,
-      duration,
+      duration: Math.min(600, Math.max(5, Number(duration) || 30)),
       isAiGenerated: true,
     };
 
@@ -311,11 +410,11 @@ RULES:
       duration: generatedData.duration,
       brandName: brand,
       productName: product,
-      keyPoints: Array.isArray(keyPoints) ? keyPoints : [],
+      keyPoints: Array.isArray(keyPoints) ? keyPoints.slice(0, 10) : [],
       prompt: parsed.instructions || parsed.prompt || '',
       script: generatedData.script,
-      hashtags: parsed.hashtags || [],
-      status: 'active',
+      hashtags: parsed.hashtags.slice(0, 20) || [],
+      status: 'pending',
       isAiGenerated: true,
     });
 
