@@ -8,6 +8,9 @@ const allAccess = authorize('client', 'admin', 'super_admin', 'mobileuser');
 // Upload URL — get R2 presigned URL before uploading
 router.post('/upload-url', authenticate, allAccess, ctrl.getUploadUrl);
 
+// Proxy upload to bypass R2 CORS limitations (needs to be public since frontend PUT doesn't carry Auth headers)
+router.put('/proxy-upload', express.raw({ type: '*/*', limit: '200mb' }), ctrl.proxyUpload);
+
 // Submit video after R2 upload
 router.post('/', authenticate, allAccess, ctrl.submitVideo);
 

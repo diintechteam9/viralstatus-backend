@@ -51,7 +51,7 @@ exports.getPromptForUser = async (req, res) => {
 };
 
 // ── POST /api/ugc-video/upload-url
-// R2 presigned URL milega — Android/frontend dono ke liye
+// Backend proxy upload URL milega — Android/frontend dono ke liye
 // Body: { promptId, fileName, contentType }
 exports.getUploadUrl = async (req, res) => {
   try {
@@ -65,9 +65,34 @@ exports.getUploadUrl = async (req, res) => {
     const key    = `ugc-videos/${promptId}/${userId}_${Date.now()}.${ext}`;
     const type   = contentType || 'video/mp4';
 
-    const uploadUrl = await putobject(key, type);
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const uploadUrl = `${baseUrl}/api/ugc-video/proxy-upload?key=${encodeURIComponent(key)}&type=${encodeURIComponent(type)}`;
+
     res.json({ success: true, uploadUrl, key });
   } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── PUT /api/ugc-video/proxy-upload
+// Proxy upload directly to R2 using server credentials to bypass CORS
+exports.proxyUpload = async (req, res) => {
+  try {
+    const { key, type } = req.query;
+    if (!key) {
+      return res.status(400).json({ success: false, message: 'key is required' });
+    }
+
+    await r2Client.send(new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET,
+      Key: decodeURIComponent(key),
+      Body: req.body, // express.raw middleware parses this into a Buffer
+      ContentType: type || 'video/mp4',
+    }));
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[UGC Proxy Upload] Error:', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
