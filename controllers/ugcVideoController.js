@@ -65,7 +65,15 @@ exports.getUploadUrl = async (req, res) => {
     const key    = `ugc-videos/${promptId}/${userId}_${Date.now()}.${ext}`;
     const type   = contentType || 'video/mp4';
 
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.get('host');
+    let baseUrl = `${protocol}://${host}`;
+
+    if (process.env.NODE_ENV === 'production' && (process.env.BACKEND_URL || process.env.BASE_URL)) {
+      baseUrl = process.env.BACKEND_URL || process.env.BASE_URL;
+    }
+    baseUrl = baseUrl.replace(/\/$/, '');
+
     const uploadUrl = `${baseUrl}/api/ugc-video/proxy-upload?key=${encodeURIComponent(key)}&type=${encodeURIComponent(type)}`;
 
     res.json({ success: true, uploadUrl, key });
