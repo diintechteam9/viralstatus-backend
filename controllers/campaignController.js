@@ -1257,44 +1257,84 @@ exports.getParticipantGeoJSON = async (req, res) => {
     const { campaignId } = req.params;
     const mongoose = require('mongoose');
 
-    const campaign = await Campaign.findById(campaignId).select('userIds').lean();
+    const campaign = await Campaign.findById(campaignId).select('userIds location').lean();
     if (!campaign) {
       return res.status(404).json({ success: false, message: 'Campaign not found' });
     }
 
     const userIds = campaign.userIds || [];
-    if (userIds.length === 0) {
-      return res.json({
-        success: true,
-        geojson: { type: 'FeatureCollection', features: [] },
-        bounds: null,
-        center: null,
-        participants: []
-      });
+    let users = [];
+    if (userIds.length > 0) {
+      const objectIds = [];
+      for (const id of userIds) {
+        if (typeof id === 'string' && /^[a-f0-9]{24}$/i.test(id)) {
+          objectIds.push(new mongoose.Types.ObjectId(id));
+        }
+      }
+
+      users = await MobileUser.find({
+        $or: [
+          { googleId: { $in: userIds } },
+          { _id: { $in: objectIds } }
+        ]
+      }).select('name email city pincode location locationAddress').lean();
     }
 
-    const objectIds = [];
-    for (const id of userIds) {
-      if (typeof id === 'string' && /^[a-f0-9]{24}$/i.test(id)) {
-        objectIds.push(new mongoose.Types.ObjectId(id));
+    const userPincodes = users.map(u => u.pincode || u.locationAddress?.pincode).filter(Boolean);
+
+    // Find all pincodes that belong to the campaign's location (e.g., Noida)
+    const campaignLocation = campaign.location || '';
+    const campaignPincodes = [];
+    const geoJsonService = require('../services/geoJsonService');
+    let geojson = { type: 'FeatureCollection', features: [] };
+
+    if (campaignLocation && campaignLocation.toLowerCase() === 'india') {
+      const rawGeoJSON = await geoJsonService.getGeoJSON();
+      if (rawGeoJSON && rawGeoJSON.features) {
+        geojson = {
+          type: 'FeatureCollection',
+          features: rawGeoJSON.features.map(feature => ({
+            type: 'Feature',
+            geometry: feature.geometry,
+            properties: {
+              pincode: feature.properties?.Pincode || feature.properties?.pincode || feature.properties?.postal_code || feature.properties?.code,
+              city: feature.properties?.city || feature.properties?.Office_Name || feature.properties?.Division || '',
+              state: feature.properties?.state || feature.properties?.Circle || '',
+              area: feature.properties?.area || feature.properties?.Office_Name || '',
+              name: feature.properties?.name || feature.properties?.Office_Name || ''
+            }
+          }))
+        };
+      }
+    } else if (campaignLocation) {
+      const geoJSON = await geoJsonService.getGeoJSON();
+      if (geoJSON && geoJSON.features) {
+        const q = campaignLocation.toLowerCase().trim();
+        geoJSON.features.forEach(f => {
+          const props = f.properties || {};
+          const isMatch = Object.values(props).some(val => 
+            String(val).toLowerCase().includes(q)
+          );
+          if (isMatch) {
+            const pincode = props.Pincode || props.pincode || props.postal_code || props.code;
+            if (pincode) campaignPincodes.push(pincode);
+          }
+        });
       }
     }
 
-    // Retrieve all participants for the campaign
-    const users = await MobileUser.find({
-      $or: [
-        { googleId: { $in: userIds } },
-        { _id: { $in: objectIds } }
-      ]
-    }).select('name email city pincode location locationAddress').lean();
+    // Combine participant pincodes and campaign area pincodes
+    const pincodes = [...new Set([...campaignPincodes, ...userPincodes])];
 
-    const pincodes = [...new Set(users.map(u => u.pincode || u.locationAddress?.pincode).filter(Boolean))];
-
-    let geojson = { type: 'FeatureCollection', features: [] };
     let bounds = null;
     let center = null;
 
-    if (pincodes.length > 0) {
+    if (campaignLocation && campaignLocation.toLowerCase() === 'india') {
+      if (pincodes.length > 0) {
+        bounds = await geoJsonService.getBoundsForPincodes(pincodes);
+        center = await geoJsonService.getCenterForPincodes(pincodes);
+      }
+    } else if (pincodes.length > 0) {
       geojson = await geoJsonService.createFeatureCollection(pincodes);
       bounds = await geoJsonService.getBoundsForPincodes(pincodes);
       center = await geoJsonService.getCenterForPincodes(pincodes);
@@ -1321,11 +1361,11 @@ exports.getParticipantGeoJSON = async (req, res) => {
       geojson,
       bounds,
       center,
-      pincodeCount: pincodes.length,
-      participants
+      participants,
+      pincodeCount: pincodes.length
     });
   } catch (err) {
     console.error('getParticipantGeoJSON error:', err);
     res.status(500).json({ success: false, message: 'Server error', error: err.message });
   }
-};  
+};
