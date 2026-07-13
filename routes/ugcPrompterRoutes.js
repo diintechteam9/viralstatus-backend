@@ -12,7 +12,7 @@ const allRoles = authorize('client', 'admin', 'super_admin', 'mobileuser');
 router.post('/generate', authenticate, clientOnly, ctrl.generatePrompt);
 
 // Public script view for users (mobileuser)
-router.get('/public/:promptId', authenticate, mobileOnly, videoCtrl.getPromptForUser);
+router.get('/public/:promptId', authenticate, mobileOnly, videoCtrl.getScriptWithVideo);
 
 // Get prompts - client and mobileuser
 router.get('/', authenticate, allRoles, ctrl.getPrompts);

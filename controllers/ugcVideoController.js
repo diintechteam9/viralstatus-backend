@@ -10,49 +10,44 @@ const AI_BASE  = () => (process.env.UGC_AI_BASE_URL || '').replace(/\/$/, '');
 const AI_TOKEN = () => process.env.UGC_AI_APP_TOKEN || '';
 const aiHeaders = () => ({ 'X-App-Token': AI_TOKEN() });
 
-// ── GET /api/ugc-prompter/public/:promptId
-// User script dekhta hai — mobileuser ke liye
-// Returns prompt details + all video submissions for this prompt with complete data
-exports.getPromptForUser = async (req, res) => {
+// ── GET /api/ugc-video/script/:promptId
+// Get script details + video submission for this script
+exports.getScriptWithVideo = async (req, res) => {
   try {
-    const prompt = await UGCPrompter.findById(req.params.promptId)
+    const script = await UGCPrompter.findById(req.params.promptId)
       .select('_id title category tone duration script status createdAt platform brandName productName keyPoints')
       .lean();
-    if (!prompt) return res.status(404).json({ success: false, message: 'Prompt not found' });
+    if (!script) return res.status(404).json({ success: false, message: 'Script not found' });
 
-    // Get all videos submitted for this prompt with complete details
-    const videos = await UGCVideo.find({ promptId: req.params.promptId })
-      .sort({ createdAt: -1 })
-      .lean();
+    // Get video for this script (only one allowed)
+    const video = await UGCVideo.findOne({ promptId: req.params.promptId }).lean();
 
-    // Generate signed URLs for all video keys
-    for (const v of videos) {
-      v.id = v._id.toString();
-      if (v.videoKey) {
-        try { v.videoUrl = await getobject(v.videoKey); } catch { v.videoUrl = ''; }
+    if (video) {
+      video.id = video._id.toString();
+      if (video.videoKey) {
+        try { video.videoUrl = await getobject(video.videoKey); } catch { video.videoUrl = ''; }
       }
-      if (v.editedVideoKey && v.editedVideoKey.trim()) {
-        try { v.editedVideoUrl = await getobject(v.editedVideoKey.trim()); } catch { v.editedVideoUrl = ''; }
+      if (video.editedVideoKey && video.editedVideoKey.trim()) {
+        try { video.editedVideoUrl = await getobject(video.editedVideoKey.trim()); } catch { video.editedVideoUrl = ''; }
       } else {
-        v.editedVideoUrl = '';
+        video.editedVideoUrl = '';
       }
-      if (v.processedVideoKey && v.processedVideoKey.trim()) {
-        try { v.processedVideoUrl = await getobject(v.processedVideoKey.trim()); } catch { v.processedVideoUrl = ''; }
-      } else { v.processedVideoUrl = ''; }
-      if (v.viralVideoKey && v.viralVideoKey.trim()) {
-        try { v.viralVideoUrl = await getobject(v.viralVideoKey.trim()); } catch { v.viralVideoUrl = ''; }
-      } else { v.viralVideoUrl = ''; }
+      if (video.processedVideoKey && video.processedVideoKey.trim()) {
+        try { video.processedVideoUrl = await getobject(video.processedVideoKey.trim()); } catch { video.processedVideoUrl = ''; }
+      } else { video.processedVideoUrl = ''; }
+      if (video.viralVideoKey && video.viralVideoKey.trim()) {
+        try { video.viralVideoUrl = await getobject(video.viralVideoKey.trim()); } catch { video.viralVideoUrl = ''; }
+      } else { video.viralVideoUrl = ''; }
     }
 
-    res.json({ success: true, prompt, videos });
+    res.json({ success: true, script, video: video || null });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
 // ── POST /api/ugc-video/upload-url
-// Backend proxy upload URL milega — Android/frontend dono ke liye
-// Body: { promptId, fileName, contentType }
+// Get presigned upload URL
 exports.getUploadUrl = async (req, res) => {
   try {
     const { promptId, fileName, contentType } = req.body;
@@ -106,9 +101,8 @@ exports.proxyUpload = async (req, res) => {
 };
 
 // ── POST /api/ugc-video
-// Video submit karo after R2 upload
-// Body: { promptId, videoKey, note }
-// IMPORTANT: NO automatic AI processing - user decides via request-edit endpoint
+// Video submit after R2 upload
+// Body: { scriptId, videoKey, note }
 exports.submitVideo = async (req, res) => {
   try {
     const { promptId, videoKey, note } = req.body;
@@ -116,24 +110,19 @@ exports.submitVideo = async (req, res) => {
       return res.status(400).json({ success: false, message: 'promptId and videoKey are required' });
     }
 
-    const prompterDoc = await UGCPrompter.findById(promptId);
-    if (!prompterDoc) {
-      return res.status(404).json({ success: false, message: 'Prompter script not found' });
+    const scriptDoc = await UGCPrompter.findById(promptId);
+    if (!scriptDoc) {
+      return res.status(404).json({ success: false, message: 'Script not found' });
     }
 
-    // Allow video submission for all active script statuses except archived
-    const blockedStatuses = ['archived'];
-    if (blockedStatuses.includes(prompterDoc.status)) {
-      return res.status(403).json({ 
-        success: false, 
-        message: `Cannot submit video for archived script.` 
-      });
+    // Check if video already exists for this script
+    const existingVideo = await UGCVideo.findOne({ promptId });
+    if (existingVideo) {
+      return res.status(400).json({ success: false, message: 'Video already uploaded for this script. One video per script allowed.' });
     }
 
-    const userId   = String(req.user.id);
-    const clientId = String(req.user.clientId || prompterDoc.clientId || req.user.id);
-
-    // Always start with 'submitted' status - user will decide if they want editing
+    const userId = String(req.user.id);
+    const clientId = String(req.user.clientId || scriptDoc.clientId || req.user.id);
     const initialStatus = 'submitted';
 
     const doc = await UGCVideo.create({
@@ -142,21 +131,24 @@ exports.submitVideo = async (req, res) => {
       note: note || '',
       status: initialStatus,
       processingStatus: 'none',
+      autoApprovalSettings: {
+        recording: false, editingRequest: false, finalEditedVideo: false,
+      },
     });
 
-    // Update prompter status to match video
-    await UGCPrompter.findByIdAndUpdate(promptId, { status: initialStatus });
+    // Mark script as having video
+    await UGCPrompter.findByIdAndUpdate(promptId, { hasVideo: true, videoId: doc._id });
 
     res.status(201).json({
       success: true,
       video: {
-        _id:              doc._id,
-        promptId:         doc.promptId,
-        videoKey:         doc.videoKey,
-        status:           doc.status,
+        _id: doc._id,
+        promptId: doc.promptId,
+        videoKey: doc.videoKey,
+        status: doc.status,
         processingStatus: doc.processingStatus,
-        note:             doc.note,
-        createdAt:        doc.createdAt,
+        note: doc.note,
+        createdAt: doc.createdAt,
       },
       message: 'Video submitted successfully. Please review and decide if you want editing.',
     });
@@ -213,7 +205,7 @@ exports.getUserVideos = async (req, res) => {
 
     const videos = await UGCVideo.find(filter)
       .sort({ createdAt: -1 })
-      .populate('promptId', '_id title category script platform tone duration brandName productName keyPoints status')
+      .populate('promptId', '_id title category script platform tone duration brandName productName keyPoints')
       .lean();
 
     // Generate fresh signed URLs for all video keys
@@ -322,6 +314,9 @@ exports.deleteVideo = async (req, res) => {
 
     try { await deleteObject(doc.videoKey); } catch { }
 
+    // Mark script as not having video
+    await UGCPrompter.findByIdAndUpdate(doc.promptId, { hasVideo: false, videoId: null });
+
     await doc.deleteOne();
     res.json({ success: true, message: 'Video deleted' });
   } catch (err) {
@@ -408,11 +403,8 @@ exports.requestEdit = async (req, res) => {
       return res.status(400).json({ success: false, message: `Cannot request edit for video with status: ${doc.status}` });
     }
 
-    // Always set status to 'editing_requested' - no auto approval
     doc.status = 'editing_requested';
     await doc.save();
-
-    await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: doc.status });
 
     // ── NOW START AI PROCESSING PIPELINE ──────────────────────────────────
     const baseUrl = AI_BASE();
@@ -501,8 +493,6 @@ exports.acceptEditedVideo = async (req, res) => {
 
     doc.status = 'approved';
     await doc.save();
-
-    await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: 'approved' });
 
     let editedVideoUrl = '';
     if (doc.editedVideoKey) {
