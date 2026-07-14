@@ -136,8 +136,8 @@ exports.submitVideo = async (req, res) => {
       },
     });
 
-    // Mark script as having video
-    await UGCPrompter.findByIdAndUpdate(promptId, { hasVideo: true, videoId: doc._id });
+    // Mark script as having video and update status
+    await UGCPrompter.findByIdAndUpdate(promptId, { hasVideo: true, videoId: doc._id, status: doc.status });
 
     res.status(201).json({
       success: true,
@@ -406,6 +406,8 @@ exports.requestEdit = async (req, res) => {
     doc.status = 'editing_requested';
     await doc.save();
 
+    await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: 'editing_requested' });
+
     // ── NOW START AI PROCESSING PIPELINE ──────────────────────────────────
     const baseUrl = AI_BASE();
     if (baseUrl && AI_TOKEN()) {
@@ -493,6 +495,8 @@ exports.acceptEditedVideo = async (req, res) => {
 
     doc.status = 'approved';
     await doc.save();
+
+    await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: 'approved' });
 
     let editedVideoUrl = '';
     if (doc.editedVideoKey) {
