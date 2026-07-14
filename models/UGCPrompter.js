@@ -32,6 +32,10 @@ const ugcPrompterSchema = new mongoose.Schema({
     default: 'pending',
   },
   isAiGenerated: { type: Boolean, default: false },
+  creatorId:    { type: String, default: '', index: true },
+  isPrivate:    { type: Boolean, default: false },
+  hasVideo:     { type: Boolean, default: false },
+  videoId:      { type: mongoose.Schema.Types.ObjectId, ref: 'UGCVideo', default: null },
   autoApprovalSettings: {
     recording: { type: Boolean, default: false },
     editingRequest: { type: Boolean, default: false },

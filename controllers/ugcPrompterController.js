@@ -64,6 +64,12 @@ exports.getPrompts = async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     const filter = { clientId };
+    if (req.user.role === 'mobileuser') {
+      filter.$or = [
+        { isPrivate: { $ne: true } },
+        { creatorId: req.user.id }
+      ];
+    }
     if (campaignId) filter.campaignId = campaignId;
     if (status) filter.status = status;
     if (category) filter.category = category;
@@ -115,6 +121,13 @@ exports.getPromptById = async (req, res) => {
     if (String(prompt.clientId) !== clientId && req.user.role !== 'admin' && req.user.role !== 'super_admin') {
       return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
+
+    // Additional privacy check for creators
+    if (req.user.role === 'mobileuser') {
+      if (prompt.isPrivate && prompt.creatorId !== req.user.id) {
+        return res.status(403).json({ success: false, message: 'Unauthorized. This script is private.' });
+      }
+    }
     
     res.json({
       success: true,
@@ -155,6 +168,10 @@ exports.createPrompt = async (req, res) => {
       return res.status(400).json({ success: false, message: validationErrors.join('; ') });
     }
 
+    const isCreator = req.user.role === 'mobileuser';
+    const creatorId = isCreator ? req.user.id : '';
+    const isPrivate = isCreator;
+
     const clientId = String(req.user.clientId || req.user.id);
 
     const doc = await UGCPrompter.create({
@@ -168,6 +185,8 @@ exports.createPrompt = async (req, res) => {
       hashtags: Array.isArray(hashtags) ? hashtags.filter(h => h && typeof h === 'string').slice(0, 20) : [],
       status: status || 'pending',
       isAiGenerated: !!isAiGenerated,
+      creatorId,
+      isPrivate,
       autoApprovalSettings: autoApprovalSettings || {
         recording: false,
         editingRequest: false,
@@ -187,6 +206,8 @@ exports.createPrompt = async (req, res) => {
         script: doc.script,
         status: doc.status,
         isAiGenerated: doc.isAiGenerated,
+        creatorId: doc.creatorId,
+        isPrivate: doc.isPrivate,
         createdAt: doc.createdAt,
         updatedAt: doc.updatedAt,
       }
@@ -208,6 +229,13 @@ exports.updatePrompt = async (req, res) => {
     // Validate ownership
     if (String(doc.clientId) !== clientId && req.user.role !== 'admin' && req.user.role !== 'super_admin') {
       return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
+    // Creators can only edit their own private scripts
+    if (req.user.role === 'mobileuser') {
+      if (!doc.isPrivate || doc.creatorId !== req.user.id) {
+        return res.status(403).json({ success: false, message: 'Unauthorized. You can only edit your own private scripts.' });
+      }
     }
 
     const allowed = [
@@ -253,6 +281,13 @@ exports.deletePrompt = async (req, res) => {
     // Validate ownership
     if (String(doc.clientId) !== clientId && req.user.role !== 'admin' && req.user.role !== 'super_admin') {
       return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
+    // Creators can only delete their own private scripts
+    if (req.user.role === 'mobileuser') {
+      if (!doc.isPrivate || doc.creatorId !== req.user.id) {
+        return res.status(403).json({ success: false, message: 'Unauthorized. You can only delete your own private scripts.' });
+      }
     }
 
     await UGCPrompter.findByIdAndDelete(req.params.id);
@@ -398,6 +433,10 @@ RULES:
       isAiGenerated: true,
     };
 
+    const isCreator = req.user.role === 'mobileuser';
+    const creatorId = isCreator ? req.user.id : '';
+    const isPrivate = isCreator;
+
     // Auto-save to database
     const clientId = String(req.user.clientId || req.user.id);
     const savedPrompt = await UGCPrompter.create({
@@ -416,6 +455,8 @@ RULES:
       hashtags: parsed.hashtags.slice(0, 20) || [],
       status: 'pending',
       isAiGenerated: true,
+      creatorId,
+      isPrivate,
     });
 
     res.json({
@@ -424,6 +465,8 @@ RULES:
       saved: {
         _id: savedPrompt._id,
         title: savedPrompt.title,
+        creatorId: savedPrompt.creatorId,
+        isPrivate: savedPrompt.isPrivate,
       },
     });
   } catch (err) {
