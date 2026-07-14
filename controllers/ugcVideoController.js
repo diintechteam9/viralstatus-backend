@@ -451,9 +451,9 @@ exports.requestEdit = async (req, res) => {
 
           const processBody = {
             caption: true, subtitle_style: 'two_line_zoom_in',
-            broll: true, music: true, bgm_mood: 'Motivational',
+            broll: true, broll_source: 'pexels', music: true, bgm_mood: 'Motivational',
             sfx: true, zoom: true, silence: true, jumpcut: true,
-            facetrack: true, viral: true, background: false, logo: false,
+            facetrack: true, viral: true, background: false, logo: true,
             video_quality: '1080p',
           };
           await axios.post(`${baseUrl}/api/ugc/process/${jobId}`, processBody, {

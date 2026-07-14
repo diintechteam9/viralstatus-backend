@@ -96,6 +96,7 @@ exports.getPrompts = async (req, res) => {
       brandName: p.brandName,
       productName: p.productName,
       keyPoints: p.keyPoints,
+      type: p.isPrivate ? 'private' : 'public',
     }));
     
     res.json({ 
@@ -124,7 +125,7 @@ exports.getPromptById = async (req, res) => {
 
     // Additional privacy check for creators
     if (req.user.role === 'mobileuser') {
-      if (prompt.isPrivate && prompt.creatorId !== req.user.id) {
+      if (prompt.isPrivate && prompt.creatorId !== String(req.user.id)) {
         return res.status(403).json({ success: false, message: 'Unauthorized. This script is private.' });
       }
     }
@@ -145,6 +146,7 @@ exports.getPromptById = async (req, res) => {
         brandName: prompt.brandName,
         productName: prompt.productName,
         keyPoints: prompt.keyPoints,
+        type: prompt.isPrivate ? 'private' : 'public',
       }
     });
   } catch (err) {
@@ -208,6 +210,7 @@ exports.createPrompt = async (req, res) => {
         isAiGenerated: doc.isAiGenerated,
         creatorId: doc.creatorId,
         isPrivate: doc.isPrivate,
+        type: doc.isPrivate ? 'private' : 'public',
         createdAt: doc.createdAt,
         updatedAt: doc.updatedAt,
       }
@@ -233,7 +236,7 @@ exports.updatePrompt = async (req, res) => {
 
     // Creators can only edit their own private scripts
     if (req.user.role === 'mobileuser') {
-      if (!doc.isPrivate || doc.creatorId !== req.user.id) {
+      if (!doc.isPrivate || doc.creatorId !== String(req.user.id)) {
         return res.status(403).json({ success: false, message: 'Unauthorized. You can only edit your own private scripts.' });
       }
     }
@@ -285,7 +288,7 @@ exports.deletePrompt = async (req, res) => {
 
     // Creators can only delete their own private scripts
     if (req.user.role === 'mobileuser') {
-      if (!doc.isPrivate || doc.creatorId !== req.user.id) {
+      if (!doc.isPrivate || doc.creatorId !== String(req.user.id)) {
         return res.status(403).json({ success: false, message: 'Unauthorized. You can only delete your own private scripts.' });
       }
     }
@@ -467,6 +470,7 @@ RULES:
         title: savedPrompt.title,
         creatorId: savedPrompt.creatorId,
         isPrivate: savedPrompt.isPrivate,
+        type: savedPrompt.isPrivate ? 'private' : 'public',
       },
     });
   } catch (err) {

@@ -119,11 +119,11 @@ async function processUGCWithPexels(videoDoc) {
       processedVideoKey: brollKey,
       processingStatus: 'completed',
       processingProgress: 100,
-      status: videoDoc.autoApprovalSettings?.recording ? 'approved' : 'submitted',
+      status: videoDoc.autoApprovalSettings?.recording ? 'approved' : 'edited',
     });
 
     await UGCPrompter.findByIdAndUpdate(videoDoc.promptId, {
-      status: videoDoc.autoApprovalSettings?.recording ? 'approved' : 'submitted',
+      status: videoDoc.autoApprovalSettings?.recording ? 'approved' : 'edited',
     });
 
     console.log(`[Pexels] ✅ Video ${videoDoc._id} processed with B-roll`);
@@ -223,11 +223,11 @@ async function pollRealAiJobs() {
               viralVideoKey: viralKey,
               processingStatus: 'completed',
               processingProgress: 100,
-              status: video.autoApprovalSettings?.recording ? 'approved' : 'submitted',
+              status: video.autoApprovalSettings?.recording ? 'approved' : 'edited',
             });
 
             await UGCPrompter.findByIdAndUpdate(video.promptId, {
-              status: video.autoApprovalSettings?.recording ? 'approved' : 'submitted',
+              status: video.autoApprovalSettings?.recording ? 'approved' : 'edited',
             });
 
             console.log(`[UGC AI Polling] ✅ Video ${video._id} successfully processed`);
