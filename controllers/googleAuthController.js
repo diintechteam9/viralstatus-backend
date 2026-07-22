@@ -1,11 +1,10 @@
 const jwt = require("jsonwebtoken");
 const Client = require("../models/client");
 const User = require("../models/user");
-
-// const CreditWallet = require('../models/CreditWallet');
 const TelegramServiceController = require('./telegram/telegrambotalertcontroller');
 const telegramService = new TelegramServiceController();
 const TelegramSettings = require('../models/Settings');
+const { logGoogleAuthAttempt, logGoogleAuthError } = require('../utils/googleAuthLogger');
 
 // Generate JWT Token
 const generateToken = (id) => {
@@ -57,24 +56,56 @@ const verifyUserOrClient = async (req, res) => {
         googlePicture: picture,
         emailVerified: emailVerified,
         isProfileCompleted: false,
-        password: "", // No password for Google users
+        password: "",
       };
-      // Only User schema has isClient; default false for users
       if (Model === User) {
         baseDoc.isClient = false;
       }
-      entity = await Model.create(baseDoc);
-      isNewEntity = true;
+      try {
+        entity = await Model.create(baseDoc);
+        isNewEntity = true;
+      } catch (createError) {
+        // Handle duplicate key or validation errors
+        if (createError.code === 11000) {
+          const field = Object.keys(createError.keyPattern)[0];
+          console.error(`Duplicate key error on field: ${field}`);
+          // Try to find and update existing document
+          entity = await Model.findOne({ [field]: createError.keyValue[field] });
+          if (entity) {
+            entity.googlePicture = picture || entity.googlePicture;
+            entity.emailVerified = emailVerified;
+            entity.lastLoginAt = new Date();
+            await entity.save();
+          } else {
+            throw new Error(`Failed to create or find user with ${field}: ${createError.keyValue[field]}`);
+          }
+        } else if (createError.name === 'ValidationError') {
+          const errors = Object.values(createError.errors).map(e => e.message);
+          throw new Error(`Validation failed: ${errors.join(', ')}`);
+        } else {
+          throw createError;
+        }
+      }
     } else {
       // Update login metadata
       entity.googlePicture = picture || entity.googlePicture;
       entity.emailVerified = emailVerified;
       entity.lastLoginAt = new Date();
-      await entity.save();
+      try {
+        await entity.save();
+      } catch (saveError) {
+        if (saveError.name === 'ValidationError') {
+          const errors = Object.values(saveError.errors).map(e => e.message);
+          throw new Error(`Failed to update user: ${errors.join(', ')}`);
+        }
+        throw saveError;
+      }
     }
 
     const authToken = generateToken(entity._id);
     const MongoId = entity._id;
+
+    logGoogleAuthAttempt(email, role, 'success', { isNewEntity, userId: MongoId });
 
     // Send Telegram alert for newly created Google user/client if enabled
     if (isNewEntity) {
@@ -114,7 +145,12 @@ const verifyUserOrClient = async (req, res) => {
     });
   } catch (error) {
     console.error('verifyUserOrClient error:', error && error.stack ? error.stack : error);
-    res.status(500).json({ success: false, message: error.message || "An error occurred during verification", error: error && error.message ? error.message : error });
+    logGoogleAuthError(googleUser?.email || 'unknown', error, { role });
+    return res.status(500).json({ 
+      success: false, 
+      message: error.message || "An error occurred during verification",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 
@@ -237,6 +273,7 @@ const completeProfile = async (req, res) => {
 
   } catch (error) {
     console.error('Profile completion error:', error);
+    logGoogleAuthError(user?.email || 'unknown', error, { action: 'completeProfile' });
     res.status(500).json({
       success: false,
       message: error.message || 'An error occurred while completing profile'
@@ -340,6 +377,7 @@ const updateProfile = async (req, res) => {
 
   } catch (error) {
     console.error('Update profile error:', error);
+    logGoogleAuthError(user?.email || 'unknown', error, { action: 'updateProfile' });
     res.status(500).json({
       success: false,
       message: error.message || 'An error occurred while updating profile'

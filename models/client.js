@@ -7,18 +7,24 @@ const clientSchema = new mongoose.Schema({
   clientId: { type: String, unique: true },
   name: { type: String, trim: true },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-  password: { type: String, required: true },
-  businessName: { type: String, required: true, trim: true },
+  password: { type: String },
+  businessName: { type: String, trim: true },
   contactPerson: { type: String, trim: true },
   phone: { type: String, trim: true },
   websiteUrl: { type: String, trim: true },
   city: { type: String, trim: true },
   pincode: { type: String, trim: true },
-  gstNo: { type: String, trim: true },
-  panNo: { type: String, trim: true },
-  aadharNo: { type: String, trim: true },
+  gstNo: { type: String, trim: true, unique: true, sparse: true },
+  panNo: { type: String, trim: true, unique: true, sparse: true },
+  aadharNo: { type: String, trim: true, unique: true, sparse: true },
   businessLogoKey: { type: String, trim: true },
   businessLogoUrl: { type: String, trim: true },
+  // Google Authentication fields
+  googleId: { type: String, unique: true, sparse: true },
+  googlePicture: { type: String },
+  isGoogleUser: { type: Boolean, default: false },
+  emailVerified: { type: Boolean, default: false },
+  isProfileCompleted: { type: Boolean, default: false },
   filter: {
     type: String,
     enum: ['all', 'new', 'prime', 'demo', 'in-house', 'testing', 'rejected'],
@@ -35,6 +41,10 @@ clientSchema.pre('save', function (next) {
   this.updatedAt = new Date();
   if (!this.name && this.contactPerson) {
     this.name = this.contactPerson;
+  }
+  // Validate password for non-Google users
+  if (!this.isGoogleUser && !this.password) {
+    return next(new Error('Password is required for non-Google users'));
   }
   next();
 });

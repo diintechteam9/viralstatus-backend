@@ -12,10 +12,14 @@ const userSchema = new mongoose.Schema({
       },
       password: {
         type: String,
-        required: function() {
-          // Password is required only if not using Google auth
-          return !this.googleId;
-        },
+        validate: {
+          validator: function(v) {
+            // Password is required only if not using Google auth
+            if (!this.googleId && !v) return false;
+            return true;
+          },
+          message: 'Password is required for non-Google users'
+        }
       },
       // Google Authentication fields
       googleId: {
@@ -41,27 +45,42 @@ const userSchema = new mongoose.Schema({
       },
       gstNo: {
         type: String,
-        required: function() {
-          return !this.googleId;
-        },
         unique: true,
         sparse: true,
+        validate: {
+          validator: function(v) {
+            // GST is required only if not using Google auth
+            if (!this.googleId && !v) return false;
+            return true;
+          },
+          message: 'GST number is required for non-Google users'
+        }
       },
       panNo: {
         type: String,
-        required: function() {
-          return !this.googleId;
-        },
         unique: true,
         sparse: true,
+        validate: {
+          validator: function(v) {
+            // PAN is required only if not using Google auth
+            if (!this.googleId && !v) return false;
+            return true;
+          },
+          message: 'PAN number is required for non-Google users'
+        }
       },
       aadharNo: {
         type: String,
-        required: function() {
-          return !this.googleId;
-        },
         unique: true,
         sparse: true,
+        validate: {
+          validator: function(v) {
+            // Aadhar is required only if not using Google auth
+            if (!this.googleId && !v) return false;
+            return true;
+          },
+          message: 'Aadhar number is required for non-Google users'
+        }
       },
       city: {
         type: String,
