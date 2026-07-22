@@ -22,11 +22,6 @@ const verifyUserOrClient = async (req, res) => {
     // Log incoming googleUser and role for debugging
     console.log('verifyUserOrClient: req.googleUser:', req.googleUser);
     const { googleUser } = req;
-    // const { role } = req.body; // 'user' or 'client'
-
-    // if (!googleUser || !role) {
-    //   return res.status(400).json({ success: false, message: "Google user info and role are required" });
-    // }
 
     const { email, name, picture, emailVerified, googleId } = googleUser;
 
@@ -42,7 +37,6 @@ const verifyUserOrClient = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid role" });
     }
     
-
 
     // Find or create user/client
     let entity = await Model.findOne({ email });
@@ -120,7 +114,7 @@ const verifyUserOrClient = async (req, res) => {
       const roleLabel = (Model === Client) ? 'Client' : 'User';
       const loginTime = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
       const message = `🆕 <b>New ${roleLabel} Registered</b>\n\n` +
-        `🧑‍💼 <b>Name:</b> ${entity.name || '-'}\n` +
+        `🧑💼 <b>Name:</b> ${entity.name || '-'}\n` +
         `✉️ <b>Email:</b> ${entity.email || '-'}\n` +
         `⏰ <b>Time:</b> ${loginTime}`;
       try {
@@ -209,7 +203,7 @@ const completeProfile = async (req, res) => {
       });
     }
 
-    // Check if GST/PAN/Aadhar numbers are already taken
+    // Check if GST/PAN numbers are already taken
     const existingClient = await Client.findOne({
       _id: { $ne: user._id },
       $or: [
@@ -225,8 +219,8 @@ const completeProfile = async (req, res) => {
       });
     }
 
-    // Update user profile
-    const updatedClient = await Client.findByIdAndUpdate(
+    // Try to update in User collection first, then Client
+    let updatedClient = await User.findByIdAndUpdate(
       user._id,
       {
         businessName,
@@ -240,6 +234,30 @@ const completeProfile = async (req, res) => {
       { new: true, runValidators: true }
     );
 
+    // If not found in User, try Client
+    if (!updatedClient) {
+      updatedClient = await Client.findByIdAndUpdate(
+        user._id,
+        {
+          businessName,
+          gstNo,
+          panNo,
+          city,
+          pincode,
+          websiteUrl,
+          isProfileCompleted: true
+        },
+        { new: true, runValidators: true }
+      );
+    }
+
+    if (!updatedClient) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
     // Send Telegram alert for completed profile after Google login if enabled
     try {
       let allowAlert = true;
@@ -252,7 +270,7 @@ const completeProfile = async (req, res) => {
       if (allowAlert) {
       const loginTime = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
       const message = `📄 <b>New Profile Created</b>\n\n` +
-        `🧑‍💼 <b>Name:</b> ${updatedClient.name || '-'}\n` +
+        `🧑💼 <b>Name:</b> ${updatedClient.name || '-'}\n` +
         `✉️ <b>Email:</b> ${updatedClient.email || '-'}\n` +
         `🏢 <b>Business:</b> ${updatedClient.businessName || '-'}\n` +
         `🌆 <b>City:</b> ${updatedClient.city || '-'}\n` +
@@ -363,11 +381,28 @@ const updateProfile = async (req, res) => {
     delete updateData.email;
     delete updateData._id;
 
-    const updatedClient = await Client.findByIdAndUpdate(
+    // Try to update in User collection first, then Client
+    let updatedClient = await User.findByIdAndUpdate(
       user._id,
       updateData,
       { new: true, runValidators: true }
     );
+
+    // If not found in User, try Client
+    if (!updatedClient) {
+      updatedClient = await Client.findByIdAndUpdate(
+        user._id,
+        updateData,
+        { new: true, runValidators: true }
+      );
+    }
+
+    if (!updatedClient) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -406,4 +441,4 @@ module.exports = {
   completeProfile,
   getProfile,
   updateProfile
-}; 
+};
