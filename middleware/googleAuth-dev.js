@@ -1,7 +1,6 @@
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const Client = require('../models/client');
-const User = require('../models/user');
 
 // ─── Public Key Cache ────────────────────────────────────────────────────────
 
@@ -163,11 +162,11 @@ const verifyGoogleToken = async (req, res, next) => {
       } catch (error) {
         console.error('[GoogleAuth] Firebase token verification failed:', error.message);
         
-        // Accept tokens with valid email claim (for testing)
-        if (decoded?.email) {
-          console.log('[GoogleAuth] ✅ Accepting token with email claim:', decoded.email);
+        // In development mode, accept tokens with valid email claim
+        if (process.env.NODE_ENV !== 'production' && decoded?.email) {
+          console.log('[GoogleAuth] ✅ Development mode: accepting test token with email claim');
           req.googleUser = {
-            googleId: decoded.sub || decoded.user_id || 'test-user-' + Date.now(),
+            googleId: decoded.sub || decoded.user_id || 'dev-user-' + Date.now(),
             email: decoded.email,
             name: decoded.name || decoded.email.split('@')[0],
             picture: decoded.picture || 'https://lh3.googleusercontent.com/a/default-user=s96-c',
@@ -223,20 +222,9 @@ const verifyJWTToken = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Access token required' });
     }
     const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET);
-    
-    // Try to find user in Client collection first
-    let user = await Client.findById(decoded.id).select('-password');
-    
-    // If not found in Client, try User collection
-    if (!user) {
-      user = await User.findById(decoded.id).select('-password');
-    }
-    
-    if (!user) {
-      return res.status(401).json({ success: false, message: 'User not found' });
-    }
-    
-    req.user = user;
+    const client = await Client.findById(decoded.id).select('-password');
+    if (!client) return res.status(401).json({ success: false, message: 'User not found' });
+    req.user = client;
     next();
   } catch (error) {
     return res.status(401).json({ success: false, message: 'Invalid or expired token' });
@@ -248,19 +236,11 @@ const optionalAuth = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith('Bearer ')) {
       const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET);
-      
-      // Try Client collection first
-      let user = await Client.findById(decoded.id).select('-password');
-      
-      // If not found, try User collection
-      if (!user) {
-        user = await User.findById(decoded.id).select('-password');
-      }
-      
-      if (user) req.user = user;
+      const client = await Client.findById(decoded.id).select('-password');
+      if (client) req.user = client;
     }
   } catch (_) {}
-  next()
+  next();
 };
 
 module.exports = { verifyGoogleToken, verifyJWTToken, optionalAuth };
