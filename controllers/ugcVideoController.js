@@ -136,8 +136,8 @@ exports.submitVideo = async (req, res) => {
       },
     });
 
-    // Mark script as having video
-    await UGCPrompter.findByIdAndUpdate(promptId, { hasVideo: true, videoId: doc._id });
+    // Mark script as having video and update status
+    await UGCPrompter.findByIdAndUpdate(promptId, { hasVideo: true, videoId: doc._id, status: doc.status });
 
     res.status(201).json({
       success: true,
@@ -406,6 +406,8 @@ exports.requestEdit = async (req, res) => {
     doc.status = 'editing_requested';
     await doc.save();
 
+    await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: 'editing_requested' });
+
     // ── NOW START AI PROCESSING PIPELINE ──────────────────────────────────
     const baseUrl = AI_BASE();
     if (baseUrl && AI_TOKEN()) {
@@ -451,9 +453,9 @@ exports.requestEdit = async (req, res) => {
 
           const processBody = {
             caption: true, subtitle_style: 'two_line_zoom_in',
-            broll: true, music: true, bgm_mood: 'Motivational',
+            broll: true, broll_source: 'pexels', music: true, bgm_mood: 'Motivational',
             sfx: true, zoom: true, silence: true, jumpcut: true,
-            facetrack: true, viral: true, background: false, logo: false,
+            facetrack: true, viral: true, background: false, logo: true,
             video_quality: '1080p',
           };
           await axios.post(`${baseUrl}/api/ugc/process/${jobId}`, processBody, {
@@ -493,6 +495,8 @@ exports.acceptEditedVideo = async (req, res) => {
 
     doc.status = 'approved';
     await doc.save();
+
+    await UGCPrompter.findByIdAndUpdate(doc.promptId, { status: 'approved' });
 
     let editedVideoUrl = '';
     if (doc.editedVideoKey) {
