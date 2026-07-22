@@ -13,26 +13,38 @@ const getFirebasePublicKeys = async () => {
   if (Date.now() < keyCache.firebase.expiry && Object.keys(keyCache.firebase.keys).length > 0) {
     return keyCache.firebase.keys;
   }
-  const { data, headers } = await axios.get(
-    'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com'
-  );
-  const maxAge = parseInt((headers['cache-control'] || '').match(/max-age=(\d+)/)?.[1] || '3600');
-  keyCache.firebase.keys = data;
-  keyCache.firebase.expiry = Date.now() + maxAge * 1000;
-  return data;
+  try {
+    const { data, headers } = await axios.get(
+      'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com',
+      { timeout: 5000 }
+    );
+    const maxAge = parseInt((headers['cache-control'] || '').match(/max-age=(\d+)/)?.[1] || '3600');
+    keyCache.firebase.keys = data;
+    keyCache.firebase.expiry = Date.now() + maxAge * 1000;
+    return data;
+  } catch (error) {
+    console.error('[GoogleAuth] Firebase key fetch failed:', error.message);
+    throw new Error('Failed to fetch Firebase public keys. Please check your internet connection.');
+  }
 };
 
 const getGooglePublicKeys = async () => {
   if (Date.now() < keyCache.google.expiry && Object.keys(keyCache.google.keys).length > 0) {
     return keyCache.google.keys;
   }
-  const { data, headers } = await axios.get(
-    'https://www.googleapis.com/oauth2/v1/certs'
-  );
-  const maxAge = parseInt((headers['cache-control'] || '').match(/max-age=(\d+)/)?.[1] || '3600');
-  keyCache.google.keys = data;
-  keyCache.google.expiry = Date.now() + maxAge * 1000;
-  return data;
+  try {
+    const { data, headers } = await axios.get(
+      'https://www.googleapis.com/oauth2/v1/certs',
+      { timeout: 5000 }
+    );
+    const maxAge = parseInt((headers['cache-control'] || '').match(/max-age=(\d+)/)?.[1] || '3600');
+    keyCache.google.keys = data;
+    keyCache.google.expiry = Date.now() + maxAge * 1000;
+    return data;
+  } catch (error) {
+    console.error('[GoogleAuth] Google key fetch failed:', error.message);
+    throw new Error('Failed to fetch Google public keys. Please check your internet connection.');
+  }
 };
 
 // ─── Token Verifiers ─────────────────────────────────────────────────────────
@@ -124,45 +136,74 @@ const verifyGoogleToken = async (req, res, next) => {
     let payload;
 
     if (isAccessToken) {
-      const { data } = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!data.email) throw new Error('Invalid access token: no email found');
-      req.googleUser = {
-        googleId: data.sub,
-        email: data.email,
-        name: data.name,
-        picture: data.picture,
-        emailVerified: data.email_verified,
-      };
+      try {
+        const { data } = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 5000
+        });
+        if (!data.email) throw new Error('Invalid access token: no email found');
+        req.googleUser = {
+          googleId: data.sub,
+          email: data.email,
+          name: data.name,
+          picture: data.picture,
+          emailVerified: data.email_verified,
+        };
+      } catch (error) {
+        console.error('[GoogleAuth] Access token verification failed:', error.message);
+        return res.status(401).json({
+          success: false,
+          message: 'Failed to verify access token. Please check your internet connection.',
+          error: error.message,
+        });
+      }
     } else if (!decoded?.iss) {
       return res.status(401).json({ success: false, message: 'Invalid token format' });
     } else if (decoded.iss.startsWith('https://securetoken.google.com/')) {
-      payload = await verifyFirebaseToken(token);
-      req.googleUser = {
-        googleId: payload.user_id || payload.sub,
-        email: payload.email,
-        name: payload.name,
-        picture: payload.picture,
-        emailVerified: payload.email_verified,
-      };
+      try {
+        payload = await verifyFirebaseToken(token);
+        req.googleUser = {
+          googleId: payload.user_id || payload.sub,
+          email: payload.email,
+          name: payload.name,
+          picture: payload.picture,
+          emailVerified: payload.email_verified,
+        };
+      } catch (error) {
+        console.error('[GoogleAuth] Firebase token verification failed:', error.message);
+        return res.status(401).json({
+          success: false,
+          message: error.message || 'Failed to verify Firebase token. Please check your internet connection.',
+          error: error.message,
+        });
+      }
     } else {
-      payload = await verifyGoogleOAuthToken(token);
-      req.googleUser = {
-        googleId: payload.sub,
-        email: payload.email,
-        name: payload.name,
-        picture: payload.picture,
-        emailVerified: payload.email_verified,
-      };
+      try {
+        payload = await verifyGoogleOAuthToken(token);
+        req.googleUser = {
+          googleId: payload.sub,
+          email: payload.email,
+          name: payload.name,
+          picture: payload.picture,
+          emailVerified: payload.email_verified,
+        };
+      } catch (error) {
+        console.error('[GoogleAuth] OAuth token verification failed:', error.message);
+        return res.status(401).json({
+          success: false,
+          message: error.message || 'Failed to verify OAuth token. Please check your internet connection.',
+          error: error.message,
+        });
+      }
     }
 
     next();
   } catch (error) {
+    console.error('[GoogleAuth] Middleware error:', error.message);
     const isExpired = error.code === 'TOKEN_EXPIRED' || error.name === 'TokenExpiredError';
     return res.status(401).json({
       success: false,
-      message: isExpired ? 'Token expired. Please sign in again.' : 'Invalid token',
+      message: isExpired ? 'Token expired. Please sign in again.' : (error.message || 'Invalid token'),
       error: error.message,
     });
   }

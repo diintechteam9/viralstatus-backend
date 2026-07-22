@@ -146,9 +146,25 @@ const verifyUserOrClient = async (req, res) => {
   } catch (error) {
     console.error('verifyUserOrClient error:', error && error.stack ? error.stack : error);
     logGoogleAuthError(googleUser?.email || 'unknown', error, { role });
-    return res.status(500).json({ 
+    
+    // Determine error type and send appropriate message
+    let statusCode = 500;
+    let message = 'An error occurred during verification';
+    
+    if (error.message?.includes('internet') || error.message?.includes('connection')) {
+      statusCode = 503;
+      message = 'Network error. Please check your internet connection.';
+    } else if (error.message?.includes('Validation failed')) {
+      statusCode = 400;
+      message = error.message;
+    } else if (error.message?.includes('duplicate') || error.code === 11000) {
+      statusCode = 409;
+      message = 'Email already registered. Please use a different email or sign in.';
+    }
+    
+    return res.status(statusCode).json({ 
       success: false, 
-      message: error.message || "An error occurred during verification",
+      message: message,
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
