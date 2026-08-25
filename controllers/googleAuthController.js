@@ -85,6 +85,10 @@ const verifyUserOrClient = async (req, res) => {
       entity.googlePicture = picture || entity.googlePicture;
       entity.emailVerified = emailVerified;
       entity.lastLoginAt = new Date();
+      if (googleId && entity.googleId !== googleId) {
+        entity.googleId = googleId;
+        entity.isGoogleUser = true;
+      }
       try {
         await entity.save();
       } catch (saveError) {
