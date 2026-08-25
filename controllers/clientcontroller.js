@@ -127,6 +127,7 @@ const loginClient = async (req, res) => {
   // Register new client
   const registerClient = async (req, res) => {
     try {
+      const crypto = require("crypto");
       const {
         name,
         email,
@@ -176,6 +177,9 @@ const loginClient = async (req, res) => {
         finalBusinessLogoUrl = await getobject(businessLogoKey);
       }
 
+      // Generate clientKey
+      const clientKey = crypto.randomBytes(16).toString("hex");
+
       // Create new client
       const client = await Client.create({
         name,
@@ -188,7 +192,8 @@ const loginClient = async (req, res) => {
         pincode,
         websiteUrl,
         businessLogoKey,
-        businessLogoUrl: finalBusinessLogoUrl
+        businessLogoUrl: finalBusinessLogoUrl,
+        clientKey
       });
   
       // Generate token
@@ -197,7 +202,8 @@ const loginClient = async (req, res) => {
       res.status(201).json({
         success: true,
         token,
-        client
+        client,
+        clientKey
       });
     } catch (error) {
       res.status(500).json({
@@ -206,5 +212,139 @@ const loginClient = async (req, res) => {
       });
     }
   };
+  // Get current client key
+  const getClientKey = async (req, res) => {
+    try {
+      const clientId = req.user?.id || req.client?.id;
+      if (!clientId) {
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+      }
 
-  module.exports = {registerClient,loginClient}
+      const client = await Client.findById(clientId);
+      if (!client) {
+        return res.status(404).json({ success: false, message: "Client not found" });
+      }
+
+      res.status(200).json({
+        success: true,
+        clientKey: client.clientKey || null
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  };
+
+  // Generate a new client key
+  const generateClientKey = async (req, res) => {
+    try {
+      const clientId = req.user?.id || req.client?.id;
+      if (!clientId) {
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+      }
+
+      const crypto = require("crypto");
+      const clientKey = crypto.randomBytes(16).toString("hex");
+
+      const client = await Client.findByIdAndUpdate(
+        clientId,
+        { clientKey },
+        { new: true }
+      );
+
+      if (!client) {
+        return res.status(404).json({ success: false, message: "Client not found" });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: "Key generated successfully",
+        clientKey: client.clientKey
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  };
+
+  // Delete the client key
+  const deleteClientKey = async (req, res) => {
+    try {
+      const clientId = req.user?.id || req.client?.id;
+      if (!clientId) {
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+      }
+
+      // Instead of setting to null, we can set to an empty string, or unset it.
+      // Setting to null works, but $unset is cleaner.
+      const client = await Client.findByIdAndUpdate(
+        clientId,
+        { $unset: { clientKey: "" } },
+        { new: true }
+      );
+
+      if (!client) {
+        return res.status(404).json({ success: false, message: "Client not found" });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: "Key deleted successfully",
+        clientKey: null
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  };
+
+  // Login with Client Key
+  const loginClientWithKey = async (req, res) => {
+    try {
+      const { clientKey } = req.body;
+
+      if (!clientKey) {
+        return res.status(400).json({
+          success: false,
+          message: "Client key is required"
+        });
+      }
+
+      // Find client by clientKey
+      const client = await Client.findOne({ clientKey });
+      
+      if (!client) {
+        console.log('Login attempt failed with invalid clientKey');
+        return res.status(401).json({
+          success: false,
+          message: "Invalid client key"
+        });
+      }
+
+      // Generate token
+      const jwtToken = generateToken(client._id);
+
+      console.log('Login successful with clientKey for:', client.email);
+
+      res.status(200).json({
+        success: true,
+        token: jwtToken,
+        client: {
+          _id: client._id,
+          name: client.name,
+          email: client.email,
+          businessName: client.businessName,
+          gstNo: client.gstNo,
+          panNo: client.panNo,
+          city: client.city,
+          pincode: client.pincode,
+          websiteUrl: client.websiteUrl
+        }
+      });
+    } catch (error) {
+      console.error('Login with key error:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || "An error occurred during login"
+      });
+    }
+  };
+
+  module.exports = { registerClient, loginClient, getClientKey, generateClientKey, deleteClientKey, loginClientWithKey }

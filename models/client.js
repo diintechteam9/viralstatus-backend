@@ -33,6 +33,7 @@ const clientSchema = new mongoose.Schema({
     trim: true,
   },
   isActive: { type: Boolean, default: true },
+  clientKey: { type: String, unique: true, sparse: true },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
