@@ -40,8 +40,8 @@ const campaignSchema = new mongoose.Schema({
     }
   },
   image: {
-    key: { type: String, required: true },
-    url: { type: String }
+    key: { type: String, default: '' },
+    url: { type: String, default: '' }
   },
   categoryImage: {
     key: { type: String, default: '' },

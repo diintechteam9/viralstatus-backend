@@ -165,7 +165,7 @@ exports.createCampaign = [
       const normalizedClientId = await resolveCampaignClientStorageId(rawClientId);
 
       const mainImageFile = req.files?.image?.[0];
-      if (!campaignName || !brandName || !goal || !normalizedClientId || !mainImageFile || !description || !startDate || !endDate || !location) {
+      if (!campaignName || !brandName || !goal || !normalizedClientId || !description || !startDate || !endDate || !location) {
         return res.status(400).json({ success: false, message: 'Missing required fields' });
       }
       
@@ -176,12 +176,15 @@ exports.createCampaign = [
       const campaignId = generateCampaignId(campaignName);
 
       // Upload main campaign image
-      const pngBuffer = await sharp(mainImageFile.buffer).png().toBuffer();
-      const originalName = mainImageFile.originalname.replace(/\s+/g, '_').replace(/\.[^/.]+$/, '.png');
-      const s3Key = `${normalizedClientId}/${campaignId}/${originalName}`;
-      await s3Client.send(new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key: s3Key, Body: pngBuffer, ContentType: 'image/png' }));
-      const imageUrl = await getobject(s3Key);
-      const image = { key: s3Key, url: imageUrl };
+      let image = { key: '', url: '' };
+      if (mainImageFile) {
+        const pngBuffer = await sharp(mainImageFile.buffer).png().toBuffer();
+        const originalName = mainImageFile.originalname.replace(/\s+/g, '_').replace(/\.[^/.]+$/, '.png');
+        const s3Key = `${normalizedClientId}/${campaignId}/${originalName}`;
+        await s3Client.send(new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key: s3Key, Body: pngBuffer, ContentType: 'image/png' }));
+        const imageUrl = await getobject(s3Key);
+        image = { key: s3Key, url: imageUrl };
+      }
 
       // Upload category image (optional)
       let categoryImage = { key: '', url: '' };
