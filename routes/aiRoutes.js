@@ -17,7 +17,7 @@ router.post('/campaign-fill', async (req, res) => {
     endDate.setDate(today.getDate() + 30);
 
     const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: 'llama-3.1-70b-versatile',
       messages: [
         {
           role: 'user',
@@ -71,7 +71,7 @@ router.post('/news-blog-fill', async (req, res) => {
   try {
     const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
     const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: 'llama-3.1-70b-versatile',
       messages: [{
         role: 'user',
         content: `You are a professional content writer for YovoAI — an influencer marketing platform in India.

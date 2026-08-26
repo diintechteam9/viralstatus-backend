@@ -249,6 +249,23 @@ exports.createCampaign = [
   }
 ];
 
+exports.getAllCampaigns = async (req, res) => {
+  try {
+    await activateCurrentCampaigns();
+    await deactivateExpiredCampaigns();
+    const campaigns = await Campaign.find().lean();
+    for (const campaign of campaigns) {
+      if (campaign.image?.key) try { campaign.image.url = await getobject(campaign.image.key); } catch {}
+      if (campaign.categoryImage?.key) try { campaign.categoryImage.url = await getobject(campaign.categoryImage.key); } catch {}
+      if (campaign.brandImage?.key) try { campaign.brandImage.url = await getobject(campaign.brandImage.key); } catch {}
+    }
+    res.json({ success: true, campaigns });
+  } catch (err) {
+    console.error('Error in getAllCampaigns:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 exports.getActiveCampaigns = async (req, res) => {
   try {
     await activateCurrentCampaigns();

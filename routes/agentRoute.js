@@ -5,7 +5,7 @@ const AgentHistory = require('../models/AgentHistory');
 const { protect } = require('../middleware/auth');
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL = 'llama-3.3-70b-versatile';
+const MODEL = 'llama-3.1-70b-versatile';
 
 const AGENT_PROMPTS = {
   yovo: {

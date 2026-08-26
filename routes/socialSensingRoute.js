@@ -12,7 +12,7 @@ const {
 } = require('../services/socialSensingService');
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL = 'llama-3.3-70b-versatile';
+const MODEL = 'llama-3.1-70b-versatile';
 
 const callGroq = async (system, user, maxTokens = 1200, temperature = 0.65) => {
   const key = process.env.GROQ_API_KEY;

@@ -101,7 +101,7 @@ async function generatePostContent(topic, category, attempt = 1) {
   const groq = getGroq();
   try {
     const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: 'llama-3.1-70b-versatile',
       messages: [{
         role: 'user',
         content: `You are a professional content writer for YovoAI — an AI-powered influencer marketing platform in India.
