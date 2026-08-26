@@ -5,7 +5,7 @@ const { authenticate, authorize } = require('../middleware/authenticate');
 const Campaign = require('../models/campaign');
 
 // Get all campaigns
-router.get('/', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.getAllCampaigns);
+router.get('/', authenticate, authorize('client', 'admin', 'super_admin', 'mobileuser'), campaignController.getAllCampaigns);
 
 // Create campaign — client only
 router.post('/', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.createCampaign);
