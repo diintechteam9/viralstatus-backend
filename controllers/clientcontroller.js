@@ -2,11 +2,13 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const Client = require("../models/client");
 
-// Generate JWT Token for admin
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: "7d",
-  });
+// Generate JWT Token for client
+const generateToken = (client) => {
+  return jwt.sign(
+    { id: client._id, clientId: client.clientId, role: "client" },
+    process.env.JWT_SECRET,
+    { expiresIn: "7d" }
+  );
 };
 
 
@@ -46,7 +48,7 @@ const loginClient = async (req, res) => {
         }
         
         // Generate JWT token
-        const authToken = generateToken(client._id);
+        const authToken = generateToken(client);
         
         console.log('Google login successful for client:', email);
         
@@ -96,7 +98,7 @@ const loginClient = async (req, res) => {
   
   
       // Generate token
-      const jwtToken = generateToken(client._id);
+      const jwtToken = generateToken(client);
   
       console.log('Login successful for client email:', email);
   
@@ -319,7 +321,7 @@ const loginClient = async (req, res) => {
       }
 
       // Generate token
-      const jwtToken = generateToken(client._id);
+      const jwtToken = generateToken(client);
 
       console.log('Login successful with clientKey for:', client.email);
 
