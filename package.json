@@ -14,7 +14,7 @@
   "license": "ISC",
   "type": "commonjs",
   "engines": {
-    "node": ">=20"
+    "node": "20.x"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.816.0",
