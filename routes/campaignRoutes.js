@@ -8,7 +8,7 @@ const Campaign = require('../models/campaign');
 router.get('/', authenticate, authorize('client', 'admin', 'super_admin', 'mobileuser'), campaignController.getAllCampaigns);
 
 // Create campaign — client only
-router.post('/', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.createCampaign);
+router.post('/', authenticate, authorize('client', 'admin', 'super_admin', 'mobileuser'), campaignController.createCampaign);
 
 // Upload campaign image
 router.post('/upload', authenticate, authorize('client', 'admin', 'super_admin'), campaignController.uploadCampaignImage);
