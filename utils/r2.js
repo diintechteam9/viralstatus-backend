@@ -10,6 +10,10 @@ const putobject = async (key, contentType) => {
 };
 
 const getobject = async (key) => { 
+  if (!key) return "";
+  if (key.startsWith("http://") || key.startsWith("https://")) {
+    return key;
+  }
   const command = new GetObjectCommand({ Bucket: BUCKET, Key: key, ResponseContentDisposition: 'inline' });
   return getSignedUrl(r2Client, command, { expiresIn: 604800 });
 };

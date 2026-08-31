@@ -86,6 +86,7 @@ exports.saveReelMetadata = async (req, res) => {
     // Bulk insert all reels at once
     const docs = newReels.map((r, i) => ({
       poolId,
+      folderId: r.folderId || null,
       s3Key: r.s3Key,
       s3Url: urlMap[i],
       title: r.title || '',
