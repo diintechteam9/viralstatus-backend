@@ -869,7 +869,8 @@ exports.getSharedReelsForUser = async (req, res) => {
         businessName: taskDetails.businessName,
         minRating: taskDetails.minRating,
         script: taskDetails.script,
-        referenceVideoUrl: taskDetails.referenceVideoUrl,
+        referenceVideoUrl: s3Url || taskDetails.referenceVideoUrl || '',
+        videoUrl: s3Url || taskDetails.referenceVideoUrl || '',
         targetViews: campaignTask?.targetViews || r.targetViews || 0,
         targetLikes: campaignTask?.targetLikes || r.targetLikes || 0,
         targetComments: campaignTask?.targetComments || r.targetComments || 0,
@@ -910,6 +911,7 @@ exports.getSharedReelsForUser = async (req, res) => {
         // ─── Reel Media (only for reels/post tasks) ──────────────────
         s3Key: r.s3Key || '',
         s3Url,
+        videoUrl: s3Url || taskDetails.referenceVideoUrl || '',
 
         // ─── Campaign ────────────────────────────────────────────────
         campaign: {

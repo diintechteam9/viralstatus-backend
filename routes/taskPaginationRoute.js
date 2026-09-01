@@ -61,23 +61,63 @@ router.get('/:userId', async (req, res) => {
     const totalPages = Math.ceil(total / pageSize);
     const skip       = (pageNum - 1) * pageSize;
 
-    const paginated  = filtered
+    const mongoose    = require('mongoose');
+    const { getobject } = require('../utils/r2');
+    const CampaignTask = require('../models/CampaignTask');
+
+    const rawSlice = filtered
       .slice()
       .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-      .slice(skip, skip + pageSize)
-      .map(r => {
+      .slice(skip, skip + pageSize);
+
+    // Fetch underlying CampaignTasks
+    const campaignTaskIds = [...new Set(
+      rawSlice.map(r => r.campaignTaskId || r.reelId).filter(id => id && mongoose.Types.ObjectId.isValid(id))
+    )];
+    const campaignTasks = campaignTaskIds.length
+      ? await CampaignTask.find({ _id: { $in: campaignTaskIds } }).lean()
+      : [];
+    const taskMap = new Map(campaignTasks.map(t => [String(t._id), t]));
+
+    const paginated = await Promise.all(
+      rawSlice.map(async (r) => {
         const campaign = campaignMap.get(String(r.campaignId)) || {};
+        const cTask = taskMap.get(String(r.campaignTaskId || r.reelId));
+
+        let liveVideoUrl = r.s3Url || r.referenceVideoUrl || cTask?.referenceVideoUrl || '';
+        if ((!liveVideoUrl || liveVideoUrl.includes('X-Amz-Expires')) && r.s3Key) {
+          try { liveVideoUrl = await getobject(r.s3Key); } catch (_) {}
+        }
+
+        let campaignImageUrl = '';
+        const imgKey = r.campaignImageKey || campaign.image?.key || '';
+        if (imgKey) {
+          try { campaignImageUrl = await getobject(imgKey); } catch (_) {}
+        } else if (campaign.image?.url) {
+          campaignImageUrl = campaign.image.url;
+        }
+
         return {
           ...r,
+          s3Url: liveVideoUrl,
+          referenceVideoUrl: liveVideoUrl,
+          videoUrl: liveVideoUrl,
+          instructions: r.description || cTask?.description || campaign.description || '',
+          script: r.script || cTask?.script || '',
+          targetUrl: r.targetUrl || cTask?.targetUrl || '',
           campaign: {
-            _id:         campaign._id         || r.campaignId,
+            _id:          campaign._id          || r.campaignId,
             campaignName: campaign.campaignName || r.campaignName || '',
             brandName:    campaign.brandName    || r.brandName    || '',
             credits:      campaign.credits      || r.credits      || 0,
-            image:        campaign.image        || null,
+            image: {
+              key: imgKey,
+              url: campaignImageUrl,
+            },
           },
         };
-      });
+      })
+    );
 
     res.json({
       success:    true,

@@ -291,18 +291,32 @@ exports.distributeCampaignTasks = async (req, res) => {
 /** GET /api/campaign-tasks/task/:taskId — single task for user detail view */
 exports.getTaskById = async (req, res) => {
   try {
+    const { getobject } = require('../utils/r2');
     const task = await CampaignTask.findById(req.params.taskId).lean();
     if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
 
     const campaign = await Campaign.findById(task.campaignId).lean();
     const userId = req.query.userId;
 
+    let liveVideoUrl = task.referenceVideoUrl || task.s3Url || '';
+    if ((!liveVideoUrl || liveVideoUrl.includes('X-Amz-Expires')) && task.s3Key) {
+      try { liveVideoUrl = await getobject(task.s3Key); } catch (_) {}
+    }
+
+    let campaignImageUrl = campaign?.image?.url || '';
+    if (!campaignImageUrl && campaign?.image?.key) {
+      try { campaignImageUrl = await getobject(campaign.image.key); } catch (_) {}
+    }
+
     res.json({
       success: true,
       task: {
         ...task,
+        referenceVideoUrl: liveVideoUrl,
+        s3Url: liveVideoUrl,
+        videoUrl: liveVideoUrl,
         campaignName: campaign?.campaignName || '',
-        campaignImageUrl: campaign?.image?.url || '',
+        campaignImageUrl,
         brandName: campaign?.brandName || '',
         alreadyCompleted: userId ? (task.completedBy || []).includes(userId) : false,
         alreadySubmitted: userId
@@ -319,8 +333,25 @@ exports.getTaskById = async (req, res) => {
 exports.getTasksByCampaign = async (req, res) => {
   try {
     const { campaignId } = req.params;
+    const { getobject } = require('../utils/r2');
     const tasks = await CampaignTask.find({ campaignId }).sort({ order: 1, createdAt: -1 }).lean();
-    res.json({ success: true, tasks });
+
+    const enrichedTasks = await Promise.all(
+      tasks.map(async (t) => {
+        let liveVideoUrl = t.referenceVideoUrl || t.s3Url || '';
+        if ((!liveVideoUrl || liveVideoUrl.includes('X-Amz-Expires')) && t.s3Key) {
+          try { liveVideoUrl = await getobject(t.s3Key); } catch (_) {}
+        }
+        return {
+          ...t,
+          referenceVideoUrl: liveVideoUrl,
+          s3Url: liveVideoUrl,
+          videoUrl: liveVideoUrl,
+        };
+      })
+    );
+
+    res.json({ success: true, tasks: enrichedTasks });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
