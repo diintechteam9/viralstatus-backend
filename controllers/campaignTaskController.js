@@ -439,6 +439,11 @@ exports.getPublicTasks = async (req, res) => {
             return null;
           })();
 
+          let reelMediaUrl = userReel?.s3Url || userReel?.referenceVideoUrl || t.referenceVideoUrl || '';
+          if (!reelMediaUrl && userReel?.s3Key) {
+            try { reelMediaUrl = await getobject(userReel.s3Key); } catch (_) {}
+          }
+
           const { campaignType: _ct, assignedTo: _at, completedBy: _cb, submissions: _subs, status: _st, ...taskData } = t;
           return {
             ...taskData,
@@ -446,6 +451,7 @@ exports.getPublicTasks = async (req, res) => {
             taskType,
             proofRequired,
             instructions: t.description || '',
+            referenceVideoUrl: reelMediaUrl,
             // Task Status
             TaskStatus: userReel?.TaskStatus || 'assigned',
             submissionStatus: userReel?.submissionStatus || 'none',
@@ -474,7 +480,7 @@ exports.getPublicTasks = async (req, res) => {
             cancellationPenalty: timer.cancellationPenalty,
             // Media
             s3Key: userReel?.s3Key || '',
-            s3Url: '',
+            s3Url: reelMediaUrl,
             // Campaign object
             campaign: {
               _id: camp._id || t.campaignId,
@@ -786,16 +792,23 @@ exports.assignTask = async (req, res) => {
       campaign || {}
     );
 
-    // Optional reel attachment for upload_reel type
-    if (reelId && assignedCount > 0) {
+    // Save referenceVideoUrl directly on the main CampaignTask document
+    if (reelS3Url || reelId) {
+      task.referenceVideoUrl = reelS3Url || task.referenceVideoUrl || '';
+      await task.save();
+    }
+
+    // Unconditionally update SharedReels for all target users (regardless of assignedCount)
+    if (reelId || reelS3Url) {
       for (const googleId of targetUserIds) {
         await SharedReels.findOneAndUpdate(
           { googleId, 'reels.campaignTaskId': String(taskId) },
           {
             $set: {
-              'reels.$.reelId': reelId,
+              'reels.$.reelId': reelId || String(taskId),
               'reels.$.s3Key': reelS3Key || '',
               'reels.$.s3Url': reelS3Url || '',
+              'reels.$.referenceVideoUrl': reelS3Url || '',
               'reels.$.title': reelTitle || task.title,
             },
           }
@@ -803,7 +816,7 @@ exports.assignTask = async (req, res) => {
       }
     }
 
-    res.json({ success: true, message: `Task assigned to ${assignedCount} user(s)`, task });
+    res.json({ success: true, message: `Task assigned to ${targetUserIds.length} user(s)`, task });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
