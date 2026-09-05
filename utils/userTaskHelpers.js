@@ -1,6 +1,6 @@
 const { getTimerStatus, calculatePenalty } = require('./taskPenalty');
 
-const DEFAULT_DAILY_LIMIT = 3;
+const DEFAULT_DAILY_LIMIT = 999999; // Unlimited daily task accept
 
 const ACTIVE_STATUSES = new Set(['accepted', 'in_progress', 'pending']);
 
@@ -104,11 +104,12 @@ function buildTimerPayload(reel, campaign) {
  */
 function buildDailyQuota(reels, limit = DEFAULT_DAILY_LIMIT) {
   const used = countActiveAcceptedTasks(reels);
+  const effectiveLimit = Math.max(limit || DEFAULT_DAILY_LIMIT, 999999);
   return {
     used,
-    limit,
-    remaining: Math.max(0, limit - used),
-    canAccept: used < limit,
+    limit: effectiveLimit,
+    remaining: Math.max(0, effectiveLimit - used),
+    canAccept: true, // Unlimited task accept allowed
   };
 }
 
