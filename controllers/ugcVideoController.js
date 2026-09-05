@@ -328,9 +328,9 @@ exports.deleteVideo = async (req, res) => {
 // Update auto-approval settings
 exports.updateAutoApprovalSettings = async (req, res) => {
   try {
-    const { autoApprovalSettings } = req.body;
-    if (!autoApprovalSettings) {
-      return res.status(400).json({ success: false, message: 'autoApprovalSettings is required' });
+    const { autoApprovalSettings, brollSource } = req.body;
+    if (!autoApprovalSettings && !brollSource) {
+      return res.status(400).json({ success: false, message: 'autoApprovalSettings or brollSource is required' });
     }
 
     const doc = await UGCVideo.findById(req.params.id);
@@ -343,13 +343,18 @@ exports.updateAutoApprovalSettings = async (req, res) => {
       }
     }
 
-    doc.autoApprovalSettings = {
-      ...doc.autoApprovalSettings,
-      ...autoApprovalSettings
-    };
+    if (autoApprovalSettings) {
+      doc.autoApprovalSettings = {
+        ...doc.autoApprovalSettings,
+        ...autoApprovalSettings
+      };
+    }
+    if (brollSource) {
+      doc.brollSource = brollSource;
+    }
     await doc.save();
 
-    res.json({ success: true, autoApprovalSettings: doc.autoApprovalSettings });
+    res.json({ success: true, autoApprovalSettings: doc.autoApprovalSettings, brollSource: doc.brollSource });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -438,8 +443,14 @@ exports.requestEdit = async (req, res) => {
             throw new Error('Downloaded video buffer is empty');
           }
 
+          const promptDoc = await UGCPrompter.findById(doc.promptId).lean();
+
           const form = new FormData();
           form.append('file', videoBuffer, { filename: 'video.mp4', contentType: 'video/mp4' });
+          if (promptDoc?.script && typeof promptDoc.script === 'string' && promptDoc.script.trim()) {
+            form.append('script_text', promptDoc.script.trim());
+          }
+          form.append('source', 'yovoai');
 
           const uploadRes = await axios.post(`${baseUrl}/api/ugc/upload`, form, {
             headers: { ...aiHeaders(), ...form.getHeaders() },
@@ -451,9 +462,10 @@ exports.requestEdit = async (req, res) => {
 
           await UGCVideo.findByIdAndUpdate(doc._id, { aiJobId: jobId, processingStatus: 'processing' });
 
+          const resolvedBrollSource = doc.brollSource || promptDoc?.brollSource || 'pexels';
           const processBody = {
             caption: true, subtitle_style: 'two_line_zoom_in',
-            broll: true, broll_source: 'pexels', music: true, bgm_mood: 'Motivational',
+            broll: true, broll_source: resolvedBrollSource, music: true, bgm_mood: 'Motivational',
             sfx: true, zoom: true, silence: true, jumpcut: true,
             facetrack: true, viral: true, background: false, logo: true,
             video_quality: '1080p',
@@ -463,7 +475,7 @@ exports.requestEdit = async (req, res) => {
             timeout: 30000,
           });
 
-          console.log(`[UGC Edit Request] ✅ Video ${doc._id} queued for AI processing with job ${jobId}`);
+          console.log(`[UGC Edit Request] ✅ Video ${doc._id} queued for AI processing with job ${jobId} (broll_source: ${resolvedBrollSource})`);
 
         } catch (err) {
           console.error('[UGC AI Pipeline] Error:', err.message);

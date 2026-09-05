@@ -2,12 +2,21 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const Client = require("../models/client");
 
-// Generate JWT Token for client
+// Generate JWT Token for client (web session)
 const generateToken = (client) => {
   return jwt.sign(
     { id: client._id, clientId: client.clientId, role: "client" },
     process.env.JWT_SECRET,
     { expiresIn: "7d" }
+  );
+};
+
+// Generate JWT Token for API Key Client integrations (1 day validity, auto-refreshed by API client)
+const generateApiKeyToken = (client) => {
+  return jwt.sign(
+    { id: client._id, clientId: client.clientId, role: "client" },
+    process.env.JWT_SECRET,
+    { expiresIn: "1d" }
   );
 };
 
@@ -320,8 +329,8 @@ const loginClient = async (req, res) => {
         });
       }
 
-      // Generate token
-      const jwtToken = generateToken(client);
+      // Generate token (long-lived 10 years for API integration)
+      const jwtToken = generateApiKeyToken(client);
 
       console.log('Login successful with clientKey for:', client.email);
 

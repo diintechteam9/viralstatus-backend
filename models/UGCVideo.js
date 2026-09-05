@@ -19,6 +19,7 @@ const ugcVideoSchema = new mongoose.Schema({
   processedVideoUrl: { type: String, default: '' },       // signed URL
   viralVideoKey:     { type: String, default: '' },       // viral variant from AI
   viralVideoUrl:     { type: String, default: '' },
+  brollSource:       { type: String, default: 'pexels' },
   autoApprovalSettings: {
     recording: { type: Boolean, default: false },
     editingRequest: { type: Boolean, default: false },

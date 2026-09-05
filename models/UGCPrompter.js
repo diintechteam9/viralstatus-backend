@@ -36,6 +36,7 @@ const ugcPrompterSchema = new mongoose.Schema({
   isPrivate:    { type: Boolean, default: false },
   hasVideo:     { type: Boolean, default: false },
   videoId:      { type: mongoose.Schema.Types.ObjectId, ref: 'UGCVideo', default: null },
+  brollSource:  { type: String, default: 'pexels' },
   autoApprovalSettings: {
     recording: { type: Boolean, default: false },
     editingRequest: { type: Boolean, default: false },

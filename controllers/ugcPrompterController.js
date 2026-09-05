@@ -161,7 +161,7 @@ exports.createPrompt = async (req, res) => {
     const {
       campaignId, title, category, platform, tone,
       duration, brandName, productName, keyPoints, prompt,
-      script, hashtags, status, isAiGenerated, autoApprovalSettings,
+      script, hashtags, status, isAiGenerated, autoApprovalSettings, brollSource,
     } = req.body;
 
     // Validate input
@@ -189,6 +189,7 @@ exports.createPrompt = async (req, res) => {
       isAiGenerated: !!isAiGenerated,
       creatorId,
       isPrivate,
+      brollSource: brollSource || 'pexels',
       autoApprovalSettings: autoApprovalSettings || {
         recording: false,
         editingRequest: false,
@@ -244,7 +245,7 @@ exports.updatePrompt = async (req, res) => {
     const allowed = [
       'title', 'category', 'platform', 'tone', 'duration',
       'brandName', 'productName', 'keyPoints', 'prompt',
-      'script', 'hashtags', 'status', 'campaignId', 'autoApprovalSettings',
+      'script', 'hashtags', 'status', 'campaignId', 'autoApprovalSettings', 'brollSource',
     ];
     
     const update = {};
