@@ -20,6 +20,13 @@ const ugcVideoSchema = new mongoose.Schema({
   viralVideoKey:     { type: String, default: '' },       // viral variant from AI
   viralVideoUrl:     { type: String, default: '' },
   brollSource:       { type: String, default: 'pexels' },
+  // Guest & Sharing Fields
+  isGuest:           { type: Boolean, default: false, index: true },
+  guestSessionId:    { type: String, default: '', index: true },
+  guestName:         { type: String, default: '' },
+  guestContact:      { type: String, default: '' },
+  referrerUserId:    { type: String, default: '', index: true },
+  claimedAt:         { type: Date, default: null },
   autoApprovalSettings: {
     recording: { type: Boolean, default: false },
     editingRequest: { type: Boolean, default: false },

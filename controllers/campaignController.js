@@ -256,7 +256,7 @@ exports.getAllCampaigns = async (req, res) => {
   try {
     await activateCurrentCampaigns();
     await deactivateExpiredCampaigns();
-    const campaigns = await Campaign.find().lean();
+    const campaigns = await Campaign.find().sort({ createdAt: -1, _id: -1 }).lean();
     for (const campaign of campaigns) {
       if (campaign.image?.key) try { campaign.image.url = await getobject(campaign.image.key); } catch {}
       if (campaign.categoryImage?.key) try { campaign.categoryImage.url = await getobject(campaign.categoryImage.key); } catch {}
@@ -286,7 +286,7 @@ exports.getActiveCampaigns = async (req, res) => {
       if (resolved) filter.clientId = resolved;
     }
 
-    const campaigns = await Campaign.find(filter).lean();
+    const campaigns = await Campaign.find(filter).sort({ createdAt: -1, _id: -1 }).lean();
 
     for (const campaign of campaigns) {
       if (campaign.image?.key) {
@@ -316,7 +316,7 @@ exports.getPublicActiveCampaigns = async (req, res) => {
       status: { $ne: 'Inactive' },
       endDate: { $gte: now },
       campaignType: 'public',
-    }).lean();
+    }).sort({ createdAt: -1, _id: -1 }).lean();
     for (const campaign of campaigns) {
       if (campaign.image?.key) try { campaign.image.url = await getobject(campaign.image.key); } catch {}
       if (campaign.categoryImage?.key) try { campaign.categoryImage.url = await getobject(campaign.categoryImage.key); } catch {}
@@ -340,7 +340,7 @@ exports.getPrivateActiveCampaigns = async (req, res) => {
       status: { $ne: 'Inactive' },
       endDate: { $gte: now },
       $or: [{ campaignType: 'private' }, { campaignType: { $exists: false } }, { campaignType: null }],
-    }).lean();
+    }).sort({ createdAt: -1, _id: -1 }).lean();
     for (const campaign of campaigns) {
       if (campaign.image?.key) try { campaign.image.url = await getobject(campaign.image.key); } catch {}
       if (campaign.categoryImage?.key) try { campaign.categoryImage.url = await getobject(campaign.categoryImage.key); } catch {}

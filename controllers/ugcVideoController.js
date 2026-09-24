@@ -586,3 +586,135 @@ exports.submitEditedVideo = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+// ── POST /api/ugc-video/guest-upload-url (No Auth Required) ──────────────────
+// Presigned upload URL for guests using the public Creator Studio landing page
+exports.getGuestUploadUrl = async (req, res) => {
+  try {
+    const { promptId, fileName, contentType, guestSessionId } = req.body;
+    if (!promptId || !fileName) {
+      return res.status(400).json({ success: false, message: 'promptId and fileName are required' });
+    }
+
+    const prompt = await UGCPrompter.findById(promptId).lean();
+    if (!prompt) return res.status(404).json({ success: false, message: 'Script not found' });
+    if (prompt.isPrivate) return res.status(403).json({ success: false, message: 'Private scripts cannot accept guest uploads' });
+
+    const session = String(guestSessionId || Date.now()).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+    const ext = fileName.split('.').pop() || 'mp4';
+    const key = `ugc-videos/${promptId}/guest_${session}_${Date.now()}.${ext}`;
+    const type = contentType || 'video/mp4';
+
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.get('host');
+    let baseUrl = `${protocol}://${host}`;
+
+    if (process.env.NODE_ENV === 'production' && (process.env.BACKEND_URL || process.env.BASE_URL)) {
+      baseUrl = process.env.BACKEND_URL || process.env.BASE_URL;
+    }
+    baseUrl = baseUrl.replace(/\/$/, '');
+
+    const uploadUrl = `${baseUrl}/api/ugc-video/proxy-upload?key=${encodeURIComponent(key)}&type=${encodeURIComponent(type)}`;
+
+    res.json({ success: true, uploadUrl, key });
+  } catch (err) {
+    console.error('[UGC Guest Upload URL] Error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── POST /api/ugc-video/guest-submit (No Auth Required) ───────────────────────
+// Video submit from guest on Creator Studio landing page
+exports.guestSubmitVideo = async (req, res) => {
+  try {
+    const { promptId, videoKey, note, guestSessionId, referrerUserId, guestName, guestContact } = req.body;
+    if (!promptId || !videoKey || !guestSessionId) {
+      return res.status(400).json({ success: false, message: 'promptId, videoKey, and guestSessionId are required' });
+    }
+
+    const scriptDoc = await UGCPrompter.findById(promptId);
+    if (!scriptDoc) return res.status(404).json({ success: false, message: 'Script not found' });
+
+    const session = String(guestSessionId).trim();
+    const doc = await UGCVideo.create({
+      promptId,
+      userId: `guest_${session}`,
+      clientId: String(scriptDoc.clientId || ''),
+      videoKey,
+      note: note || '',
+      status: 'submitted',
+      processingStatus: 'none',
+      isGuest: true,
+      guestSessionId: session,
+      guestName: (guestName || '').trim().slice(0, 100),
+      guestContact: (guestContact || '').trim().slice(0, 100),
+      referrerUserId: (referrerUserId || '').trim(),
+      autoApprovalSettings: {
+        recording: false,
+        editingRequest: false,
+        finalEditedVideo: false,
+      },
+    });
+
+    await UGCPrompter.findByIdAndUpdate(promptId, { hasVideo: true, videoId: doc._id });
+
+    res.status(201).json({
+      success: true,
+      video: {
+        _id: doc._id,
+        promptId: doc.promptId,
+        videoKey: doc.videoKey,
+        status: doc.status,
+        isGuest: doc.isGuest,
+        guestSessionId: doc.guestSessionId,
+        createdAt: doc.createdAt,
+      },
+      message: 'Video submitted successfully. Please sign up or login to claim rewards.',
+    });
+  } catch (err) {
+    console.error('[UGC Guest Submit] Error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── POST /api/ugc-video/claim (Requires Auth) ──────────────────────────────────
+// Automatically claims guest videos when the user logs in or registers
+exports.claimGuestVideo = async (req, res) => {
+  try {
+    const { guestSessionId, guestVideoId } = req.body;
+    if (!guestSessionId && !guestVideoId) {
+      return res.status(400).json({ success: false, message: 'guestSessionId or guestVideoId is required' });
+    }
+
+    const userId = String(req.user.id);
+    const clientId = String(req.user.clientId || req.user.id);
+
+    const filter = { isGuest: true };
+    if (guestVideoId) {
+      filter._id = guestVideoId;
+    } else {
+      filter.guestSessionId = String(guestSessionId).trim();
+    }
+
+    const updateData = {
+      userId,
+      clientId,
+      isGuest: false,
+      claimedAt: new Date(),
+    };
+
+    const updateRes = await UGCVideo.updateMany(filter, { $set: updateData });
+
+    console.log(`[UGC Claim] User ${userId} claimed ${updateRes.modifiedCount} video(s) for session ${guestSessionId}`);
+
+    res.json({
+      success: true,
+      claimedCount: updateRes.modifiedCount,
+      message: `${updateRes.modifiedCount} video(s) connected to your account successfully!`,
+    });
+  } catch (err) {
+    console.error('[UGC Claim] Error:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+

@@ -11,6 +11,9 @@ const allRoles = authorize('client', 'admin', 'super_admin', 'mobileuser');
 // AI generation - client and mobileuser
 router.post('/generate', authenticate, allRoles, ctrl.generatePrompt);
 
+// Public script view for standalone creator studio landing page (NO AUTH required)
+router.get('/public-view/:promptId', ctrl.getPublicPromptView);
+
 // Public script view for users (mobileuser)
 router.get('/public/:promptId', authenticate, mobileOnly, videoCtrl.getScriptWithVideo);
 

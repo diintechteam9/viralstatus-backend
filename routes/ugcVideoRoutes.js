@@ -8,11 +8,20 @@ const allAccess = authorize('client', 'admin', 'super_admin', 'mobileuser');
 // Upload URL — get R2 presigned URL before uploading
 router.post('/upload-url', authenticate, allAccess, ctrl.getUploadUrl);
 
+// Public Guest Upload URL (No Auth Required — for Creator Studio landing page)
+router.post('/guest-upload-url', ctrl.getGuestUploadUrl);
+
 // Proxy upload to bypass R2 CORS limitations (needs to be public since frontend PUT doesn't carry Auth headers)
 router.put('/proxy-upload', express.raw({ type: '*/*', limit: '200mb' }), ctrl.proxyUpload);
 
 // Submit video after R2 upload
 router.post('/', authenticate, allAccess, ctrl.submitVideo);
+
+// Public Guest Submit Video (No Auth Required — for Creator Studio landing page)
+router.post('/guest-submit', ctrl.guestSubmitVideo);
+
+// Claim guest videos after login / register
+router.post('/claim', authenticate, allAccess, ctrl.claimGuestVideo);
 
 // Get user's submitted videos (role-based: mobileuser gets own, client gets all)
 router.get('/', authenticate, allAccess, ctrl.getUserVideos);

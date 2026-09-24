@@ -2,15 +2,17 @@ const CampaignTask = require('../models/CampaignTask');
 const Campaign     = require('../models/campaign');
 const SharedReels  = require('../models/SharedReels');
 const UGCForm      = require('../models/UGCForm');
-const TransactionHistory = require('../models/TransactionHistory');
-const UserResponse = require('../models/userResponse');
-const CreditWallet = require('../models/CreditWallet');
+const MobileUser   = require('../models/MobileUser');
+const { getobject } = require('../utils/r2');
 const { buildTaskTemplate } = require('../utils/campaignTaskFactory');
 const { VALID_TASK_TYPE_IDS } = require('../utils/campaignTaskTypes');
 const { syncSharedReelSubmission } = require('../services/userTaskService');
 const multer       = require('multer');
 const path         = require('path');
 const fs           = require('fs');
+const UserResponse      = require('../models/userResponse');
+const CreditWallet      = require('../models/CreditWallet');
+const TransactionHistory = require('../models/TransactionHistory');
 
 // Multer config for proof screenshots
 const proofStorage = multer.diskStorage({
@@ -28,15 +30,14 @@ const uploadProof = multer({ storage: proofStorage, limits: { fileSize: 10 * 102
 async function resolveTargetUserIds(campaign, userIds) {
   if (Array.isArray(userIds) && userIds.length > 0) return userIds;
   if (campaign.campaignType === 'public') {
-    const MobileUser = require('../models/MobileUser');
-    const allUsers = await MobileUser.find({ googleId: { $exists: true, $ne: null, $ne: '' } })
+    const allUsers = await MobileUser.find({ googleId: { $exists: true, $nin: [null, ''] } })
       .select('googleId').lean();
     return allUsers.map((u) => u.googleId).filter(Boolean);
   }
   return [];
 }
 
-async function assignCampaignTaskToUsers(task, userIds, assignmentScope, campaign) {
+async function assignCampaignTaskToUsers(task, userIds, assignmentScope, campaign, reelData = {}) {
   const taskCampaignType =
     assignmentScope === 'public' || assignmentScope === 'private'
       ? assignmentScope
@@ -51,65 +52,91 @@ async function assignCampaignTaskToUsers(task, userIds, assignmentScope, campaig
   );
 
   const now = new Date();
-  let assignedCount = 0;
   const taskIdStr = String(task._id);
+  const allowedCategories = ['reels', 'post', 'ugc', 'app_review', 'gmb_review'];
+  const contentCategory = allowedCategories.includes(task.contentCategory) ? task.contentCategory : 'reels';
 
-  for (const googleId of userIds) {
-    const shared = await SharedReels.findOne({ googleId });
-    const already = shared?.reels?.some(
-      (r) =>
-        String(r.campaignTaskId) === taskIdStr ||
-        (String(r.campaignId) === String(task.campaignId) &&
-          r.contentCategory === task.contentCategory &&
-          String(r.reelId) === taskIdStr)
-    );
-    if (already) continue;
+  const reelObj = {
+    reelId: reelData.reelId || taskIdStr,
+    campaignTaskId: taskIdStr,
+    contentCategory: contentCategory,
+    s3Key: reelData.reelS3Key || '',
+    s3Url: reelData.reelS3Url || '',
+    campaignId: task.campaignId,
+    campaignName: campaign?.campaignName || task.title,
+    credits: task.credits || 0,
+    title: reelData.reelTitle || task.title,
+    campaignImageKey: campaign?.image?.key || '',
+    description: task.description || '',
+    targetUrl: task.targetUrl || '',
+    targetCount: task.targetCount || 0,
+    targetViews: task.targetViews || 0,
+    targetLikes: task.targetLikes || 0,
+    targetComments: task.targetComments || 0,
+    currentViews: 0,
+    currentLikes: 0,
+    currentComments: 0,
+    appName: task.appName || '',
+    businessName: task.businessName || '',
+    minRating: task.minRating || '',
+    script: task.script || '',
+    referenceVideoUrl: reelData.reelS3Url || task.referenceVideoUrl || '',
+    targetChannels: task.targetChannels || '',
+    cutoffViews: task.cutoffViews || 0,
+    isTaskComplete: false,
+    isTaskAccepted: false,
+    TaskStatus: 'assigned',
+    acceptedAt: null,
+    campaignType: taskCampaignType,
+    createdAt: now,
+  };
 
-    await SharedReels.findOneAndUpdate(
-      { googleId },
+  // Step 1: Ensure SharedReels docs exist for all target users
+  const userInitOps = userIds.map((googleId) => ({
+    updateOne: {
+      filter: { googleId },
+      update: { $setOnInsert: { googleId, reels: [] } },
+      upsert: true,
+    },
+  }));
+  if (userInitOps.length > 0) {
+    await SharedReels.bulkWrite(userInitOps, { ordered: false });
+  }
+
+  // Step 2: Push reel to users who don't have this task assigned yet
+  await SharedReels.updateMany(
+    {
+      googleId: { $in: userIds },
+      'reels.campaignTaskId': { $ne: taskIdStr },
+    },
+    {
+      $push: { reels: reelObj },
+    }
+  );
+
+  // Step 3: If reel details are provided, update any existing reel entry for this task
+  if (reelData.reelId || reelData.reelS3Url) {
+    await SharedReels.updateMany(
       {
-        $push: {
-          reels: {
-            reelId: taskIdStr,
-            campaignTaskId: taskIdStr,
-            contentCategory: task.contentCategory || 'post',
-            s3Key: '',
-            s3Url: '',
-            campaignId: task.campaignId,
-            campaignName: campaign?.campaignName || task.title,
-            credits: task.credits,
-            title: task.title,
-            campaignImageKey: campaign?.image?.key || '',
-            description: task.description || '',
-            targetUrl: task.targetUrl || '',
-            targetCount: task.targetCount || 0,
-            targetViews: task.targetViews || 0,
-            targetLikes: task.targetLikes || 0,
-            targetComments: task.targetComments || 0,
-            currentViews: 0,
-            currentLikes: 0,
-            currentComments: 0,
-            appName: task.appName || '',
-            businessName: task.businessName || '',
-            minRating: task.minRating || '',
-            script: task.script || '',
-            referenceVideoUrl: task.referenceVideoUrl || '',
-            targetChannels: task.targetChannels || '',
-            cutoffViews: task.cutoffViews || 0,
-            isTaskComplete: false,
-            isTaskAccepted: false,
-            TaskStatus: 'assigned',
-            acceptedAt: null,
-            campaignType: taskCampaignType,
-            createdAt: now,
-          },
+        googleId: { $in: userIds },
+        'reels.campaignTaskId': taskIdStr,
+      },
+      {
+        $set: {
+          'reels.$[elem].reelId': reelData.reelId || taskIdStr,
+          'reels.$[elem].s3Key': reelData.reelS3Key || '',
+          'reels.$[elem].s3Url': reelData.reelS3Url || '',
+          'reels.$[elem].referenceVideoUrl': reelData.reelS3Url || '',
+          'reels.$[elem].title': reelData.reelTitle || task.title,
         },
       },
-      { upsert: true, new: true }
+      {
+        arrayFilters: [{ 'elem.campaignTaskId': taskIdStr }],
+      }
     );
-    assignedCount++;
   }
-  return assignedCount;
+
+  return userIds.length;
 }
 
 // POST /api/campaign-tasks
@@ -291,7 +318,6 @@ exports.distributeCampaignTasks = async (req, res) => {
 /** GET /api/campaign-tasks/task/:taskId — single task for user detail view */
 exports.getTaskById = async (req, res) => {
   try {
-    const { getobject } = require('../utils/r2');
     const task = await CampaignTask.findById(req.params.taskId).lean();
     if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
 
@@ -333,7 +359,6 @@ exports.getTaskById = async (req, res) => {
 exports.getTasksByCampaign = async (req, res) => {
   try {
     const { campaignId } = req.params;
-    const { getobject } = require('../utils/r2');
     const tasks = await CampaignTask.find({ campaignId }).sort({ order: 1, createdAt: -1 }).lean();
 
     const enrichedTasks = await Promise.all(
@@ -361,7 +386,6 @@ exports.getTasksByCampaign = async (req, res) => {
 exports.getPublicTasks = async (req, res) => {
   try {
     const { userId } = req.query;
-    const { getobject } = require('../utils/r2');
     const { buildTimerPayload } = require('../services/userTaskService');
     const UGCSubmission = require('../models/UGCSubmission');
     const now = new Date();
@@ -723,7 +747,6 @@ exports.getPublicSubmissions = async (req, res) => {
     const task = await CampaignTask.findById(taskId).lean();
     if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
 
-    const { getobject } = require('../utils/r2');
     const submissions = await Promise.all((task.submissions || []).map(async (sub) => {
       let proofUrl = sub.proofUrl || '';
       if (sub.proofKey) {
@@ -807,8 +830,7 @@ exports.assignTask = async (req, res) => {
     const isPublicCampaign = campaign?.campaignType === 'public';
 
     if (assignToAll || isPublicTask || (isPublicCampaign && targetUserIds.length === 0)) {
-      const MobileUser = require('../models/MobileUser');
-      const allUsers = await MobileUser.find({ googleId: { $exists: true, $ne: null, $ne: '' } })
+      const allUsers = await MobileUser.find({ googleId: { $exists: true, $nin: [null, ''] } })
         .select('googleId').lean();
       targetUserIds = allUsers.map((u) => u.googleId).filter(Boolean);
     }
@@ -816,38 +838,21 @@ exports.assignTask = async (req, res) => {
     if (!Array.isArray(targetUserIds) || targetUserIds.length === 0)
       return res.status(400).json({ success: false, message: 'No users to assign. For private tasks, provide userIds.' });
 
-    const assignedCount = await assignCampaignTaskToUsers(
-      task,
-      targetUserIds,
-      assignmentScope || (task.visibility === 'public' ? 'public' : 'private'),
-      campaign || {}
-    );
-
     // Save referenceVideoUrl directly on the main CampaignTask document
     if (reelS3Url || reelId) {
       task.referenceVideoUrl = reelS3Url || task.referenceVideoUrl || '';
       await task.save();
     }
 
-    // Unconditionally update SharedReels for all target users (regardless of assignedCount)
-    if (reelId || reelS3Url) {
-      for (const googleId of targetUserIds) {
-        await SharedReels.findOneAndUpdate(
-          { googleId, 'reels.campaignTaskId': String(taskId) },
-          {
-            $set: {
-              'reels.$.reelId': reelId || String(taskId),
-              'reels.$.s3Key': reelS3Key || '',
-              'reels.$.s3Url': reelS3Url || '',
-              'reels.$.referenceVideoUrl': reelS3Url || '',
-              'reels.$.title': reelTitle || task.title,
-            },
-          }
-        );
-      }
-    }
+    const assignedCount = await assignCampaignTaskToUsers(
+      task,
+      targetUserIds,
+      assignmentScope || (task.visibility === 'public' ? 'public' : 'private'),
+      campaign || {},
+      { reelId, reelS3Url, reelS3Key, reelTitle }
+    );
 
-    res.json({ success: true, message: `Task assigned to ${targetUserIds.length} user(s)`, task });
+    res.json({ success: true, message: `Task assigned to ${assignedCount} user(s)`, task });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -868,7 +873,6 @@ exports.uploadPublicTaskProof = [
       try {
         const { r2Client, BUCKET_NAME } = require('../config/r2');
         const { PutObjectCommand } = require('@aws-sdk/client-s3');
-        const ext = path.extname(req.file.originalname) || path.extname(req.file.filename);
         const r2Key = `proofs/${req.file.filename}`;
         await r2Client.send(new PutObjectCommand({
           Bucket: BUCKET_NAME,
@@ -878,9 +882,7 @@ exports.uploadPublicTaskProof = [
         }));
         // Delete local temp file
         fs.unlink(req.file.path, () => {});
-        const r2PublicUrl = `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${BUCKET_NAME}/${r2Key}`;
         // Use custom domain if set, else signed URL
-        const { getobject } = require('../utils/r2');
         const signedUrl = await getobject(r2Key);
         return res.json({ success: true, url: signedUrl, r2Key });
       } catch (r2Err) {
@@ -917,8 +919,6 @@ exports.getSubmissionsByCategory = async (req, res) => {
     if (contentCategory) filter.contentCategory = contentCategory;
 
     const tasks = await CampaignTask.find(filter).lean();
-    const { getobject } = require('../utils/r2');
-    const UserResponse = require('../models/userResponse');
     const submissions = [];
 
     // Source 1: CampaignTask.submissions (app_review, gmb_review)

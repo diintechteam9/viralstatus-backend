@@ -479,3 +479,42 @@ RULES:
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+// ── GET public prompt view (No Auth Required) ─────────────────────────────────
+exports.getPublicPromptView = async (req, res) => {
+  try {
+    const id = req.params.id || req.params.promptId;
+    if (!id) return res.status(400).json({ success: false, message: 'Script ID is required' });
+
+    const prompt = await UGCPrompter.findById(id).lean();
+    if (!prompt) return res.status(404).json({ success: false, message: 'Script not found or no longer available' });
+
+    if (prompt.isPrivate) {
+      return res.status(403).json({ success: false, message: 'This script is private and cannot be accessed publicly' });
+    }
+
+    res.json({
+      success: true,
+      prompt: {
+        _id: prompt._id,
+        id: prompt._id.toString(),
+        title: prompt.title,
+        category: prompt.category,
+        tone: prompt.tone,
+        duration: prompt.duration || 30,
+        script: prompt.script || '',
+        prompt: prompt.prompt || '',
+        platform: prompt.platform || 'instagram',
+        brandName: prompt.brandName || '',
+        productName: prompt.productName || '',
+        keyPoints: prompt.keyPoints || [],
+        hashtags: prompt.hashtags || [],
+        createdAt: prompt.createdAt,
+      },
+    });
+  } catch (err) {
+    console.error('[UGCPrompter] getPublicPromptView error:', err.message);
+    res.status(500).json({ success: false, message: 'Failed to load script' });
+  }
+};
+
